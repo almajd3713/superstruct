@@ -11,7 +11,7 @@ use crate::l1::{Rect, lift_pieces};
 use crate::l1_port::PORT_CLEARANCE;
 use crate::l2_mass::{Parent, inflate};
 use crate::prim::{
-    CellOutput, FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb, QVec3, Shape,
+    CellOutput, Dir4, FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb, QVec3, Shape,
 };
 use crate::regime::regime;
 use crate::rng::Rng;
@@ -122,27 +122,8 @@ impl LiftColumn {
                 continue;
             }
             prims.extend(lift_pieces(rect, lo, hi, &[t - oy, top - oy]));
-            // Platform ring: four boxes around the shaft, top at the stop height.
-            let thin = 8;
             if (0..=CELL).contains(&(top - oy)) {
-                let (y0, y1) = ((top - oy - thin).max(0), top - oy);
-                let o = PLATFORM;
-                let ring = [
-                    (rect.x0 - o, rect.z0 - o, rect.x1 + o, rect.z0),
-                    (rect.x0 - o, rect.z1, rect.x1 + o, rect.z1 + o),
-                    (rect.x0 - o, rect.z0, rect.x0, rect.z1),
-                    (rect.x1, rect.z0, rect.x1 + o, rect.z1),
-                ];
-                if y0 < y1 {
-                    prims.extend(ring.into_iter().map(|(x0, z0, x1, z1)| Primitive {
-                        shape: Shape::Box {
-                            aabb: QAabb::new(QVec3::new(x0, y0, z0), QVec3::new(x1, y1, z1)),
-                        },
-                        material: MaterialId::GRATING,
-                        kind: FeatureKind::WALKWAY,
-                        flags: PrimFlags::NONE,
-                    }));
-                }
+                prims.extend(platform_ring(rect, (top - oy - 8).max(0), top - oy));
             }
             keepouts.push(inflate_xz(
                 &QAabb::new(
@@ -156,6 +137,30 @@ impl LiftColumn {
     }
 }
 
+/// Four grating boxes around `rect`, `PLATFORM` wide, between heights `y0` and `y1`.
+fn platform_ring(rect: Rect, y0: Q, y1: Q) -> Vec<Primitive> {
+    if y0 >= y1 {
+        return Vec::new();
+    }
+    let o = PLATFORM;
+    [
+        (rect.x0 - o, rect.z0 - o, rect.x1 + o, rect.z0),
+        (rect.x0 - o, rect.z1, rect.x1 + o, rect.z1 + o),
+        (rect.x0 - o, rect.z0, rect.x0, rect.z1),
+        (rect.x1, rect.z0, rect.x1 + o, rect.z1),
+    ]
+    .into_iter()
+    .map(|(x0, z0, x1, z1)| Primitive {
+        shape: Shape::Box {
+            aabb: QAabb::new(QVec3::new(x0, y0, z0), QVec3::new(x1, y1, z1)),
+        },
+        material: MaterialId::GRATING,
+        kind: FeatureKind::WALKWAY,
+        flags: PrimFlags::NONE,
+    })
+    .collect()
+}
+
 fn inflate_xz(a: &QAabb, by: Q) -> QAabb {
     let big = inflate(a, by);
     QAabb::new(
@@ -167,6 +172,187 @@ fn inflate_xz(a: &QAabb, by: Q) -> QAabb {
 /// The shaft's span key for `cell`.
 pub fn span_of(cell: CellKey) -> ColumnSpanKey {
     ColumnSpanKey::of(cell)
+}
+
+/// Stair tower flights: 32 steps of 2 Q rise and 5 Q tread, so one flight climbs 4 m (64 Q) over
+/// 10 m. Deck tops and L2 cells are multiples of 64 Q, so a flight never crosses a cell face.
+const FLIGHT_RISE: Q = 64;
+const FLIGHT_STEPS: u16 = 32;
+const FLIGHT_RUN: Q = 160;
+const LANE: Q = 4 * M;
+/// Inside the walls.
+const WALL: Q = M;
+
+/// A stair tower of one L2 column span (`levels.md` §5.2), in the parent L1 cell's frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TowerColumn {
+    pub rect: Rect,
+    /// Deck tops the tower stands on.
+    pub decks: Vec<Q>,
+    /// Flights above each deck; odd, so the last one ends in the east landing.
+    pub flights: Q,
+}
+
+/// The stair tower of `span`, if any. It keeps clear of the span's lift shaft.
+pub fn stair_tower(
+    seed: WorldSeed,
+    span: ColumnSpanKey,
+    parent: &CellOutput,
+    lift: Option<&LiftColumn>,
+) -> Option<TowerColumn> {
+    debug_assert_eq!(span.level, Level::L2);
+    let l0 = glam::I64Vec3::new(
+        floor_div_pow2(span.x, 6),
+        floor_div_pow2(span.sy, 3),
+        floor_div_pow2(span.z, 6),
+    );
+    let d = f32::from(regime(seed, l0).density) / 255.0;
+    let mut rng = Rng::new(hash(
+        seed.0,
+        Level::L2,
+        span.hash_coords(),
+        salt::STAIR_TOWER,
+    ));
+    let exists = rng.chance(0.15 + (0.40 - 0.15) * d);
+    let wx = 4 * M * rng.range_i32(4, 9);
+    let wz = 4 * M * rng.range_i32(4, 9);
+    let ux = rng.range_i32(0, (CELL - 2 * RIM - wx) / (4 * M) + 1);
+    let uz = rng.range_i32(0, (CELL - 2 * RIM - wz) / (4 * M) + 1);
+    let flights = 2 * rng.range_i32(1, 8) + 1;
+    if !exists {
+        return None;
+    }
+    let (cx, cz) = (
+        Q::try_from(floor_mod_pow2(span.x, 3)).ok()? * CELL,
+        Q::try_from(floor_mod_pow2(span.z, 3)).ok()? * CELL,
+    );
+    let x0 = cx + RIM + 4 * M * ux;
+    let z0 = cz + RIM + 4 * M * uz;
+    let rect = Rect {
+        x0,
+        z0,
+        x1: x0 + wx,
+        z1: z0 + wz,
+    };
+    let room = PLATFORM + GAP;
+    if let Some(l) = lift {
+        let apart = |a0: Q, a1: Q, b0: Q, b1: Q| a0 - 2 * room >= b1 || b0 - 2 * room >= a1;
+        if !(apart(rect.x0, rect.x1, l.rect.x0, l.rect.x1)
+            || apart(rect.z0, rect.z1, l.rect.z0, l.rect.z1))
+        {
+            return None;
+        }
+    }
+    let ctx = Parent::new(parent, [0, 0, 0]);
+    let decks = ctx.all_deck_tops();
+    if decks.is_empty()
+        || decks
+            .iter()
+            .any(|&t| t + flights * FLIGHT_RISE + PORT_CLEARANCE > crate::l1::CELL)
+    {
+        return None;
+    }
+    let fits = decks.iter().all(|&t| {
+        ctx.fits(&QAabb::new(
+            QVec3::new(rect.x0 - room, t, rect.z0 - room),
+            QVec3::new(
+                rect.x1 + room,
+                t + flights * FLIGHT_RISE + PORT_CLEARANCE,
+                rect.z1 + room,
+            ),
+        ))
+    });
+    fits.then_some(TowerColumn {
+        rect,
+        decks,
+        flights,
+    })
+}
+
+impl TowerColumn {
+    /// The slice in the L2 cell at `origin` (in the parent's frame): walls, flights, landings,
+    /// platform ring, and the volume children must leave alone, in cell-local quanta.
+    pub fn slice(&self, origin: [Q; 3]) -> (Vec<Primitive>, Vec<QAabb>) {
+        let [ox, oy, oz] = origin;
+        let rect = Rect {
+            x0: self.rect.x0 - ox,
+            z0: self.rect.z0 - oz,
+            x1: self.rect.x1 - ox,
+            z1: self.rect.z1 - oz,
+        };
+        // Flush with the east wall, so the top landing meets the opening there.
+        let (xa, za) = (rect.x1 - WALL - FLIGHT_RUN - LANE, rect.z0 + WALL);
+        let mut prims = Vec::new();
+        let mut keepouts = Vec::new();
+        for &t in &self.decks {
+            let top = t + self.flights * FLIGHT_RISE;
+            let (lo, hi) = ((t - oy).max(0), (top + PORT_CLEARANCE - oy).min(CELL));
+            if lo >= hi {
+                continue;
+            }
+            // Walls open at the bottom and the top; the shaft volume is for lifts only.
+            prims.extend(
+                lift_pieces(rect, lo, hi, &[t - oy, top - oy])
+                    .into_iter()
+                    .skip(1)
+                    .map(|p| Primitive {
+                        kind: FeatureKind::STAIR_TOWER,
+                        ..p
+                    }),
+            );
+            for i in 0..self.flights {
+                let base = t + i * FLIGHT_RISE - oy;
+                if base < 0 || base + FLIGHT_RISE > CELL {
+                    continue;
+                }
+                let even = i % 2 == 0;
+                let (z0, z1) = if even {
+                    (za, za + LANE)
+                } else {
+                    (za + LANE, za + 2 * LANE)
+                };
+                prims.push(Primitive {
+                    shape: Shape::stair_run(
+                        QAabb::new(
+                            QVec3::new(xa, base, z0),
+                            QVec3::new(xa + FLIGHT_RUN, base + FLIGHT_RISE, z1),
+                        ),
+                        if even { Dir4::PosX } else { Dir4::NegX },
+                        FLIGHT_STEPS,
+                    ),
+                    material: MaterialId::METAL,
+                    kind: FeatureKind::STAIR_TOWER,
+                    flags: PrimFlags::NONE,
+                });
+                if even {
+                    // The landing east of the flight, across both lanes.
+                    let y = base + FLIGHT_RISE;
+                    prims.push(Primitive {
+                        shape: Shape::Box {
+                            aabb: QAabb::new(
+                                QVec3::new(xa + FLIGHT_RUN, y - 8, za),
+                                QVec3::new(xa + FLIGHT_RUN + LANE, y, za + 2 * LANE),
+                            ),
+                        },
+                        material: MaterialId::GRATING,
+                        kind: FeatureKind::STAIR_TOWER,
+                        flags: PrimFlags::NONE,
+                    });
+                }
+            }
+            if (0..=CELL).contains(&(top - oy)) {
+                prims.extend(platform_ring(rect, (top - oy - 8).max(0), top - oy));
+            }
+            keepouts.push(inflate_xz(
+                &QAabb::new(
+                    QVec3::new(rect.x0, lo, rect.z0),
+                    QVec3::new(rect.x1, hi, rect.z1),
+                ),
+                PLATFORM,
+            ));
+        }
+        (prims, keepouts)
+    }
 }
 
 #[cfg(test)]
@@ -286,6 +472,116 @@ mod tests {
         assert!(
             shafts > 20 && joined > 10,
             "{shafts} shafts, {joined} joined"
+        );
+    }
+
+    /// P0.8.5b: the tower is identical from every L2 cell it passes through, every flight lies
+    /// inside one cell, and in a cell holding a deck and the top platform they are connected.
+    #[test]
+    #[allow(clippy::too_many_lines)] // one scan with several checks per tower
+    fn tower_is_identical_across_its_span() {
+        let seed = WorldSeed(0x0806);
+        let (mut towers, mut joined) = (0, 0);
+        for px in -40..40 {
+            for (py, pz) in [(0, 1), (2, -3)] {
+                let parent_key = CellKey::new(Level::L1, I64Vec3::new(px, py, pz));
+                let cache = L1Cache::default();
+                let parent = cache.get(seed, parent_key);
+                for (cx, cz) in [(1, 1), (4, 6), (7, 3)] {
+                    let span = ColumnSpanKey {
+                        level: Level::L2,
+                        x: px * 8 + cx,
+                        z: pz * 8 + cz,
+                        sy: py,
+                    };
+                    let lift = lift_column(seed, span, &parent);
+                    let Some(col) = stair_tower(seed, span, &parent, lift.as_ref()) else {
+                        continue;
+                    };
+                    towers += 1;
+                    let mut flights = 0;
+                    for cy in 0..8i32 {
+                        let cell = CellKey::new(
+                            Level::L2,
+                            I64Vec3::new(span.x, py * 8 + i64::from(cy), span.z),
+                        );
+                        let origin = [
+                            Q::try_from(floor_mod_pow2(span.x, 3)).unwrap() * CELL,
+                            cy * CELL,
+                            Q::try_from(floor_mod_pow2(span.z, 3)).unwrap() * CELL,
+                        ];
+                        let (prims, _) = col.slice(origin);
+                        for p in &prims {
+                            let bb = p.aabb();
+                            assert!(
+                                bb.min.y >= 0 && bb.max.y <= CELL,
+                                "{span:?}: {p:?} leaves cell {cy}"
+                            );
+                            flights += i32::from(matches!(p.shape, Shape::StairRun { .. }));
+                        }
+                        let out = l2_cell_in(seed, &cache, cell);
+                        let in_out = out
+                            .primitives
+                            .iter()
+                            .filter(|p| {
+                                matches!(p.shape, Shape::StairRun { .. })
+                                    && p.kind == FeatureKind::STAIR_TOWER
+                            })
+                            .count();
+                        assert_eq!(
+                            in_out,
+                            prims
+                                .iter()
+                                .filter(|p| matches!(p.shape, Shape::StairRun { .. }))
+                                .count()
+                        );
+                    }
+                    assert_eq!(
+                        flights,
+                        col.flights * i32::try_from(col.decks.len()).unwrap()
+                    );
+                    for &t in &col.decks {
+                        let top = t + col.flights * FLIGHT_RISE;
+                        if t / CELL != (top + PORT_CLEARANCE) / CELL {
+                            continue;
+                        }
+                        let cy = t / CELL;
+                        let cell = CellKey::new(
+                            Level::L2,
+                            I64Vec3::new(span.x, py * 8 + i64::from(cy), span.z),
+                        );
+                        let out = l2_cell_in(seed, &cache, cell);
+                        let origin = [
+                            Q::try_from(floor_mod_pow2(span.x, 3)).unwrap() * CELL,
+                            cy * CELL,
+                            Q::try_from(floor_mod_pow2(span.z, 3)).unwrap() * CELL,
+                        ];
+                        let mut prims = cell_window(&parent.primitives, origin, CELL);
+                        let n = prims.len();
+                        prims.extend(out.primitives);
+                        let nav = Nav::build(&prims);
+                        let ring = (0..nav.plates.len()).find(|&i| {
+                            nav.plates[i].source >= n
+                                && nav.plates[i].kind == FeatureKind::WALKWAY
+                                && nav.plates[i].y0 == top - origin[1]
+                        });
+                        let Some(ring) = ring else {
+                            panic!("{span:?}: no platform plate at {}", top - origin[1]);
+                        };
+                        let reaches = (0..nav.plates.len()).any(|i| {
+                            nav.plates[i].source < n
+                                && nav.plates[i].kind == FeatureKind::DECK
+                                && nav.connected(i, ring)
+                        });
+                        assert!(reaches, "{span:?}: tower top is cut off from the deck");
+                        joined += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            towers > 20 && joined > 10,
+            "{towers} towers, {joined} joined"
         );
     }
 }

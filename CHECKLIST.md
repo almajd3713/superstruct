@@ -129,9 +129,8 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.8.3b** Masses keep an 8 m gap from L2 port corridors (`levels.md` §5.1), once P0.8.3 defines them; `l2_mass::Parent::fits` is the place. *Done when:* no mass intersects a port corridor (test). (2026-10-17)
 - [x] **P0.8.3** L2 ports: those inherited by cascade from L1, plus the cell's own face-hash ports. *Done when:* every L1 port that crosses an L2 face appears as an L2 port (test). (2026-10-17)
 - [x] **P0.8.4** Internal connectivity: build a port graph and generate walkways, stairs and ramps that connect all ports while respecting the slope and step limits. *Done when:* the walkability validator (P0.9) reports every port reachable in 10⁴ random cells. (2026-10-17)
-- [ ] **P0.8.4b** Extra links between ports and mass entrances (`levels.md` §5.3 steps 1–2: spanning tree plus `chance(0.3)` loops), once masses have entrances. P0.8.4 attaches each port to the network on its own. *Done when:* loops exist at the spec frequency and the validator still reports every port reachable.
 - [x] **P0.8.5** Stair towers and lift shafts as column features, with lift stops emitted as ports. *Done when:* a shaft is identical from every L2 cell it passes through (test). (2026-10-17, lift shafts; towers split out as P0.8.5b)
-- [ ] **P0.8.5b** Stair towers `[STAIR_TOWER]` (`levels.md` §5.2). Open question: a flight with the spec rise (3 Q) has no whole-step height dividing the 8192 Q L2 cell, so towers cannot align with cell boundaries; decide the tower rise or how a flight crosses an L2 cell face, then build stacked `StairRun`s in `Box` walls with landings. *Done when:* a tower is identical from every L2 cell it passes through (test), and the validator links its landings.
+- [x] **P0.8.5b** Stair towers `[STAIR_TOWER]` (`levels.md` §5.2). Open question: a flight with the spec rise (3 Q) has no whole-step height dividing the 8192 Q L2 cell, so towers cannot align with cell boundaries; decide the tower rise or how a flight crosses an L2 cell face, then build stacked `StairRun`s in `Box` walls with landings. *Done when:* a tower is identical from every L2 cell it passes through (test), and the validator links its landings. (2026-10-17, tower rise 2 Q)
 - [x] **P0.8.6** Sanctuary placement: chosen at the L1 level so they sit a few km apart along walkable routes, and marked in L2 metadata. *Done when:* the spacing distribution over 10⁴ L1 cells matches the spec. (2026-10-17)
 - [x] **P0.8.7** Vista rule: occasionally guarantee an opening that frames a view (an opening facing an L1 void). *Done when:* the vista frequency matches the spec, and the openings face a void (test). (2026-10-17)
 - [x] **P0.8.8** Railing and edge flags: mark walkable edges with a drop greater than the fall threshold as guarded or deliberately unguarded. *Done when:* the unguarded fraction matches the spec. (2026-10-17)
@@ -147,7 +146,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.10.1** CLI arguments: `--seed --level --axis --at --center --extent --res --out` and overlay toggles. *Done when:* `--help` documents everything. (2026-10-17)
 - [x] **P0.10.2** Render primitive occupancy as a PNG coloured by type, with overlays for the cell grid, ports and walkable surfaces. *Done when:* the PNG has been inspected visually and matches expectations for a known cell. (2026-10-17)
 - [x] **P0.10.3** `--report` mode that runs the P0.9.4 check and writes JSON stats. *Done when:* the JSON includes counts, failures and timing. (2026-10-17)
-- [ ] **P0.10.4** Tune the L1 and L2 parameters using slice images: density, variety and void ratio. 🧭 Review a set of slices with the user. *Done when:* the user approves the look of the cross-sections.
+- [x] **P0.10.4** Tune the L1 and L2 parameters using slice images: density, variety and void ratio. 🧭 Review a set of slices with the user. *Done when:* the user approves the look of the cross-sections. (2026-10-17, user approved the sample slices; retune after the engine)
 
 ### P0.11 Determinism, performance and phase exit
 - [x] **P0.11.1** Golden tests: hashes of `CellOutput` for 100 fixed cells at each level, tied to `GEN_VERSION`. *Done when:* the test fails on any output change. (2026-10-17)
@@ -294,6 +293,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P4.1.3** Retry with sub-seeds (up to K attempts), then a fallback template that is always solvable. *Done when:* ≥ 99.9% of blocks solve before needing the fallback (stats over 10⁵ blocks).
 - [ ] **P4.1.4** L3 output is wired into the walkability validator. *Done when:* L3 blocks keep every port reachable (10⁴ blocks).
 - [ ] **P4.1.5** L3 performance: a block solves in under 5 ms on a worker thread. *Done when:* a benchmark records it.
+- [ ] **P4.1.6** Mass entrances and extra links (moved from P0.8.4b on 2026-10-17: an entrance means nothing until L3 builds interiors). Give each L2 mass an entrance as a `ForcedPort` for L3, and add `levels.md` §5.3 steps 1–2 (spanning tree plus `chance(0.3)` loops) between ports and entrances. *Done when:* loops exist at the spec frequency and the validator still reports every port and entrance reachable.
 
 ### P4.2 L4 module kit (generated in code)
 - [ ] **P4.2.1** Module mesh generators: wall panel variants, railing, grating floor, pipe (straight, bend), cable bundle, door frame, lamp, stair. *Done when:* a gallery screenshot has been inspected.

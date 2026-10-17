@@ -6,7 +6,7 @@ use crate::cell::{CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::key::LayerKey;
 use crate::l1::{DECK_REGION_LOG2, decks};
 use crate::l2_attach::attached_masses;
-use crate::l2_column::{lift_column, span_of};
+use crate::l2_column::{lift_column, span_of, stair_tower};
 use crate::l2_mass::masses_in;
 use crate::l2_port::{L1Cache, cell_ports_in};
 use crate::l2_rail::railings;
@@ -76,8 +76,13 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
     );
 
     let origin = [c.x, c.y, c.z].map(|v| Q::try_from(floor_mod_pow2(v, 3)).unwrap_or(0) * CELL);
-    if let Some(col) = lift_column(seed, span_of(cell), &parent) {
-        let (prims, keepouts) = col.slice(origin);
+    let lift = lift_column(seed, span_of(cell), &parent);
+    let tower = stair_tower(seed, span_of(cell), &parent, lift.as_ref());
+    let slices = lift
+        .iter()
+        .map(|c| c.slice(origin))
+        .chain(tower.iter().map(|t| t.slice(origin)));
+    for (prims, keepouts) in slices {
         out.primitives.extend(prims);
         out.child_constraints.extend(
             keepouts

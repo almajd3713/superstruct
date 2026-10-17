@@ -1,6 +1,6 @@
 # Phase 0 exit: connectivity over 10⁶ random cells
 
-Date: 2026-10-17. Generator: `GEN_VERSION` 2. Tool: `slice --report` (`worldgen::validate::check_random`).
+Date: 2026-10-17. Generator: `GEN_VERSION` 3 (re-run after stair towers and the railing fix: 0 failures again over five seeds of 10⁶ cells). Tool: `slice --report` (`worldgen::validate::check_random`).
 
 ## What is checked
 
@@ -39,4 +39,4 @@ Those last two changed generator output, so `GEN_VERSION` went from 1 to 2 and t
 - Walking itself (controller, step-up, falls) does not exist yet. The validator models the capsule with the rules in `traversal.md` §6.
 - The 10⁶ cells sample L1 heights −1 to 1 only.
 - L3 and finer levels do not exist yet.
-- P0.10.4 (tuning density, variety and void ratio from slice images with the user) is still open and needs a review session.
+- P0.10.4: the user approved the sample slice images for now; further tuning waits for the engine.

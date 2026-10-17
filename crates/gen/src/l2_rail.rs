@@ -19,8 +19,10 @@ pub const FALL_THRESHOLD: Q = 15 * M;
 /// Railing height 1.1 m and thickness 0.1 m, rounded to quanta.
 const HEIGHT: Q = 18;
 const THICKNESS: Q = 2;
-/// Edges are guarded or not in runs of at most this length.
+/// Runs of drop cells are guarded or not together, up to this length.
 const SEGMENT: Q = 64 * M;
+/// Edges are probed in cells of this length, 2 m.
+const PROBE_CELL: Q = 2 * M;
 /// How far past the edge the drop is probed, and the headroom that must be free there.
 const PROBE: Q = 8;
 const GUARDED: f32 = 0.85;
@@ -63,9 +65,12 @@ pub fn railings(
             if fixed <= 0 || fixed >= CELL {
                 continue;
             }
+            // Probe in short cells, then guard each run of drop cells, so a railing never covers
+            // a stretch of edge that is flush with a walkway or doorway.
+            let mut run: Option<(Q, Q)> = None;
             let mut a = lo;
             while a < hi {
-                let b = (a + SEGMENT).min(hi);
+                let b = (a + PROBE_CELL).min(hi);
                 let mid = i32::midpoint(a, b);
                 let beyond = fixed + outward * PROBE;
                 let (px, pz) = if along_x {
@@ -75,18 +80,51 @@ pub fn railings(
                 };
                 let wall = solid_in_column(prims, px, pz, y, y + 29);
                 let drop = y - solid_top_below(prims, px, pz, y).unwrap_or(y - 100 * CELL);
-                if !wall && drop > FALL_THRESHOLD {
-                    stats.drops += 1;
-                    if rng.chance(GUARDED) {
-                        stats.guarded += 1;
-                        out.push(rail(along_x, fixed, outward, a, b, y));
+                let is_drop = !wall && drop > FALL_THRESHOLD;
+                run = match (run, is_drop) {
+                    (Some((s, _)), true) if b - s <= SEGMENT => Some((s, b)),
+                    (Some((s, e)), _) => {
+                        emit(
+                            &mut rng,
+                            &mut stats,
+                            &mut out,
+                            (along_x, fixed, outward, y),
+                            (s, e),
+                        );
+                        is_drop.then_some((a, b))
                     }
-                }
+                    (None, true) => Some((a, b)),
+                    (None, false) => None,
+                };
                 a = b;
+            }
+            if let Some((s, e)) = run {
+                emit(
+                    &mut rng,
+                    &mut stats,
+                    &mut out,
+                    (along_x, fixed, outward, y),
+                    (s, e),
+                );
             }
         }
     }
     (out, stats)
+}
+
+/// Draws the guard decision for one run of drop cells and adds its railing.
+fn emit(
+    rng: &mut Rng,
+    stats: &mut EdgeStats,
+    out: &mut Vec<Primitive>,
+    (along_x, fixed, outward, y): (bool, Q, Q, Q),
+    (a, b): (Q, Q),
+) {
+    stats.drops += 1;
+    if rng.chance(GUARDED) {
+        stats.guarded += 1;
+        out.push(rail(along_x, fixed, outward, a, b, y));
+    }
 }
 
 /// A railing along the inside of an edge at `fixed`, between `a` and `b`.

@@ -78,5 +78,6 @@ Derived from §1 and §2. The generator uses these (`levels.md`, `ports.md`), so
 | Stair rise / tread | 0.1875 m / 0.3125 m (3 Q / 5 Q) | about 31°. The rise is well under the step-up |
 | Walkway ramps | ≤ 15° | comfortable at walking pace. 40° is the hard limit |
 | Railing height | 1.1 m | `levels.md` §5.4 |
+| Stair tower rise / tread | 0.125 m / 0.3125 m (2 Q / 5 Q) | towers only (`levels.md` §5.2): a 4 m flight must divide the L2 cell, which 3 Q steps cannot |
 | Guarded-edge threshold | drop > 15 m | equals the fall-death height |
 | Narrowest walkable patch | must contain a disk of radius 0.3 m | `primitives.md` §6 |
