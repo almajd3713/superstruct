@@ -58,6 +58,13 @@ impl Level {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Dir6 {
     PosX,
     NegX,
@@ -86,6 +93,18 @@ impl Dir6 {
             Dir6::PosZ => I64Vec3::Z,
             Dir6::NegZ => I64Vec3::NEG_Z,
         }
+    }
+
+    pub const fn axis(self) -> Axis {
+        match self {
+            Dir6::PosX | Dir6::NegX => Axis::X,
+            Dir6::PosY | Dir6::NegY => Axis::Y,
+            Dir6::PosZ | Dir6::NegZ => Axis::Z,
+        }
+    }
+
+    pub const fn is_positive(self) -> bool {
+        matches!(self, Dir6::PosX | Dir6::PosY | Dir6::PosZ)
     }
 
     #[must_use]
@@ -231,6 +250,31 @@ impl CellKey {
     }
 }
 
+/// The face between `owner` and `owner + axis`, owned by the lower cell (`ports.md` §1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FaceKey {
+    pub owner: CellKey,
+    pub axis: Axis,
+}
+
+impl FaceKey {
+    /// The face of `cell` on side `dir`. Both cells sharing a face produce the same key.
+    pub fn of(cell: CellKey, dir: Dir6) -> Result<FaceKey, CoordError> {
+        if !cell.in_domain() {
+            return Err(CoordError::OutOfDomain);
+        }
+        let owner = if dir.is_positive() {
+            cell
+        } else {
+            cell.neighbor(dir)?
+        };
+        Ok(FaceKey {
+            owner,
+            axis: dir.axis(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,6 +331,18 @@ mod tests {
         }
 
         #[test]
+        fn face_key_shared_by_both_cells(cell in any_cell()) {
+            for dir in Dir6::ALL {
+                let Ok(n) = cell.neighbor(dir) else { continue };
+                let a = FaceKey::of(cell, dir).unwrap();
+                prop_assert_eq!(a, FaceKey::of(n, dir.opposite()).unwrap());
+                prop_assert_eq!(a.axis, dir.axis());
+                let lower = if dir.is_positive() { cell } else { n };
+                prop_assert_eq!(a.owner, lower);
+            }
+        }
+
+        #[test]
         fn aabb_min_lies_in_the_cell(cell in any_cell()) {
             let bounds = cell.aabb_world().unwrap();
             prop_assert_eq!(CellKey::containing(cell.level, &bounds.min), cell);
@@ -321,6 +377,17 @@ mod tests {
         assert_eq!(p(Level::L3, -1), -1);
         assert_eq!(p(Level::L2, 6), 0);
         assert_eq!(CellKey::new(Level::L0, I64Vec3::ZERO).parent(), None);
+    }
+
+    #[test]
+    fn face_key_at_domain_min() {
+        let bottom = CellKey::new(Level::L1, I64Vec3::splat(Level::L1.cell_min()));
+        assert_eq!(
+            FaceKey::of(bottom, Dir6::NegY),
+            Err(CoordError::OutOfDomain)
+        );
+        let up = FaceKey::of(bottom, Dir6::PosY).unwrap();
+        assert_eq!((up.owner, up.axis), (bottom, Axis::Y));
     }
 
     #[test]
