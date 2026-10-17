@@ -16,7 +16,7 @@ use crate::hash::hash;
 use crate::l2::{CELL, l2_cell_in};
 use crate::l2_port::{L1Cache, face_ports_in};
 use crate::port::PortKind;
-use crate::prim::{CellOutput, Q};
+use crate::prim::{CellOutput, FeatureKind, Q};
 use crate::seed::WorldSeed;
 use crate::walk::{Nav, cell_window, plates_at_port};
 
@@ -104,6 +104,27 @@ pub fn check_cell(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellReport
         }
     }
     report
+}
+
+/// Lemma A for one L1 cell: its deck and bridge surfaces and lift platforms form one component.
+/// Returns a message per disconnected plate, empty when the cell passes.
+pub fn check_l1(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> Vec<String> {
+    let out = cache.get(seed, cell);
+    let nav = Nav::build(&out.primitives);
+    let network: Vec<usize> = (0..nav.plates.len())
+        .filter(|&i| {
+            let p = &nav.plates[i];
+            p.lift || matches!(p.kind, FeatureKind::DECK | FeatureKind::BRIDGE)
+        })
+        .collect();
+    let Some(&first) = network.first() else {
+        return Vec::new();
+    };
+    network
+        .iter()
+        .filter(|&&i| !nav.connected(first, i))
+        .map(|&i| format!("L1 plate {:?} is cut off", nav.plates[i].rect))
+        .collect()
 }
 
 /// The nav graphs of a set of cells, joined through the ports on faces they share.
@@ -290,10 +311,21 @@ pub fn check_random(
                     for run in (0..runs).filter(|r| usize::try_from(*r).unwrap_or(0) % threads == t)
                     {
                         let cache = L1Cache::default();
-                        let reports = run_cells(run)
-                            .into_iter()
-                            .map(|c| (c, check_cell(seed, &cache, c)))
-                            .collect();
+                        let cells = run_cells(run);
+                        let parent =
+                            CellKey::new(Level::L1, cells[0].coords.map(|v| floor_div_pow2(v, 3)));
+                        let mut reports: Vec<(CellKey, CellReport)> = Vec::new();
+                        let l1 = check_l1(seed, &cache, parent);
+                        if !l1.is_empty() {
+                            reports.push((
+                                parent,
+                                CellReport {
+                                    failures: l1,
+                                    ..CellReport::default()
+                                },
+                            ));
+                        }
+                        reports.extend(cells.into_iter().map(|c| (c, check_cell(seed, &cache, c))));
                         out.push((run, reports));
                     }
                     out

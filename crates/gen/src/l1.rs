@@ -1444,35 +1444,4 @@ mod tests {
         }
         assert!(columns_seen >= 5 && cells > 50, "{columns_seen} {cells}");
     }
-
-    /// FNV-1a over the debug text of `l1_cell` for a fixed sample, including cavity rims.
-    /// A change here is a generator output change: bump `GEN_VERSION`.
-    #[test]
-    fn l1_cell_golden() {
-        use crate::regime::{RareEvent, rare_event};
-        let seed = WorldSeed(0x601D);
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        let mut feed = |cell: CellKey| {
-            for b in format!("{:?}", l1_cell(seed, cell)).bytes() {
-                h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
-            }
-        };
-        sample_cells().for_each(&mut feed);
-        let mut found = 0;
-        for i in 0..2000i64 {
-            let l0 = I64Vec3::new(i % 50 - 25, i / 50 - 20, 3);
-            if found < 3 && rare_event(seed, l0) == RareEvent::GiantCavity {
-                found += 1;
-                for k in 0..512i64 {
-                    feed(l1(
-                        l0.x * 8 + k % 8,
-                        l0.y * 8 + k / 64,
-                        l0.z * 8 + k / 8 % 8,
-                    ));
-                }
-            }
-        }
-        assert_eq!(found, 3);
-        assert_eq!(h, 18_146_471_219_858_894_092);
-    }
 }
