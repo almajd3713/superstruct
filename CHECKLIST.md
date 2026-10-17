@@ -151,8 +151,8 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 
 ### P0.11 Determinism, performance and phase exit
 - [x] **P0.11.1** Golden tests: hashes of `CellOutput` for 100 fixed cells at each level, tied to `GEN_VERSION`. *Done when:* the test fails on any output change. (2026-10-17)
-- [ ] **P0.11.2** Thread-order test: generate the same cells serially and in a shuffled order across rayon threads, then compare. *Done when:* identical.
-- [ ] **P0.11.3** Far-coordinate test: generate cells near ±2⁵⁰ sectors. *Done when:* they are valid, with no panics and connectivity intact.
+- [x] **P0.11.2** Thread-order test: generate the same cells serially and in a shuffled order across rayon threads, then compare. *Done when:* identical. (2026-10-17)
+- [x] **P0.11.3** Far-coordinate test: generate cells near ±2⁵⁰ sectors. *Done when:* they are valid, with no panics and connectivity intact. (2026-10-17)
 - [ ] **P0.11.4** Criterion benchmarks for L1 and L2 cell generation. Budgets: L2 cell under 2 ms, L1 cell under 5 ms, single thread, release build. *Done when:* the benchmarks exist and the numbers are recorded in `PLAN.md`.
 - [ ] **P0.11.5** **Phase exit:** the connectivity check on 10⁶ random cells reports zero backbone failures. *Done when:* the report has been saved to `docs/playtests/phase0.md`.
 
