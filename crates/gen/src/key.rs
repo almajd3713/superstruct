@@ -29,6 +29,30 @@ impl ColumnKey {
     }
 }
 
+/// A vertical run of 8 cells in one column: the cells sharing a parent's y (`sy = y div 8`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ColumnSpanKey {
+    pub level: Level,
+    pub x: i64,
+    pub z: i64,
+    pub sy: i64,
+}
+
+impl ColumnSpanKey {
+    pub fn of(cell: CellKey) -> Self {
+        Self {
+            level: cell.level,
+            x: cell.coords.x,
+            z: cell.coords.z,
+            sy: floor_div_pow2(cell.coords.y, 3),
+        }
+    }
+
+    pub fn hash_coords(&self) -> I64Vec3 {
+        I64Vec3::new(self.x, self.sy, self.z)
+    }
+}
+
 /// One horizontal layer of cells over a `W × W` region, with `W = 2^region_log2`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LayerKey {
@@ -69,6 +93,23 @@ mod tests {
         assert_eq!(a.hash_coords(), I64Vec3::new(-3, 0, 7));
         assert_ne!(a, ColumnKey::of(cell(Level::L1, -2, 0, 7)));
         assert_ne!(a, ColumnKey::of(cell(Level::L2, -3, 0, 7)));
+    }
+
+    #[test]
+    fn column_span_groups_eight_cells() {
+        let k = |y| ColumnSpanKey::of(cell(Level::L2, 5, y, -6));
+        for y in -8..0 {
+            assert_eq!(k(y), k(-8));
+        }
+        for y in 0..8 {
+            assert_eq!(k(y), k(0));
+        }
+        assert_ne!(k(-1), k(0));
+        assert_ne!(k(7), k(8));
+        assert_eq!(k(-1).hash_coords(), I64Vec3::new(5, -1, -6));
+        // The span index is the parent's y.
+        let c = cell(Level::L2, 5, -9, -6);
+        assert_eq!(k(-9).sy, c.parent().unwrap().coords.y);
     }
 
     #[test]

@@ -92,7 +92,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.3.4** `FaceKey` canonicalization: the cell plus axis, owned by the lower-coordinate cell. *Done when:* proptest checks that both adjacent cells produce the identical key for their shared face. (2026-10-17)
 - [x] **P0.3.5** Column and layer key helpers (`ColumnKey(level, x, z)`, `LayerKey(level, y, region)`), if chosen in P0.2.4. *Done when:* tests pass. (2026-10-17)
 - [x] **P0.3.6** Overflow policy: every coordinate arithmetic path uses checked or explicitly wrapping ops, per the spec. *Done when:* tests at ±(2⁶²) neither panic nor silently corrupt values. (2026-10-17)
-- [ ] **P0.3.7** `ColumnSpanKey(level, x, z, sy = y div 8)` helper per `levels.md` §1.2. *Done when:* tests confirm every cell in a span maps to the same key, and adjacent spans map to different keys.
+- [x] **P0.3.7** `ColumnSpanKey(level, x, z, sy = y div 8)` helper per `levels.md` §1.2. *Done when:* tests confirm every cell in a span maps to the same key, and adjacent spans map to different keys. (2026-10-17)
 
 ### P0.4 Hashing and RNG
 - [ ] **P0.4.1** Implement `hash(seed, level, cell, salt) -> u64` per `hashing.md`. *Done when:* the pinned test vectors pass.
