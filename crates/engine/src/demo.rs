@@ -7,8 +7,12 @@ use crate::mesh::Mesh;
 
 /// A floor slab and a field of pillars of varied height in sector (0,0,0).
 pub fn demo_scene() -> Vec<(WorldPos, Mesh)> {
-    let origin =
-        WorldPos::new(I64Vec3::ZERO, Vec3::new(448.0, 480.0, 448.0)).unwrap_or(WorldPos::ORIGIN);
+    demo_scene_at(I64Vec3::ZERO)
+}
+
+/// The same scene translated by whole sectors, to test precision far from the origin.
+pub fn demo_scene_at(sector: I64Vec3) -> Vec<(WorldPos, Mesh)> {
+    let origin = WorldPos::new(sector, Vec3::new(448.0, 480.0, 448.0)).unwrap_or(WorldPos::ORIGIN);
     let mut mesh = Mesh::default();
     mesh.add_box(Vec3::new(0.0, 0.0, 0.0), Vec3::new(128.0, 32.0, 128.0), 2);
     for ix in 0..12u32 {

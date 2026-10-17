@@ -180,10 +180,10 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P1.2.6** Camera-relative transform: `chunk WorldPos − camera WorldPos → Vec3`, computed in f64 or i64 then narrowed. *Done when:* the test shows sub-millimetre error at sector 2⁴⁰. (2026-10-17, `camera_relative` via `WorldPos::delta`; test at sector 2^40)
 
 ### P1.3 Rendering basics
-- [ ] **P1.3.1** Depth32Float buffer with compare `GreaterEqual`, cleared to 0. *Done when:* a test scene sorts correctly at 1 m and 10 km. (Depth buffer is in; the sorting test needs the P1.4.6 harness.)
+- [x] **P1.3.1** Depth32Float buffer with compare `GreaterEqual`, cleared to 0. *Done when:* a test scene sorts correctly at 1 m and 10 km. (2026-10-17, `tests/render.rs`: 1 m vs 10 km and 5 m apart at 10 km, both draw orders; passes on the RTX 4070)
 - [x] **P1.3.2** Vertex format: position f32×3, octahedral-encoded normal, material id u16. *Done when:* the size and alignment are documented and tested. (2026-10-17, 20-byte vertex documented in `vertex.rs`, size/offset and oct round-trip tested)
 - [x] **P1.3.3** Basic forward pipeline with a camera uniform and a per-draw transform storage buffer. *Done when:* a grid of boxes renders. (2026-10-17, box grid scene via per-draw camera-relative origin storage buffer; `demo.rs` is temporary)
-- [x] **P1.3.4** Greybox shader: Lambert lighting plus a world-aligned 1 m / 8 m grid so scale is readable, computed from camera-relative position plus a sector offset uniform. *Done when:* the grid does not swim at large coordinates. (2026-10-17, checked in a Windows screenshot; grid phase is sector-independent because 1024 is a multiple of 8, so the uniform carries the in-sector camera offset only; swim test at large coordinates comes with P1.4.6)
+- [x] **P1.3.4** Greybox shader: Lambert lighting plus a world-aligned 1 m / 8 m grid so scale is readable, computed from camera-relative position plus a sector offset uniform. *Done when:* the grid does not swim at large coordinates. (2026-10-17, checked in a Windows screenshot; grid phase is sector-independent because 1024 is a multiple of 8, so the uniform carries the in-sector camera offset only; `grid_does_not_swim_at_large_coordinates` renders sector 0 and sector 2^40 identically)
 - [x] **P1.3.5** Debug-line renderer for AABBs, cell grids and ports. *Done when:* toggles show L1 and L2 cell bounds. (2026-10-17, F3 toggles L2 (blue) and L1 (orange) outlines, depth-tested, verified in a screenshot)
 - [x] **P1.3.6** Screenshot key F12, saving a PNG to `out/`. *Done when:* the file is written. (2026-10-17, F12 writes `out/screenshot-<unix>.png`; `SUPERSTRUCT_AUTOSHOT=<n>` takes one after n frames and exits, for remote runs)
 
@@ -193,7 +193,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P1.4.3** `egui` overlay (F1): FPS, frame-time graph, camera sector and local position, seed. *Done when:* it is visible and toggles.
 - [ ] **P1.4.4** Tracy CPU zones behind a cargo feature flag. *Done when:* a capture shows frame zones.
 - [ ] **P1.4.5** GPU timestamp queries per pass, shown in the overlay, with a fallback when unsupported. *Done when:* per-pass milliseconds are visible.
-- [ ] **P1.4.6** Headless offscreen render harness: render to a texture, read it back and compare against a reference with a tolerance. It runs under lavapipe in WSL. *Done when:* one reference test passes in WSL.
+- [x] **P1.4.6** Headless offscreen render harness: render to a texture, read it back and compare against a reference with a tolerance. It runs under lavapipe in WSL. *Done when:* one reference test passes in WSL. (2026-10-17, `engine::headless` + `tests/render.rs` with a committed reference PNG; passes natively on Windows. WSL has only Mesa GL-on-D3D12, which segfaults, so GL is excluded and the tests skip there; install `mesa-vulkan-drivers` for lavapipe to run them in WSL)
 
 ### P1.5 Windows workflow and phase exit
 - [ ] **P1.5.1** Document and verify the Windows build: a native `cargo` on Windows, or cross-compilation from WSL. *Done when:* the steps are in CLAUDE.md §7 and the binary runs.

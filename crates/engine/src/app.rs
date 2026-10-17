@@ -21,7 +21,7 @@ use crate::demo::demo_scene;
 use crate::gpu::{Gpu, GpuError};
 use crate::input::{Action, Bindings, InputState};
 use crate::readback;
-use crate::renderer::{DebugBox, FrameParams, Renderer};
+use crate::renderer::{DebugBox, FrameInput, FrameParams, Renderer};
 use crate::settings::Settings;
 use crate::window::toggle_fullscreen;
 
@@ -82,8 +82,8 @@ impl App {
                 .map_err(winit::error::EventLoopError::from)?,
         );
         let gpu = Gpu::new(&window, s.vsync)?;
-        let mut renderer = Renderer::new(&gpu);
-        renderer.set_scene(&gpu, &demo_scene());
+        let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
+        renderer.set_scene(&gpu.device, &demo_scene());
         Ok(Running {
             window,
             gpu,
@@ -204,12 +204,15 @@ impl App {
                         label: Some("frame"),
                     });
             running.renderer.render(
-                &running.gpu,
+                &running.gpu.queue,
                 &mut encoder,
                 &view,
-                &render_camera,
-                FrameParams::default(),
-                &self.box_scratch,
+                &FrameInput {
+                    camera: &render_camera,
+                    size: running.gpu.size(),
+                    params: FrameParams::default(),
+                    boxes: &self.box_scratch,
+                },
             );
             running.gpu.queue.submit([encoder.finish()]);
             if want_screenshot {
@@ -259,7 +262,9 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 running.gpu.resize(size.width, size.height);
-                running.renderer.resize(&running.gpu);
+                running
+                    .renderer
+                    .resize(&running.gpu.device, running.gpu.size());
             }
             WindowEvent::RedrawRequested => self.frame(),
             WindowEvent::KeyboardInput {

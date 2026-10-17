@@ -41,7 +41,11 @@ pub struct Gpu {
 
 impl Gpu {
     pub fn new(window: &Arc<Window>, vsync: VsyncMode) -> Result<Self, GpuError> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            // GL is deliberately excluded: Mesa's GL-on-D3D12 under WSL crashes, and the game targets Vulkan/DX12.
+            backends: wgpu::Backends::PRIMARY,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
         let surface = instance.create_surface(window.clone())?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -109,6 +113,10 @@ impl Gpu {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
     }
 
     pub fn vsync(&self) -> VsyncMode {

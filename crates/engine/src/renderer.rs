@@ -5,7 +5,6 @@ use glam::{Mat4, Vec3, Vec4};
 use worldgen::coord::WorldPos;
 
 use crate::camera::{Camera, camera_relative};
-use crate::gpu::Gpu;
 use crate::mesh::Mesh;
 use crate::vertex::Vertex;
 
@@ -45,6 +44,15 @@ struct Draw {
     first_index: u32,
     index_count: u32,
     base_vertex: i32,
+}
+
+/// Everything that varies per frame.
+#[derive(Clone, Copy)]
+pub struct FrameInput<'a> {
+    pub camera: &'a Camera,
+    pub size: (u32, u32),
+    pub params: FrameParams,
+    pub boxes: &'a [DebugBox],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -116,8 +124,7 @@ fn create_depth(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture
 
 impl Renderer {
     #[allow(clippy::too_many_lines)]
-    pub fn new(gpu: &Gpu) -> Self {
-        let device = &gpu.device;
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, size: (u32, u32)) -> Self {
         let globals_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
             size: std::mem::size_of::<Globals>() as u64,
@@ -189,7 +196,7 @@ impl Renderer {
             "scene",
             &scene_source(),
             &scene_layout,
-            gpu.config.format,
+            format,
             &[Some(Vertex::LAYOUT)],
             wgpu::PrimitiveTopology::TriangleList,
             true,
@@ -204,7 +211,7 @@ impl Renderer {
             "lines",
             &lines_source(),
             &lines_layout,
-            gpu.config.format,
+            format,
             &[Some(line_layout)],
             wgpu::PrimitiveTopology::LineList,
             false,
@@ -217,8 +224,8 @@ impl Renderer {
         });
 
         Self {
-            depth_view: create_depth(device, gpu.config.width, gpu.config.height),
-            depth_size: (gpu.config.width, gpu.config.height),
+            depth_view: create_depth(device, size.0, size.1),
+            depth_size: size,
             globals_buf,
             globals_bg,
             draws_buf,
@@ -235,7 +242,7 @@ impl Renderer {
     }
 
     /// Replaces the scene with `meshes`, each placed at a world-space origin. Vertices are origin-local.
-    pub fn set_scene(&mut self, gpu: &Gpu, meshes: &[(WorldPos, Mesh)]) {
+    pub fn set_scene(&mut self, device: &wgpu::Device, meshes: &[(WorldPos, Mesh)]) {
         use wgpu::util::DeviceExt;
         let mut vertices: Vec<Vertex> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
@@ -252,12 +259,11 @@ impl Renderer {
         }
         let make = |label, usage, data: &[u8]| {
             (!data.is_empty()).then(|| {
-                gpu.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(label),
-                        contents: data,
-                        usage,
-                    })
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: data,
+                    usage,
+                })
             })
         };
         self.vertex_buf = make(
@@ -272,10 +278,9 @@ impl Renderer {
         );
     }
 
-    pub fn resize(&mut self, gpu: &Gpu) {
-        let size = (gpu.config.width, gpu.config.height);
+    pub fn resize(&mut self, device: &wgpu::Device, size: (u32, u32)) {
         if size != self.depth_size {
-            self.depth_view = create_depth(&gpu.device, size.0, size.1);
+            self.depth_view = create_depth(device, size.0, size.1);
             self.depth_size = size;
         }
     }
@@ -283,14 +288,18 @@ impl Renderer {
     /// Records the frame's passes into `encoder`.
     pub fn render(
         &mut self,
-        gpu: &Gpu,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
-        camera: &Camera,
-        params: FrameParams,
-        boxes: &[DebugBox],
+        frame: &FrameInput<'_>,
     ) {
-        let aspect = gpu.config.width as f32 / gpu.config.height as f32;
+        let FrameInput {
+            camera,
+            size,
+            params,
+            boxes,
+        } = *frame;
+        let aspect = size.0 as f32 / size.1 as f32;
         let view_proj: Mat4 = camera.view_proj(aspect);
         let local = camera.pos.local();
         let globals = Globals {
@@ -298,8 +307,7 @@ impl Renderer {
             cam_local: [local.x, local.y, local.z, 0.0],
             params: [params.fog_density, f32::from(params.grid), 0.0, 0.0],
         };
-        gpu.queue
-            .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
+        queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
         self.origins_scratch.clear();
         self.origins_scratch.extend(self.draws.iter().map(|d| {
@@ -307,7 +315,7 @@ impl Renderer {
             [r.x, r.y, r.z, 0.0]
         }));
         if !self.origins_scratch.is_empty() {
-            gpu.queue.write_buffer(
+            queue.write_buffer(
                 &self.draws_buf,
                 0,
                 bytemuck::cast_slice(&self.origins_scratch),
@@ -325,7 +333,7 @@ impl Renderer {
         }
         self.lines_scratch.truncate(MAX_LINE_VERTICES);
         if !self.lines_scratch.is_empty() {
-            gpu.queue.write_buffer(
+            queue.write_buffer(
                 &self.lines_buf,
                 0,
                 bytemuck::cast_slice(&self.lines_scratch),

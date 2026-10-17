@@ -7,6 +7,7 @@ pub mod app;
 pub mod camera;
 pub mod demo;
 pub mod gpu;
+pub mod headless;
 pub mod input;
 pub mod mesh;
 pub mod readback;
