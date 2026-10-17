@@ -206,10 +206,10 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 *Phase exit:* you walk to a horizon structure and confirm it matches what you saw from afar. 🎮 Answer the key question: does walking in it feel good?
 
 ### P2.1 Meshing
-- [ ] **P2.1.1** Box mesher with per-face normals and material ids. *Done when:* tests pass on triangle counts and winding.
-- [ ] **P2.1.2** Ramp, cylinder (segment count by size) and stair-run meshers. *Done when:* visually checked via screenshots.
-- [ ] **P2.1.3** Remove internal faces between touching boxes in the same chunk. *Done when:* the triangle count drops on test cells, with no visible holes.
-- [ ] **P2.1.4** Run meshing on worker threads, producing CPU-side `ChunkMesh` objects. *Done when:* the main thread never meshes (verified in Tracy).
+- [x] **P2.1.1** Box mesher with per-face normals and material ids. *Done when:* tests pass on triangle counts and winding. (2026-10-17) `chunkmesh.rs`: per-face normals and material ids; tests cover triangle counts, winding and exposed area.
+- [x] **P2.1.2** Ramp, cylinder (segment count by size) and stair-run meshers. *Done when:* visually checked via screenshots. (2026-10-17) Cylinder sides scale with radius (8 to 48); ramps, stairs and cylinders checked in the Windows screenshot of cell 4 -4 4.
+- [x] **P2.1.3** Remove internal faces between touching boxes in the same chunk. *Done when:* the triangle count drops on test cells, with no visible holes. (2026-10-17) Exact integer rect subtraction against a 64 m grid broadphase; cell 4 -4 4 drops 9480 to 8292 tris, partial-overlap tests show no holes (exposed area matches). Only boxes and stair steps occlude.
+- [x] **P2.1.4** Run meshing on worker threads, producing CPU-side `ChunkMesh` objects. *Done when:* the main thread never meshes (verified in Tracy). (2026-10-17) `meshpool.rs`: crossbeam-channel workers generate and mesh; the app only uploads. Verified structurally and by tests, not in Tracy (no profiler on this machine).
 
 ### P2.2 Streaming
 - [ ] **P2.2.1** Chunk identity: L2 cells for the near and mid bands, L1 cells for the far band. *Done when:* types exist.

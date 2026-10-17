@@ -1,5 +1,4 @@
-//! Temporary primitive mesher: turns generated primitives into flat-shaded triangles.
-//! Replaced by the real mesher (greedy faces, LOD bands) in Phase 2.
+//! Ramp and cylinder meshers, used by `chunkmesh` for the shapes it does not cull.
 
 use glam::Vec3;
 use worldgen::cell::Axis;
@@ -7,7 +6,11 @@ use worldgen::prim::{Dir4, Primitive, Q_PER_M, QAabb, QVec3, Shape};
 
 use crate::mesh::Mesh;
 
-const CYLINDER_SIDES: usize = 12;
+/// Segments grow with radius so large trunks stay round and thin pipes stay cheap.
+#[allow(clippy::cast_sign_loss)] // clamped to 8..=48 above the cast
+fn cylinder_sides(radius_m: f32) -> usize {
+    (8.0 + radius_m * 4.0).round().clamp(8.0, 48.0) as usize
+}
 
 fn m(q: i32) -> f32 {
     q as f32 / Q_PER_M as f32
@@ -117,13 +120,14 @@ fn add_cylinder(mesh: &mut Mesh, axis: Axis, base: Vec3, length: f32, radius: f3
         Axis::Y => (Vec3::Y, Vec3::Z, Vec3::X),
         Axis::Z => (Vec3::Z, Vec3::X, Vec3::Y),
     };
+    let sides = cylinder_sides(radius);
     let ring = |k: usize, at: f32| {
-        let a = std::f32::consts::TAU * k as f32 / CYLINDER_SIDES as f32;
+        let a = std::f32::consts::TAU * k as f32 / sides as f32;
         base + along * at + (u * a.cos() + v * a.sin()) * radius
     };
     let inside = base + along * (length * 0.5);
-    for k in 0..CYLINDER_SIDES {
-        let k1 = (k + 1) % CYLINDER_SIDES;
+    for k in 0..sides {
+        let k1 = (k + 1) % sides;
         mesh.add_polygon_outward(
             &[
                 ring(k, 0.0),
@@ -136,7 +140,7 @@ fn add_cylinder(mesh: &mut Mesh, axis: Axis, base: Vec3, length: f32, radius: f3
         );
     }
     for at in [0.0, length] {
-        let cap: Vec<Vec3> = (0..CYLINDER_SIDES).map(|k| ring(k, at)).collect();
+        let cap: Vec<Vec3> = (0..sides).map(|k| ring(k, at)).collect();
         mesh.add_polygon_outward(&cap, inside, material);
     }
 }
@@ -207,6 +211,13 @@ mod tests {
         let run = aabb([0, 0, 0], [64, 32, 32]);
         add_primitive(&mut stairs, &prim(Shape::stair_run(run, Dir4::PosX, 4)));
         assert_eq!(stairs.vertices.len(), 4 * 24);
+    }
+
+    #[test]
+    fn cylinder_segments_scale_with_radius() {
+        assert_eq!(cylinder_sides(0.25), 9);
+        assert_eq!(cylinder_sides(2.0), 16);
+        assert_eq!(cylinder_sides(100.0), 48);
     }
 
     #[test]

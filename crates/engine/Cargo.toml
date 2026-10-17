@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 bytemuck = "1.25.2"
+crossbeam-channel = "0.5.16"
 egui = { version = "0.37.0", features = ["default_fonts"] }
 egui-wgpu = "0.37.0"
 egui-winit = "0.37.0"

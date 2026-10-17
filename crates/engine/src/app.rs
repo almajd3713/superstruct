@@ -18,10 +18,11 @@ use worldgen::coord::WorldPos;
 use worldgen::seed::WorldSeed;
 
 use crate::camera::Camera;
-use crate::cellscene::{CellScene, busiest_l2_cell};
+use crate::cellscene::busiest_l2_cell;
 use crate::gpu::{Gpu, GpuError};
 use crate::gpu_timer::GpuTimer;
 use crate::input::{Action, Bindings, InputState};
+use crate::meshpool::MeshPool;
 use crate::overlay::{Overlay, OverlayInfo};
 use crate::readback;
 use crate::renderer::{DebugBox, FrameInput, FrameParams, Renderer};
@@ -58,6 +59,7 @@ struct App {
     running: Option<Running>,
     failure: Option<AppError>,
     scene_note: String,
+    pool: MeshPool,
     debug_boxes: bool,
     box_scratch: Vec<DebugBox>,
     input: InputState,
@@ -95,21 +97,19 @@ impl App {
             .ok()
             .and_then(|v| parse_cell(&v))
             .unwrap_or_else(|| busiest_l2_cell(WorldSeed(self.settings.seed), 4));
-        match CellScene::build(WorldSeed(self.settings.seed), key) {
-            Ok(mut scene) => {
-                self.scene_note = scene.summary();
-                info!("{}", self.scene_note);
-                let mesh = std::mem::take(&mut scene.mesh);
-                renderer.set_scene(&gpu.device, &[(scene.origin, mesh)]);
-                // Start outside the cell's low corner, high up, looking at its centre.
-                if let Ok(p) = scene.origin.offset(Vec3::new(-120.0, 420.0, -120.0)) {
-                    self.camera.pos = p;
-                    self.prev_cam_pos = p;
-                    self.camera.yaw = 5.0 * std::f32::consts::FRAC_PI_4;
-                    self.camera.pitch = -0.4;
-                }
+        self.pool.submit(WorldSeed(self.settings.seed), key);
+        // Start outside the cell's low corner, high up, looking at its centre.
+        match key
+            .aabb_world()
+            .and_then(|b| b.min.offset(Vec3::new(-120.0, 420.0, -120.0)))
+        {
+            Ok(p) => {
+                self.camera.pos = p;
+                self.prev_cam_pos = p;
+                self.camera.yaw = 5.0 * std::f32::consts::FRAC_PI_4;
+                self.camera.pitch = -0.4;
             }
-            Err(err) => error!("cannot build cell {key:?}: {err}"),
+            Err(err) => error!("cannot place the camera at cell {key:?}: {err}"),
         }
         if cfg!(debug_assertions) {
             // Errors are logged and kept for the overlay; the embedded pipelines stay in use.
@@ -195,7 +195,37 @@ impl App {
         }
     }
 
+    /// Hands meshes the workers finished to the renderer.
+    fn upload_finished_meshes(&mut self) {
+        let Some(running) = &mut self.running else {
+            return;
+        };
+        while let Some(done) = self.pool.try_recv() {
+            match done {
+                Ok(chunk) => {
+                    let c = chunk.key.coords;
+                    self.scene_note = format!(
+                        "L2 cell {} {} {}: {} prims, {} tris | gen {:.2} ms, mesh {:.2} ms (worker)",
+                        c.x,
+                        c.y,
+                        c.z,
+                        chunk.primitives,
+                        chunk.mesh.indices.len() / 3,
+                        chunk.gen_ms,
+                        chunk.mesh_ms
+                    );
+                    info!("{}", self.scene_note);
+                    running
+                        .renderer
+                        .set_scene(&running.gpu.device, &[(chunk.origin, chunk.mesh)]);
+                }
+                Err((key, err)) => error!("cannot build cell {key:?}: {err}"),
+            }
+        }
+    }
+
     fn draw(&mut self, alpha: f32, frame_time: f64, want_screenshot: bool) -> bool {
+        self.upload_finished_meshes();
         let Some(running) = &mut self.running else {
             return false;
         };
@@ -431,6 +461,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         running: None,
         failure: None,
         scene_note: String::new(),
+        pool: MeshPool::with_default_threads(),
         debug_boxes: std::env::var_os("SUPERSTRUCT_DEBUG_BOXES").is_some(),
         box_scratch: Vec::new(),
         input: InputState::new(Bindings::default()),
