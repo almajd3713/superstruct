@@ -165,6 +165,7 @@ impl CellKey {
             // floor in `[0, per_sector)`.
             #[allow(clippy::cast_possible_truncation)]
             let sub = (pos.local() / level.size_m() as f32).floor().as_i64vec3();
+            // Cannot overflow: |sector| ≤ 2⁵² and per_sector ≤ 128.
             sector * per_sector + sub
         };
         Self { level, coords }
@@ -388,6 +389,30 @@ mod tests {
         );
         let up = FaceKey::of(bottom, Dir6::PosY).unwrap();
         assert_eq!((up.owner, up.axis), (bottom, Axis::Y));
+    }
+
+    /// P0.3.6: far out-of-domain inputs return errors instead of panicking or wrapping.
+    #[test]
+    fn extreme_inputs_never_panic_or_wrap() {
+        let p62 = 1i64 << 62;
+        for v in [p62, -p62, i64::MAX, i64::MIN] {
+            let pos = WorldPos::new(I64Vec3::new(0, v, 0), Vec3::ZERO);
+            assert_eq!(pos, Err(CoordError::OutOfDomain));
+            for level in Level::ALL {
+                let cell = CellKey::new(level, I64Vec3::new(v, 0, 0));
+                assert!(!cell.in_domain());
+                assert!(cell.children().is_err());
+                assert!(cell.aabb_world().is_err());
+                for dir in Dir6::ALL {
+                    assert_eq!(cell.neighbor(dir), Err(CoordError::OutOfDomain));
+                    assert_eq!(FaceKey::of(cell, dir), Err(CoordError::OutOfDomain));
+                }
+                let parent = cell.parent();
+                if let Some(parent) = parent {
+                    assert_eq!(parent.coords.x, v >> 3);
+                }
+            }
+        }
     }
 
     #[test]
