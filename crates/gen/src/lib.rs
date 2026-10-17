@@ -10,6 +10,7 @@ pub mod port;
 pub mod prim;
 pub mod rng;
 pub mod salt;
+pub mod sdf;
 pub mod seed;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change

@@ -64,7 +64,11 @@ pub enum Shape {
 
 Each shape provides `aabb()`, `contains(p)` (point-in-solid) and `sdf(p)` (signed distance, negative inside), all over `f32` points in cell-local metres (P0.5.3).
 - `sdf` is exact for Box and Cylinder.
-- For Ramp and StairRun it is exact or a conservative bound; the implementation documents which. A bound never overestimates distance, so the raymarcher stays safe.
+- For Ramp and StairRun it is exact or a conservative bound. A bound never overestimates distance, so the raymarcher stays safe. As implemented (`worldgen::sdf`, P0.5.3):
+  - Ramp is `max(box, incline plane)`: exact inside, a lower bound outside.
+  - StairRun is the minimum over its step boxes: exact outside, and it underestimates depth inside.
+  - Both are evaluated in a mirrored "rise frame" (an isometry), so all four directions share one formula.
+- LiftShaft's `sdf` is `+∞`, because it has no surface.
 - LiftShaft's `contains` is always false.
 
 **No subtractive primitives.** The solid world is the **union** of all primitives. Holes, shafts and chasms are expressed by not placing solid there, and finer levels are kept out of those regions by `KeepOut` constraints (§6). This keeps collision a simple "any primitive contains p" query.

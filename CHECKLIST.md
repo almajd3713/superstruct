@@ -104,7 +104,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 ### P0.5 Primitives and cell output
 - [x] **P0.5.1** Primitive structs per `primitives.md`, with an AABB per primitive. *Done when:* AABB tests pass for each type. (2026-10-17)
 - [x] **P0.5.2** `CellOutput { primitives, ports, child_constraints, meta }`, with optional `serde` behind a feature flag. *Done when:* a round-trip serialization test passes. (2026-10-17)
-- [ ] **P0.5.3** Point-in-solid and signed-distance functions for each primitive type, used later by collision, the SDF port and validation. *Done when:* tests at known points pass.
+- [x] **P0.5.3** Point-in-solid and signed-distance functions for each primitive type, used later by collision, the SDF port and validation. *Done when:* tests at known points pass. (2026-10-17)
 
 ### P0.6 L0 regimes
 - [ ] **P0.6.1** `regime(seed, L0 cell) -> Regime` with all fields from `regimes.md`. *Done when:* the output is stable (golden test), and a 64×64 histogram of fields matches the specified distributions.
