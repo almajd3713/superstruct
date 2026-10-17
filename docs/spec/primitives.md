@@ -32,7 +32,7 @@ pub enum Dir4 { PosX, NegX, PosZ, NegZ }   // direction of ascent
 pub enum Axis3 { X, Y, Z }
 ```
 
-The megastructure's language is orthogonal: slabs, shafts, pillars, ducts. Axis-alignment keeps collision analytic and exact, and keeps the SDF horizon cheap. Arbitrary rotation (diagonal bridges, for example) would be a later addition and a `GEN_VERSION` bump.
+The megastructure's language is orthogonal: slabs, shafts, pillars, ducts. Axis-alignment keeps collision analytic and exact, and keeps the SDF horizon cheap. Arbitrary rotation (diagonal bridges, for example) would be a later addition and a `GEN_VERSION` bump. **The user confirmed axis-aligned only on 2026-10-17**, over yaw rotation and 45° steps.
 
 ## 3. Primitive types
 
