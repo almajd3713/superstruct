@@ -135,7 +135,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.8.6** Sanctuary placement: chosen at the L1 level so they sit a few km apart along walkable routes, and marked in L2 metadata. *Done when:* the spacing distribution over 10⁴ L1 cells matches the spec. (2026-10-17)
 - [x] **P0.8.7** Vista rule: occasionally guarantee an opening that frames a view (an opening facing an L1 void). *Done when:* the vista frequency matches the spec, and the openings face a void (test). (2026-10-17)
 - [x] **P0.8.8** Railing and edge flags: mark walkable edges with a drop greater than the fall threshold as guarded or deliberately unguarded. *Done when:* the unguarded fraction matches the spec. (2026-10-17)
-- [ ] **P0.8.9** Trunk-attached masses, with walkway routing to the L1 network so they stay reachable (`ports.md` Lemma D). *Done when:* the validator reports every trunk-attached mass reachable in 10⁴ random cells.
+- [x] **P0.8.9** Trunk-attached masses, with walkway routing to the L1 network so they stay reachable (`ports.md` Lemma D). *Done when:* the validator reports every trunk-attached mass reachable in 10⁴ random cells. (2026-10-17)
 
 ### P0.9 Walkability validator
 - [x] **P0.9.1** Extract walkable surfaces from primitives: top faces with clearance of at least the capsule height. *Done when:* tests on hand-built cells pass. (2026-10-17)

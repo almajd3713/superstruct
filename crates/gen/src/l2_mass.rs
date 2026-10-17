@@ -158,6 +158,17 @@ impl Parent {
         p
     }
 
+    /// Drops the trunk circles, for bodies that are meant to touch a trunk.
+    pub(crate) fn without_trunks(mut self) -> Self {
+        self.trunks.clear();
+        self
+    }
+
+    /// `(x, z, radius)` of each trunk.
+    pub(crate) fn trunk_circles(&self) -> &[(Q, Q, Q)] {
+        &self.trunks
+    }
+
     pub(crate) fn solids(&self) -> &[QAabb] {
         &self.solids
     }
@@ -171,7 +182,7 @@ impl Parent {
     }
 
     /// Deck tops with room above them for the smallest mass and the margin.
-    fn deck_tops(&self) -> Vec<Q> {
+    pub(crate) fn deck_tops(&self) -> Vec<Q> {
         let mut tops: Vec<Q> = self
             .decks
             .iter()
@@ -218,7 +229,7 @@ pub fn overlaps(a: &QAabb, b: &QAabb) -> bool {
 }
 
 /// Whether the boxes are at least `GAP` apart along some axis.
-fn gap_ok(a: &QAabb, b: &QAabb) -> bool {
+pub(crate) fn gap_ok(a: &QAabb, b: &QAabb) -> bool {
     let sep = |a0: Q, a1: Q, b0: Q, b1: Q| (b0 - a1).max(a0 - b1);
     sep(a.min.x, a.max.x, b.min.x, b.max.x) >= GAP
         || sep(a.min.y, a.max.y, b.min.y, b.max.y) >= GAP

@@ -29,8 +29,11 @@ const CLEARANCE: Q = 4 * M;
 pub struct Skywalk {
     /// Axis of the face: X or Z.
     pub axis: Axis,
-    /// Face plane position along `axis`: 0 or `CELL`.
+    /// Position of the plane the skywalk starts from along `axis`: a cell face (0 or `CELL`),
+    /// or the outer face of a trunk-attached mass.
     pub plane: Q,
+    /// Direction away from the plane along `axis`: +1 or -1.
+    pub inward: Q,
     /// Tangential extent along the face (`u`: z for X faces, x for Z faces).
     pub u0: Q,
     pub u1: Q,
@@ -41,14 +44,9 @@ pub struct Skywalk {
 }
 
 impl Skywalk {
-    /// Direction of `+n`, from the face into the cell.
-    fn inward(&self) -> Q {
-        if self.plane == 0 { 1 } else { -1 }
-    }
-
     /// Plan range along the axis covering `[a, b)` measured inward from the face.
     fn span(&self, a: Q, b: Q) -> (Q, Q) {
-        if self.inward() > 0 {
+        if self.inward > 0 {
             (self.plane + a, self.plane + b)
         } else {
             (self.plane - b, self.plane - a)
@@ -94,7 +92,7 @@ impl Skywalk {
         }
         let run = self.steps() * TREAD;
         let top = self.floor - self.height + self.steps() * RISE;
-        let ascend = match (self.axis, self.inward() > 0) {
+        let ascend = match (self.axis, self.inward > 0) {
             (Axis::X, true) => Dir4::NegX,
             (Axis::X, false) => Dir4::PosX,
             (_, true) => Dir4::NegZ,

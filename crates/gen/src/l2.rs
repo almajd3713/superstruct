@@ -5,6 +5,7 @@
 use crate::cell::{CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::key::LayerKey;
 use crate::l1::{DECK_REGION_LOG2, decks};
+use crate::l2_attach::attached_masses;
 use crate::l2_column::{lift_column, span_of};
 use crate::l2_mass::masses_in;
 use crate::l2_port::{L1Cache, cell_ports_in};
@@ -12,7 +13,9 @@ use crate::l2_rail::railings;
 use crate::l2_vista::vista;
 use crate::l2_walk::Skywalk;
 use crate::port::PortKind;
-use crate::prim::{CellMeta, CellOutput, ChildConstraint, MetaFlags, Q, QAabb, ZoneKind};
+use crate::prim::{
+    CellMeta, CellOutput, ChildConstraint, MetaFlags, Primitive, Q, QAabb, ZoneKind,
+};
 use crate::seed::WorldSeed;
 use crate::walk::cell_window;
 
@@ -57,6 +60,7 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
         let walk = Skywalk {
             axis: port.face.axis,
             plane: if port.face.owner == cell { CELL } else { 0 },
+            inward: if port.face.owner == cell { -1 } else { 1 },
             u0: port.rect.u0,
             u1: port.rect.u1,
             floor: port.rect.v0,
@@ -83,6 +87,49 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
         corridors.extend(keepouts);
     }
 
+    copy_sanctuary(&parent, origin, &mut out);
+
+    if let Some(v) = vista(seed, cell, parent_key, &parent, origin, &corridors) {
+        out.primitives.push(v.balcony);
+        out.child_constraints
+            .push(ChildConstraint::KeepOut { aabb: v.corridor });
+        out.child_constraints.push(ChildConstraint::Zone {
+            aabb: v.zone,
+            kind: ZoneKind::Vista,
+        });
+        out.meta.flags = MetaFlags(out.meta.flags.0 | MetaFlags::VISTA.0);
+        corridors.push(v.zone);
+    }
+
+    let normal = masses_in(seed, cell, &parent, &corridors);
+    let normal_boxes: Vec<QAabb> = normal.iter().map(Primitive::aabb).collect();
+    let mut masses: Vec<Primitive> = normal;
+    for a in attached_masses(seed, cell, &parent, origin, &corridors, &normal_boxes) {
+        masses.push(a.mass);
+        out.primitives.extend(a.walk.primitives());
+        out.child_constraints.push(ChildConstraint::KeepOut {
+            aabb: a.walk.corridor(),
+        });
+    }
+    for m in masses {
+        out.child_constraints.push(ChildConstraint::Envelope {
+            prim: u32::try_from(out.primitives.len()).unwrap_or(u32::MAX),
+        });
+        out.primitives.push(m);
+    }
+    let mut seen = cell_window(&parent.primitives, origin, CELL);
+    seen.extend(out.primitives.iter().copied());
+    out.primitives.extend(railings(seed, cell, &seen).0);
+    for i in 0..out.ports.len() {
+        out.child_constraints.push(ChildConstraint::ForcedPort {
+            port: u32::try_from(i).unwrap_or(u32::MAX),
+        });
+    }
+    out
+}
+
+/// Copies the parent's sanctuary zone and flag into the child that holds it.
+fn copy_sanctuary(parent: &CellOutput, origin: [Q; 3], out: &mut CellOutput) {
     for c in &parent.child_constraints {
         if let ChildConstraint::Zone {
             aabb,
@@ -102,36 +149,6 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
             }
         }
     }
-
-    if let Some(v) = vista(seed, cell, parent_key, &parent, origin, &corridors) {
-        out.primitives.push(v.balcony);
-        out.child_constraints
-            .push(ChildConstraint::KeepOut { aabb: v.corridor });
-        out.child_constraints.push(ChildConstraint::Zone {
-            aabb: v.zone,
-            kind: ZoneKind::Vista,
-        });
-        out.meta.flags = MetaFlags(out.meta.flags.0 | MetaFlags::VISTA.0);
-        corridors.push(v.zone);
-    }
-
-    let first_mass = out.primitives.len();
-    out.primitives
-        .extend(masses_in(seed, cell, &parent, &corridors));
-    for i in first_mass..out.primitives.len() {
-        out.child_constraints.push(ChildConstraint::Envelope {
-            prim: u32::try_from(i).unwrap_or(u32::MAX),
-        });
-    }
-    let mut seen = cell_window(&parent.primitives, origin, CELL);
-    seen.extend(out.primitives.iter().copied());
-    out.primitives.extend(railings(seed, cell, &seen).0);
-    for i in 0..out.ports.len() {
-        out.child_constraints.push(ChildConstraint::ForcedPort {
-            port: u32::try_from(i).unwrap_or(u32::MAX),
-        });
-    }
-    out
 }
 
 #[cfg(test)]

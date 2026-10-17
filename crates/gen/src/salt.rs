@@ -47,6 +47,8 @@ salts! {
     RAMP = 0x0305;
     EDGE_GUARD = 0x0306;
     VISTA = 0x0307;
+    /// Keyed by `CellKey(L2)`: masses attached to trunks.
+    TRUNK_MASS = 0x0308;
 
     // L3 blocks: 0x04xx
     L3_RETRY = 0x0401;

@@ -363,12 +363,13 @@ fn skywalk_fits(seed: WorldSeed, cache: &L1Cache, f: &Frame, rect: &QRect, heigh
     let n = f.axis_index();
     let mut other_idx = f.idx;
     other_idx[n] = (other_idx[n] + 1) % 8;
-    [(f.po, f.idx, CELL), (f.pn, other_idx, 0)]
+    [(f.po, f.idx, CELL, -1), (f.pn, other_idx, 0, 1)]
         .into_iter()
-        .all(|(parent, idx, plane)| {
+        .all(|(parent, idx, plane, inward)| {
             let walk = Skywalk {
                 axis,
                 plane,
+                inward,
                 u0: rect.u0,
                 u1: rect.u1,
                 floor: rect.v0,
