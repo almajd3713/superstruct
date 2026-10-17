@@ -2,7 +2,7 @@
 
 use glam::I64Vec3;
 
-use crate::coord::{SECTOR_SIZE_LOG2, WorldPos};
+use crate::coord::{CoordError, SECTOR_SIZE_LOG2, WorldPos};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
@@ -25,6 +25,80 @@ impl Level {
     pub const fn size_m(self) -> i64 {
         1 << self.size_log2()
     }
+
+    /// Smallest valid cell coordinate on any axis: the domain `[−2⁶², 2⁶²)` m divided by the
+    /// cell size (`coordinates.md` §7).
+    pub const fn cell_min(self) -> i64 {
+        -(1 << (62 - self.size_log2()))
+    }
+
+    pub const fn cell_max(self) -> i64 {
+        (1 << (62 - self.size_log2())) - 1
+    }
+
+    pub const fn parent(self) -> Option<Level> {
+        match self {
+            Level::L0 => None,
+            Level::L1 => Some(Level::L0),
+            Level::L2 => Some(Level::L1),
+            Level::L3 => Some(Level::L2),
+            Level::L4 => Some(Level::L3),
+        }
+    }
+
+    pub const fn child(self) -> Option<Level> {
+        match self {
+            Level::L0 => Some(Level::L1),
+            Level::L1 => Some(Level::L2),
+            Level::L2 => Some(Level::L3),
+            Level::L3 => Some(Level::L4),
+            Level::L4 => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Dir6 {
+    PosX,
+    NegX,
+    PosY,
+    NegY,
+    PosZ,
+    NegZ,
+}
+
+impl Dir6 {
+    pub const ALL: [Dir6; 6] = [
+        Dir6::PosX,
+        Dir6::NegX,
+        Dir6::PosY,
+        Dir6::NegY,
+        Dir6::PosZ,
+        Dir6::NegZ,
+    ];
+
+    pub const fn offset(self) -> I64Vec3 {
+        match self {
+            Dir6::PosX => I64Vec3::X,
+            Dir6::NegX => I64Vec3::NEG_X,
+            Dir6::PosY => I64Vec3::Y,
+            Dir6::NegY => I64Vec3::NEG_Y,
+            Dir6::PosZ => I64Vec3::Z,
+            Dir6::NegZ => I64Vec3::NEG_Z,
+        }
+    }
+
+    #[must_use]
+    pub const fn opposite(self) -> Dir6 {
+        match self {
+            Dir6::PosX => Dir6::NegX,
+            Dir6::NegX => Dir6::PosX,
+            Dir6::PosY => Dir6::NegY,
+            Dir6::NegY => Dir6::PosY,
+            Dir6::PosZ => Dir6::NegZ,
+            Dir6::NegZ => Dir6::PosZ,
+        }
+    }
 }
 
 /// Floor division by `2^shift`. An arithmetic right shift rounds towards −∞.
@@ -35,6 +109,13 @@ pub const fn floor_div_pow2(a: i64, shift: u32) -> i64 {
 /// Floor modulo `2^shift`, always in `[0, 2^shift)`.
 pub const fn floor_mod_pow2(a: i64, shift: u32) -> i64 {
     a & ((1 << shift) - 1)
+}
+
+/// A cell's world-space bounds: its minimum corner and its edge length.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellBounds {
+    pub min: WorldPos,
+    pub size_m: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,12 +150,189 @@ impl CellKey {
         };
         Self { level, coords }
     }
+
+    pub fn in_domain(&self) -> bool {
+        let (lo, hi) = (self.level.cell_min(), self.level.cell_max());
+        self.coords.cmpge(I64Vec3::splat(lo)).all() && self.coords.cmple(I64Vec3::splat(hi)).all()
+    }
+
+    pub fn parent(&self) -> Option<CellKey> {
+        let level = self.level.parent()?;
+        let c = self.coords;
+        Some(CellKey::new(
+            level,
+            I64Vec3::new(
+                floor_div_pow2(c.x, 3),
+                floor_div_pow2(c.y, 3),
+                floor_div_pow2(c.z, 3),
+            ),
+        ))
+    }
+
+    /// The 512 children in a fixed order: x fastest, then y, then z. `Ok(None)` at L4.
+    pub fn children(&self) -> Result<Option<impl Iterator<Item = CellKey>>, CoordError> {
+        if !self.in_domain() {
+            return Err(CoordError::OutOfDomain);
+        }
+        let Some(level) = self.level.child() else {
+            return Ok(None);
+        };
+        let base = self.coords * 8;
+        Ok(Some((0..512i64).map(move |i| {
+            CellKey::new(level, base + I64Vec3::new(i & 7, (i >> 3) & 7, i >> 6))
+        })))
+    }
+
+    pub fn neighbor(&self, dir: Dir6) -> Result<CellKey, CoordError> {
+        let d = dir.offset();
+        let add = |a: i64, b: i64| a.checked_add(b).ok_or(CoordError::OutOfDomain);
+        let n = CellKey::new(
+            self.level,
+            I64Vec3::new(
+                add(self.coords.x, d.x)?,
+                add(self.coords.y, d.y)?,
+                add(self.coords.z, d.z)?,
+            ),
+        );
+        if n.in_domain() {
+            Ok(n)
+        } else {
+            Err(CoordError::OutOfDomain)
+        }
+    }
+
+    /// Minimum corner and size (`coordinates.md` §5.1).
+    pub fn aabb_world(&self) -> Result<CellBounds, CoordError> {
+        if !self.in_domain() {
+            return Err(CoordError::OutOfDomain);
+        }
+        let k = self.level.size_log2();
+        let c = self.coords;
+        let min = if k >= SECTOR_SIZE_LOG2 {
+            WorldPos::new(c * (1 << (k - SECTOR_SIZE_LOG2)), glam::Vec3::ZERO)?
+        } else {
+            let shift = SECTOR_SIZE_LOG2 - k;
+            let sector = I64Vec3::new(
+                floor_div_pow2(c.x, shift),
+                floor_div_pow2(c.y, shift),
+                floor_div_pow2(c.z, shift),
+            );
+            let sub = I64Vec3::new(
+                floor_mod_pow2(c.x, shift),
+                floor_mod_pow2(c.y, shift),
+                floor_mod_pow2(c.z, shift),
+            );
+            WorldPos::new(sector, (sub * self.level.size_m()).as_vec3())?
+        };
+        Ok(CellBounds {
+            min,
+            size_m: self.level.size_m(),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use glam::Vec3;
+    use proptest::prelude::*;
+    use std::collections::HashSet;
+
+    /// In-domain cells: anywhere, hugging either domain edge, or near the origin.
+    fn any_cell() -> impl Strategy<Value = CellKey> {
+        (0usize..5, any::<[i64; 3]>(), 0u8..4).prop_map(|(l, raw, mode)| {
+            let level = Level::ALL[l];
+            let (lo, hi) = (level.cell_min(), level.cell_max());
+            let span = hi - lo + 1;
+            let c = raw.map(|r| match mode {
+                0 => lo + r.rem_euclid(span),
+                1 => lo + r.rem_euclid(3),
+                2 => hi - r.rem_euclid(3),
+                _ => r.rem_euclid(9) - 4,
+            });
+            CellKey::new(level, I64Vec3::from_array(c))
+        })
+    }
+
+    proptest! {
+        #[test]
+        fn children_have_this_parent(cell in any_cell()) {
+            if let Some(children) = cell.children().unwrap() {
+                let all: Vec<CellKey> = children.collect();
+                prop_assert_eq!(all.len(), 512);
+                prop_assert_eq!(all.iter().collect::<HashSet<_>>().len(), 512);
+                for child in &all {
+                    prop_assert!(child.in_domain());
+                    prop_assert_eq!(child.parent(), Some(cell));
+                }
+                prop_assert_eq!(all[0].aabb_world().unwrap().min, cell.aabb_world().unwrap().min);
+            }
+        }
+
+        #[test]
+        fn neighbor_round_trip(cell in any_cell()) {
+            for dir in Dir6::ALL {
+                match cell.neighbor(dir) {
+                    Ok(n) => prop_assert_eq!(n.neighbor(dir.opposite()), Ok(cell)),
+                    Err(e) => {
+                        prop_assert_eq!(e, CoordError::OutOfDomain);
+                        let edge = cell.coords + dir.offset();
+                        prop_assert!(
+                            edge.min_element() < cell.level.cell_min()
+                                || edge.max_element() > cell.level.cell_max()
+                        );
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn aabb_min_lies_in_the_cell(cell in any_cell()) {
+            let bounds = cell.aabb_world().unwrap();
+            prop_assert_eq!(CellKey::containing(cell.level, &bounds.min), cell);
+        }
+    }
+
+    #[test]
+    fn spec_aabb_examples() {
+        let x_of = |level, x| {
+            let b = CellKey::new(level, I64Vec3::new(x, 0, 0))
+                .aabb_world()
+                .unwrap();
+            (b.min.sector().x, b.min.local().x)
+        };
+        assert_eq!(x_of(Level::L2, -1), (-1, 512.0));
+        assert_eq!(x_of(Level::L2, 6), (3, 0.0));
+        assert_eq!(x_of(Level::L1, -1), (-4, 0.0));
+        assert_eq!(x_of(Level::L3, -1), (-1, 960.0));
+        assert_eq!(x_of(Level::L4, -3), (-1, 1000.0));
+    }
+
+    #[test]
+    fn spec_parent_examples() {
+        let p = |level, x| {
+            CellKey::new(level, I64Vec3::new(x, 0, 0))
+                .parent()
+                .unwrap()
+                .coords
+                .x
+        };
+        assert_eq!(p(Level::L4, -3), -1);
+        assert_eq!(p(Level::L3, -1), -1);
+        assert_eq!(p(Level::L2, 6), 0);
+        assert_eq!(CellKey::new(Level::L0, I64Vec3::ZERO).parent(), None);
+    }
+
+    #[test]
+    fn domain_edge_neighbor() {
+        let top = CellKey::new(Level::L0, I64Vec3::new((1 << 47) - 1, 0, 0));
+        assert!(top.in_domain());
+        assert_eq!(top.neighbor(Dir6::PosX), Err(CoordError::OutOfDomain));
+        let worst = CellKey::new(Level::L4, I64Vec3::splat(i64::MAX));
+        assert_eq!(worst.neighbor(Dir6::PosX), Err(CoordError::OutOfDomain));
+        assert!(worst.children().is_err());
+        assert!(worst.aabb_world().is_err());
+    }
 
     /// Reference: floor(absolute / size) in i128, from positions on a 1/16 m grid.
     fn reference(level: Level, sector: I64Vec3, local_q: [i64; 3]) -> I64Vec3 {

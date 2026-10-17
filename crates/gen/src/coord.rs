@@ -5,8 +5,10 @@ use glam::{DVec3, I64Vec3, Vec3};
 pub const SECTOR_SIZE: f32 = 1024.0;
 pub const SECTOR_SIZE_LOG2: u32 = 10;
 
-/// Largest valid `|sector|` on any axis (`coordinates.md` §7).
-pub const MAX_SECTOR: i64 = 1 << 52;
+/// Valid sectors on every axis: `[SECTOR_MIN, SECTOR_MAX]`, i.e. `[−2⁶², 2⁶²)` metres
+/// (`coordinates.md` §7). Half-open so cells of every level tile it exactly.
+pub const SECTOR_MIN: i64 = -(1 << 52);
+pub const SECTOR_MAX: i64 = (1 << 52) - 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CoordError {
@@ -17,14 +19,13 @@ pub enum CoordError {
 }
 
 pub fn sector_in_domain(sector: I64Vec3) -> bool {
-    sector.cmpge(I64Vec3::splat(-MAX_SECTOR)).all()
-        && sector.cmple(I64Vec3::splat(MAX_SECTOR)).all()
+    sector.cmpge(I64Vec3::splat(SECTOR_MIN)).all() && sector.cmple(I64Vec3::splat(SECTOR_MAX)).all()
 }
 
 /// A position as an integer sector plus an `f32` offset inside it.
 ///
 /// Invariant: every component of `local` is finite and in `[0, SECTOR_SIZE)`, and `sector` is
-/// within `±MAX_SECTOR`. Only [`WorldPos::new`] and the methods below construct one.
+/// within `[SECTOR_MIN, SECTOR_MAX]`. Only [`WorldPos::new`] and the methods below construct one.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WorldPos {
     sector: I64Vec3,
@@ -171,9 +172,9 @@ mod tests {
 
     #[test]
     fn delta_at_domain_extremes_is_exact() {
-        let a = wp([MAX_SECTOR, 0, 0], [0.0; 3]);
-        let b = wp([-MAX_SECTOR, 0, 0], [0.0; 3]);
-        assert_eq!(a.delta(&b).x, 2.0f64.powi(53) * 1024.0);
+        let a = wp([SECTOR_MAX, 0, 0], [0.0; 3]);
+        let b = wp([SECTOR_MIN, 0, 0], [0.0; 3]);
+        assert_eq!(a.delta(&b).x, (2.0f64.powi(53) - 1.0) * 1024.0);
     }
 
     #[test]
@@ -197,10 +198,14 @@ mod tests {
 
     #[test]
     fn domain_edges() {
-        let edge = wp([MAX_SECTOR, 0, 0], [1023.5, 0.0, 0.0]);
+        let edge = wp([SECTOR_MAX, 0, 0], [1023.5, 0.0, 0.0]);
         assert_eq!(edge.offset(Vec3::X), Err(CoordError::OutOfDomain));
-        let low = WorldPos::new(I64Vec3::new(-MAX_SECTOR, 0, 0), Vec3::new(-0.5, 0.0, 0.0));
+        let low = WorldPos::new(I64Vec3::new(SECTOR_MIN, 0, 0), Vec3::new(-0.5, 0.0, 0.0));
         assert_eq!(low, Err(CoordError::OutOfDomain));
-        assert!(WorldPos::new(I64Vec3::new(-MAX_SECTOR, 0, 0), Vec3::ZERO).is_ok());
+        assert!(WorldPos::new(I64Vec3::new(SECTOR_MIN, 0, 0), Vec3::ZERO).is_ok());
+        assert_eq!(
+            WorldPos::new(I64Vec3::new(SECTOR_MAX + 1, 0, 0), Vec3::ZERO),
+            Err(CoordError::OutOfDomain)
+        );
     }
 }

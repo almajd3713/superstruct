@@ -157,10 +157,12 @@ Precision: at 50 km from the render origin an `f32` steps in 3.9 mm, which is fi
 
 ## 7. Overflow policy at extreme coordinates
 
-**Domain.** A valid sector satisfies `|sector.c| <= MAX_SECTOR = 2⁵²` on every axis.
+**Domain.** A valid sector satisfies `SECTOR_MIN = −2⁵² ≤ sector.c ≤ SECTOR_MAX = 2⁵² − 1` on every axis. That is the half-open range [−2⁶², 2⁶²) in metres.
+
+The range is half-open so that the cells of **every level tile it exactly**. At a level with cell size 2^k m, the valid cell coordinates are `[−2^(62−k), 2^(62−k) − 1]`. Every valid position therefore lies in a valid cell, and the parent and all 512 children of a valid cell are valid. Only `neighbor` can step out of the domain.
 
 - That is ±4.6×10¹⁸ m (about 487 light years) per axis. Nihei's City is about 1.6×10¹² m across. Walking at 4 m/s, reaching the edge takes about 3.7×10¹⁰ years, and at 1 km/s noclip about 1.5×10⁸ years. The world is unbounded in practice.
-- The bound leaves headroom. An L4 coordinate is `sector × 128 + 127`, so |c| < 2⁵⁹. One more ×8 subdivision stays under 2⁶², neighbours ±1 cannot overflow, and the sector difference of two valid positions (|Δ| ≤ 2⁵³) fits in `i64` and converts to `f64` exactly.
+- The bound leaves headroom. L4 coordinates lie in [−2⁵⁹, 2⁵⁹). One more ×8 subdivision stays under 2⁶², neighbours ±1 cannot overflow, and the sector difference of two valid positions (|Δ| ≤ 2⁵³) fits in `i64` and converts to `f64` exactly.
 
 **Rules.**
 
@@ -168,12 +170,13 @@ Precision: at 50 km from the render origin an `f32` steps in 3.9 mm, which is fi
 2. `wrapping_*` operations are allowed only inside the hash and RNG (`hashing.md`), where wrap-around is part of the algorithm.
 3. Entry points that accept external coordinates (teleport commands, save files, `WorldPos::new`) validate them and return `Result`. `normalize` and `offset` return `Result` because a carry can step out of the domain.
 4. `delta` between two valid positions cannot overflow, so it is infallible.
-5. World → cell for a valid `WorldPos` cannot overflow, so it is infallible. `CellKey::neighbor` and `children` are checked against the level's domain: `|c| <= MAX_SECTOR × n` for k < 10, or `MAX_SECTOR div m` for k ≥ 10.
+5. World → cell for a valid `WorldPos` cannot overflow, so it is infallible. `CellKey::neighbor` and `children` are checked against the level's domain `[−2^(62−k), 2^(62−k) − 1]`. `parent` and `children` cannot leave it.
 6. **Gameplay at the edge:** cells outside the domain are never generated or streamed. The controller treats the domain boundary as a solid wall. Nobody will reach it, but the behaviour is defined.
 
 **Examples.**
 
-- `WorldPos::new((2⁵², 0, 0), (1023.5, 0, 0))` is valid (sector 2⁵², local 1023.5).
-- `.offset((1.0, 0, 0))` carries to sector 2⁵² + 1 and returns `Err(OutOfDomain)`.
+- `WorldPos::new((2⁵² − 1, 0, 0), (1023.5, 0, 0))` is valid (sector 2⁵² − 1, local 1023.5).
+- `.offset((1.0, 0, 0))` carries to sector 2⁵² and returns `Err(OutOfDomain)`.
+- The L0 cell `2⁴⁷ − 1` is valid, but its `neighbor(+X)` (`2⁴⁷`) returns `Err(OutOfDomain)`.
 - `WorldPos::new((−2⁶², 0, 0), …)` returns `Err(OutOfDomain)`. This is the ±2⁶² test in P0.3.6: no panic, no wrapped value.
 - At sector −2⁵², local (−0.5, …), normalizing would give sector −2⁵² − 1, so it returns `Err(OutOfDomain)`.
