@@ -144,7 +144,15 @@ Each cell in `[a, b]` emits the trunk as a vertical `Cylinder` clipped to its ow
   3. Otherwise take a 3-segment route through the 64 m band along the faces, which never contains a trunk.
 - A route must stay clear of the trunk footprint. If none does, the trunk segment is omitted in this cell (`ports.md` Lemma A.3). Routes may pass over holes, since bridging voids is their point.
 - **Trunk landing.** In a cell where the trunk crosses no deck, the first bridge, by port id, gets a landing that touches the trunk. That keeps every trunk reachable.
-- Width 8–32 m, step 4 m. Thickness 4 m. Kind `Bridge`, material `METAL`.
+- **Routes as implemented** (`worldgen::l1_bridge`, P0.7.5). Each route is a chain of boxes at the port's floor, in a frame where `n` runs inward from the port's face and `t` along it. A strip that must meet the core is centred on the core's extent.
+  1. **Normal, then turn.** If the port's `t`-range overlaps the core's, one straight box runs to the core's near face. Otherwise one box runs in to a strip aligned with the core, and a second runs along `t` to the core.
+  2. **Along, then in.** One box runs along the face within `n ∈ [0, w)` to a strip aligned with the core in `t`, and a second runs in to the core.
+  3. **Through a side band.** One box runs along the face to a strip 16 m inside an adjacent face (left side first, then right). A second runs inward along that side band, and a third runs across to the core.
+
+  The first route clear of the trunk (circle distance ≥ r) wins. If none is clear, the trunk piece is omitted and route 1 is used.
+- **Trunk landing:** an 8 m wide L from the core to the trunk's axis. It leaves the core along an axis on which the trunk lies wholly beside the core, so it never crosses the core.
+- **Children:** each bridge box becomes a `KeepOut` from its underside to 4 m above its floor.
+- Width 8–32 m, step 4 m (the port width). Thickness 4 m. Kind `Bridge`, material `METAL`. Only bridges at least 16 m wide are `FAR_VISIBLE`.
 - Bridges hang from nothing. At megastructure scale an 8–32 m beam is self-supporting by convention. Supports are dressing, added later.
 
 ### 4.6 Giant cavity

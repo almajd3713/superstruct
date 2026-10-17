@@ -116,11 +116,12 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.7.2** Decks: horizontal slabs from layer keys or ports, with thickness and extent. *Done when:* decks continue across faces exactly as the ports specify (test). (2026-10-17)
 - [x] **P0.7.3** Shafts, chasms and voids, including giant-cavity rare events that carve out L1 content. *Done when:* a cavity region contains no L1 solids (test). (2026-10-17)
 - [x] **P0.7.4** L1 face ports, including the backbone lattice. *Done when:* backbone faces always carry at least one walkable port (proptest). (2026-10-17)
-- [ ] **P0.7.5** Bridges joining trunks and decks along L1 ports. *Done when:* every L1 port has a bridge or deck reaching it inside the cell (test).
+- [x] **P0.7.5** Bridges joining trunks and decks along L1 ports. *Done when:* every L1 port has a bridge or deck reaching it inside the cell (test). (2026-10-17)
 - [ ] **P0.7.6** `l1_far_primitives(cell)`: the reduced set used by the far LOD band. *Done when:* it is a strict subset of the full L1 output (test).
 - [ ] **P0.7.7** Lift core per L1 column (`levels.md` §4.0.1): footprint from `ColumnKey`, stops at every deck top and bridge height, absent in cavity cells. *Done when:* the core is identical from every cell in a column (test), and every deck and bridge in a cell has a stop (test).
 - [ ] **P0.7.8** Giant-cavity rim bites (`levels.md` §4.6): tile-grid bites with the connectivity shrink loop. The blob itself (voxelization and pocket filling, `worldgen::cavity`) landed in P0.7.3. *Done when:* every rim cell's deck still reaches all its port-carrying faces and core stops (test), and the no-pocket test still passes over 10⁴ L0 cells.
 - [ ] **P0.7.9** Infinite-staircase footprint (`regimes.md` §5.2): `l1::stair_footprint` already places it (P0.7.1, since trunks avoid it). Make shafts and chasms avoid it, and emit it as a `KeepOut` until P5.2.3. *Done when:* the `KeepOut` is identical from every L1 cell in the column, and no L1 solid intersects it (tests).
+- [ ] **P0.7.10** L1 generation cost: `l1_cell` rebuilds the L0 cavity mask about 13 times (once per `is_cavity` call). Compute it once per L0 cell and pass it through, behind an L1 context struct. *Done when:* `l1_cell` output is unchanged (golden), and a criterion bench shows the speed-up.
 
 ### P0.8 L2 districts
 - [ ] **P0.8.1** An L1 context query for an L2 cell: which volume is structure, void, deck surface or trunk interior. *Done when:* the query agrees with the L1 primitives at 10⁴ random points (test).

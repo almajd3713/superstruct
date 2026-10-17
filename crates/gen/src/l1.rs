@@ -9,6 +9,8 @@ use crate::cavity::is_cavity;
 use crate::cell::{Axis, CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::hash::hash;
 use crate::key::{ColumnKey, ColumnSpanKey, LayerKey};
+use crate::l1_bridge::bridges;
+use crate::l1_port::PORT_CLEARANCE;
 use crate::prim::{
     CellMeta, CellOutput, ChildConstraint, FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb,
     QVec3, Shape,
@@ -45,7 +47,7 @@ impl Rect {
     }
 
     /// Squared distance from the point to the rectangle (0 inside).
-    fn dist2_point(&self, x: Q, z: Q) -> i64 {
+    pub(crate) fn dist2_point(&self, x: Q, z: Q) -> i64 {
         let dx = i64::from((self.x0 - x).max(x - self.x1).max(0));
         let dz = i64::from((self.z0 - z).max(z - self.z1).max(0));
         dx * dx + dz * dz
@@ -309,8 +311,9 @@ pub fn chasm(seed: WorldSeed, cell: CellKey) -> Option<Rect> {
     clear.then_some(r)
 }
 
-/// Everything L1 emits for one cell so far: face ports, trunk piece, deck pieces, and `KeepOut`
-/// for the shaft and chasm. Cavity cells emit nothing. Core and bridges join in later items.
+/// Everything L1 emits for one cell so far: face ports, trunk piece, deck pieces, half-bridges,
+/// and `KeepOut` for bridges, the shaft and the chasm. Cavity cells emit nothing. The core
+/// joins in P0.7.7.
 pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     let mut out = CellOutput {
         key: cell,
@@ -324,12 +327,26 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     }
     out.ports = crate::l1_port::cell_ports(seed, cell);
     let span = ColumnSpanKey::of(cell);
-    if let Some(t) = trunk(seed, span) {
-        out.primitives.extend(trunk_piece(&t, cell));
-    }
     let ds = decks(seed, LayerKey::of(cell, DECK_REGION_LOG2));
+    let core = core_footprint(seed, ColumnKey::of(cell));
+    let t = trunk(seed, span).filter(|t| trunk_piece(t, cell).is_some());
+    let br = bridges(cell, &out.ports, core, t.as_ref(), !ds.is_empty());
+    if br.trunk_kept {
+        out.primitives.extend(t.and_then(|t| trunk_piece(&t, cell)));
+    }
     out.primitives
         .extend(deck_pieces(&ds, &deck_holes(seed, cell)));
+    // Children keep bridge decks and the opening above them clear.
+    out.child_constraints.extend(br.primitives.iter().map(|p| {
+        let bb = p.aabb();
+        ChildConstraint::KeepOut {
+            aabb: QAabb::new(
+                bb.min,
+                QVec3::new(bb.max.x, bb.max.y + PORT_CLEARANCE, bb.max.z),
+            ),
+        }
+    }));
+    out.primitives.extend(br.primitives);
     let full_height = |r: Rect| ChildConstraint::KeepOut {
         aabb: QAabb::new(QVec3::new(r.x0, 0, r.z0), QVec3::new(r.x1, CELL, r.z1)),
     };
@@ -845,12 +862,14 @@ mod tests {
                         assert!(apart, "{bb:?} in hole {h:?}");
                     }
                 }
-                let keepouts = out
+                let full_height = out
                     .child_constraints
                     .iter()
-                    .filter(|c| matches!(c, ChildConstraint::KeepOut { .. }))
+                    .filter(|c| {
+                        matches!(c, ChildConstraint::KeepOut { aabb } if aabb.min.y == 0 && aabb.max.y == CELL)
+                    })
                     .count();
-                assert_eq!(keepouts, holes.len() - 1, "one per shaft and chasm");
+                assert_eq!(full_height, holes.len() - 1, "one per shaft and chasm");
             }
         }
     }
@@ -876,15 +895,179 @@ mod tests {
                             l0 * 8
                                 + I64Vec3::from_array([x, y, z].map(|v| i64::try_from(v).unwrap())),
                         );
-                        let out = l1_cell(seed, cell);
                         if mask.get([x, y, z]) {
                             checked += 1;
+                            let out = l1_cell(seed, cell);
                             assert!(out.primitives.is_empty() && out.child_constraints.is_empty());
+                            assert!(out.ports.is_empty());
                         }
                     }
                 }
             }
         }
         assert!(checked > 500, "only {checked} cavity cells checked");
+    }
+
+    /// Cells of `columns()` in a few layers, skipping none.
+    fn sample_cells() -> impl Iterator<Item = CellKey> {
+        (-15..15).flat_map(|x| {
+            [-4, 0, 3]
+                .into_iter()
+                .flat_map(move |y| [-6, 1].map(|z| l1(x, y, z)))
+        })
+    }
+
+    /// Indices of the rects reachable from `start` through touching or overlapping rects.
+    fn reachable(rects: &[Rect], start: usize) -> Vec<bool> {
+        let touch =
+            |a: &Rect, b: &Rect| a.x0 <= b.x1 && b.x0 <= a.x1 && a.z0 <= b.z1 && b.z0 <= a.z1;
+        let mut seen = vec![false; rects.len()];
+        let mut stack = vec![start];
+        seen[start] = true;
+        while let Some(i) = stack.pop() {
+            for j in 0..rects.len() {
+                if !seen[j] && touch(&rects[i], &rects[j]) {
+                    seen[j] = true;
+                    stack.push(j);
+                }
+            }
+        }
+        seen
+    }
+
+    /// The face-plane span `(u0, u1)` a box covers on the cell's face `face`, if it touches it.
+    fn face_span(cell: CellKey, face: crate::cell::FaceKey, bb: &QAabb) -> Option<(Q, Q)> {
+        let positive = face.owner == cell;
+        match face.axis {
+            Axis::X => {
+                let at = if positive {
+                    bb.max.x == CELL
+                } else {
+                    bb.min.x == 0
+                };
+                at.then_some((bb.min.z, bb.max.z))
+            }
+            Axis::Z => {
+                let at = if positive {
+                    bb.max.z == CELL
+                } else {
+                    bb.min.z == 0
+                };
+                at.then_some((bb.min.x, bb.max.x))
+            }
+            Axis::Y => None,
+        }
+    }
+
+    /// P0.7.5: every L1 port has a deck or a bridge reaching it inside the cell, and every
+    /// bridge reaches the core at its own height, clear of a kept trunk.
+    #[test]
+    fn every_port_is_reached() {
+        use crate::port::PortKind;
+        let seed = WorldSeed(0xB41D);
+        let (mut bridges_checked, mut omitted) = (0, 0);
+        for cell in sample_cells() {
+            let out = l1_cell(seed, cell);
+            let core = core_footprint(seed, ColumnKey::of(cell));
+            let kept_trunk = out.primitives.iter().find(|p| p.kind == FeatureKind::TRUNK);
+            let t = trunk(seed, ColumnSpanKey::of(cell)).filter(|t| trunk_piece(t, cell).is_some());
+            omitted += u32::from(t.is_some() && kept_trunk.is_none());
+            for port in &out.ports {
+                let kind = match port.kind {
+                    PortKind::DeckContinuation => FeatureKind::DECK,
+                    PortKind::BridgeEnd => FeatureKind::BRIDGE,
+                    _ => continue,
+                };
+                let at_floor: Vec<QAabb> = out
+                    .primitives
+                    .iter()
+                    .filter(|p| p.kind == kind)
+                    .map(Primitive::aabb)
+                    .filter(|bb| bb.max.y == port.rect.v0)
+                    .collect();
+                let mut covered: Vec<(Q, Q)> = at_floor
+                    .iter()
+                    .filter_map(|bb| face_span(cell, port.face, bb))
+                    .collect();
+                covered.sort_unstable();
+                let mut reach = port.rect.u0;
+                for (a, b) in covered {
+                    if a <= reach {
+                        reach = reach.max(b);
+                    }
+                }
+                assert!(reach >= port.rect.u1, "{cell:?} port {port:?} not reached");
+
+                if kind == FeatureKind::BRIDGE {
+                    bridges_checked += 1;
+                    let rects: Vec<Rect> = at_floor
+                        .iter()
+                        .map(|bb| Rect {
+                            x0: bb.min.x,
+                            z0: bb.min.z,
+                            x1: bb.max.x,
+                            z1: bb.max.z,
+                        })
+                        .collect();
+                    let start = at_floor
+                        .iter()
+                        .position(|bb| face_span(cell, port.face, bb).is_some())
+                        .unwrap();
+                    let seen = reachable(&rects, start);
+                    let to_core = rects
+                        .iter()
+                        .zip(&seen)
+                        .any(|(r, &s)| s && r.dist2_rect(&core) == 0);
+                    assert!(to_core, "{cell:?} bridge from {port:?} misses the core");
+                    for r in &rects {
+                        let inside =
+                            r.x0 < core.x1 && core.x0 < r.x1 && r.z0 < core.z1 && core.z0 < r.z1;
+                        assert!(!inside, "bridge enters the core");
+                    }
+                }
+            }
+        }
+        assert!(bridges_checked > 200, "{bridges_checked}");
+        assert!(omitted * 20 < bridges_checked, "{omitted} trunks omitted");
+    }
+
+    /// A kept trunk is never crossed by a bridge route, apart from the landing.
+    #[test]
+    fn bridges_clear_kept_trunks() {
+        let seed = WorldSeed(0xB41D);
+        for cell in sample_cells() {
+            let out = l1_cell(seed, cell);
+            let Some(t) = trunk(seed, ColumnSpanKey::of(cell)) else {
+                continue;
+            };
+            if !out.primitives.iter().any(|p| p.kind == FeatureKind::TRUNK) {
+                continue;
+            }
+            let has_deck = out.primitives.iter().any(|p| p.kind == FeatureKind::DECK);
+            let r2 = i64::from(t.radius) * i64::from(t.radius);
+            let crossing = out
+                .primitives
+                .iter()
+                .filter(|p| p.kind == FeatureKind::BRIDGE)
+                .map(Primitive::aabb)
+                .filter(|bb| {
+                    let r = Rect {
+                        x0: bb.min.x,
+                        z0: bb.min.z,
+                        x1: bb.max.x,
+                        z1: bb.max.z,
+                    };
+                    r.dist2_point(t.centre_x, t.centre_z) < r2
+                })
+                .count();
+            if has_deck {
+                assert_eq!(crossing, 0, "{cell:?}");
+            } else {
+                assert!(
+                    crossing >= 1,
+                    "{cell:?}: trunk without deck needs a landing"
+                );
+            }
+        }
     }
 }
