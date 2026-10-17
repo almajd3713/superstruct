@@ -198,8 +198,10 @@ impl App {
         let key = std::env::var("SUPERSTRUCT_CELL")
             .ok()
             .and_then(|v| parse_triple(&v))
-            .map(|[x, y, z]| CellKey::new(Level::L2, I64Vec3::new(x, y, z)))
-            .unwrap_or_else(|| busiest_l2_cell(WorldSeed(self.settings.seed), 4));
+            .map_or_else(
+                || busiest_l2_cell(WorldSeed(self.settings.seed), 4),
+                |[x, y, z]| CellKey::new(Level::L2, I64Vec3::new(x, y, z)),
+            );
         match key
             .aabb_world()
             .and_then(|b| b.min.offset(Vec3::new(-120.0, 420.0, -120.0)))
