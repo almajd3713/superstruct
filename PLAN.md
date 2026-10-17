@@ -278,6 +278,19 @@ tools/
 
 CPU main thread: at most 4 ms per frame. Generation and meshing run on worker threads. Uploads are capped at a few MB per frame through a staging belt.
 
+#### Generation cost (P0.11.4)
+
+`cargo bench -p gen --bench cells`, single thread, release build, recorded 2026-10-17 on WSL2 (**not a native Windows run, so provisional**; CLAUDE.md §7 requires Windows numbers, tracked as P0.11.4b).
+
+| Measurement | Result | Budget |
+|---|---|---|
+| L1 cell, mean over 32 cells that emit geometry | 17 µs | 5 ms |
+| L2 cell, mean over 2048 children of 4 L1 parents (most are empty air), L1 parent cached | 16 µs | 2 ms |
+| L2 cell, busy cells only (decks, skywalks, masses, railings), L1 parent cached | 97 µs | 2 ms |
+| L2 cell, busy, with its L1 parent generated per cell | 109 µs | 2 ms |
+
+All are far inside budget, so L3 and meshing can spend the headroom. The L2 numbers include ports, skywalks, lift shafts, sanctuary, vista, masses and railings. Connectivity validation of a cell (`check_cell`) is not part of generation.
+
 ### 11.5 Development environment caveat
 
 Development happens in WSL2. A wgpu window there may fall back to software rendering or behave differently from native Windows. Plan to:
