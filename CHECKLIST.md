@@ -98,6 +98,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P0.4.2** Implement the in-house RNG with `next_u32`, `next_f32` (in [0,1)), `range_i32`, `chance(p)` and `pick_weighted`. *Done when:* pinned sequence tests pass, plus a basic uniformity test (chi-square over 10⁶ samples).
 - [ ] **P0.4.3** Add the `worldgen::salt` registry module with a test that asserts all salts are unique. *Done when:* the test passes.
 - [ ] **P0.4.4** Add `GEN_VERSION` and `WorldSeed` types, with the seed parsed from a string or number. *Done when:* the same string always gives the same seed (tested).
+- [ ] **P0.4.5** Hash quality test: single-bit avalanche over every input field (each output bit flips with p ≈ 0.5 within a stated tolerance), per `hashing.md` §2. *Done when:* the test passes.
 
 ### P0.5 Primitives and cell output
 - [ ] **P0.5.1** Primitive structs per `primitives.md`, with an AABB per primitive. *Done when:* AABB tests pass for each type.
