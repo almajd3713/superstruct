@@ -6,6 +6,7 @@ use glam::{I64Vec3, Vec3};
 use winit::event::WindowEvent;
 use winit::window::Window;
 
+use crate::debugcmd::Command;
 use crate::gpu_timer::{GpuTimer, Zone};
 use crate::streamer::StreamStats;
 
@@ -18,6 +19,7 @@ pub struct OverlayInfo<'a> {
     pub seed: u64,
     pub adapter: &'a str,
     pub vsync: &'a str,
+    pub mode: &'a str,
     pub stream: StreamStats,
     pub gpu_bytes: u64,
     pub shader_error: Option<&'a str>,
@@ -31,6 +33,10 @@ pub struct Overlay {
     pub visible: bool,
     frame_ms: VecDeque<f32>,
     prepared: Option<Prepared>,
+    teleport_text: String,
+    /// Debug commands the user asked for this frame; the app drains them.
+    pub requests: Vec<Command>,
+    pub status: String,
 }
 
 struct Prepared {
@@ -59,6 +65,9 @@ impl Overlay {
             visible: false,
             frame_ms: VecDeque::with_capacity(HISTORY),
             prepared: None,
+            teleport_text: String::new(),
+            requests: Vec::new(),
+            status: String::new(),
         }
     }
 
@@ -90,7 +99,10 @@ impl Overlay {
         }
         let input = self.state.take_egui_input(window);
         let frame_ms = &self.frame_ms;
-        let mut output = self.ctx.run_ui(input, |ui| draw(ui, frame_ms, info));
+        let (text, requests, status) = (&mut self.teleport_text, &mut self.requests, &self.status);
+        let mut output = self.ctx.run_ui(input, |ui| {
+            draw(ui, frame_ms, info, (text, requests, status));
+        });
         self.state
             .handle_platform_output(window, output.platform_output);
         let pixels_per_point = output.pixels_per_point;
@@ -156,7 +168,12 @@ impl Overlay {
     }
 }
 
-fn draw(ui: &mut egui::Ui, frame_ms: &VecDeque<f32>, info: &OverlayInfo<'_>) {
+fn draw(
+    ui: &mut egui::Ui,
+    frame_ms: &VecDeque<f32>,
+    info: &OverlayInfo<'_>,
+    (text, requests, status): (&mut String, &mut Vec<Command>, &str),
+) {
     egui::Window::new("debug")
         .title_bar(false)
         .resizable(false)
@@ -171,6 +188,8 @@ fn draw(ui: &mut egui::Ui, frame_ms: &VecDeque<f32>, info: &OverlayInfo<'_>) {
             frame_graph(ui, frame_ms);
             ui.monospace(format!("{} | vsync {}", info.adapter, info.vsync));
             ui.monospace(format!("seed {}", info.seed));
+            ui.monospace(info.mode);
+            debug_commands(ui, text, requests, status);
             stream_lines(ui, &info.stream, info.gpu_bytes);
             ui.monospace(format!(
                 "sector {} {} {}",
@@ -250,4 +269,30 @@ fn stream_lines(ui: &mut egui::Ui, s: &StreamStats, gpu_bytes: u64) {
         "evicted {} | rejected {} | over budget {}",
         s.evictions, s.rejected, s.over_budget_frames
     ));
+}
+
+/// Teleport box and buttons. Needs the cursor released (Esc) to click or type; F5 and F6 work
+/// without it.
+fn debug_commands(ui: &mut egui::Ui, text: &mut String, requests: &mut Vec<Command>, status: &str) {
+    ui.separator();
+    let field = ui.add(
+        egui::TextEdit::singleline(text)
+            .hint_text("sx sy sz [lx ly lz]")
+            .desired_width(220.0),
+    );
+    let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    ui.horizontal(|ui| {
+        if ui.button("go").clicked() || enter {
+            requests.push(Command::Teleport(text.clone()));
+        }
+        if ui.button("port (F5)").clicked() {
+            requests.push(Command::NearestPort);
+        }
+        if ui.button("sanctuary (F6)").clicked() {
+            requests.push(Command::Sanctuary { pick: u64::MAX });
+        }
+    });
+    if !status.is_empty() {
+        ui.monospace(status);
+    }
 }

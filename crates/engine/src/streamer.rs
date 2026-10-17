@@ -7,9 +7,10 @@ use glam::Vec3;
 use worldgen::cell::{CellKey, Level};
 use worldgen::coord::WorldPos;
 
+use crate::collision::{CollisionChunk, CollisionWorld};
 use crate::meshpool::{ChunkMesh, MeshPool, PoolStats};
 use crate::renderer::{ChunkHandle, Renderer};
-use crate::stream::{ChunkId, StreamConfig, Wanted, desired_set};
+use crate::stream::{ChunkId, Detail, StreamConfig, Wanted, desired_set};
 use crate::vertex::Vertex;
 use crate::zone;
 
@@ -103,6 +104,7 @@ pub struct Streamer {
     resident_bytes: u64,
     stats: StreamStats,
     scratch: Vec<Wanted>,
+    collision: CollisionWorld,
 }
 
 impl Streamer {
@@ -120,6 +122,7 @@ impl Streamer {
             resident_bytes: 0,
             stats: StreamStats::default(),
             scratch: Vec::new(),
+            collision: CollisionWorld::default(),
         }
     }
 
@@ -137,6 +140,11 @@ impl Streamer {
             resident_bytes: self.resident_bytes,
             ..self.stats
         }
+    }
+
+    /// Collision data for every resident full-detail chunk.
+    pub fn collision(&self) -> &CollisionWorld {
+        &self.collision
     }
 
     pub fn is_resident(&self, id: &ChunkId) -> bool {
@@ -220,6 +228,13 @@ impl Streamer {
                 break;
             };
             let (handle, actual) = sink.upload(&chunk);
+            if chunk.id.detail == Detail::Full {
+                let size = chunk.id.key.level.size_m() as f32;
+                self.collision.insert(
+                    chunk.id,
+                    CollisionChunk::new(chunk.origin, size, &chunk.prims),
+                );
+            }
             used += bytes;
             self.stats.uploads_this_frame += 1;
             self.stats.upload_bytes_this_frame = used;
@@ -277,6 +292,7 @@ impl Streamer {
             }
             if let Some(r) = self.resident.remove(&id) {
                 sink.remove(r.handle);
+                self.collision.remove(&id);
                 self.resident_bytes -= r.bytes;
                 self.stats.evictions += 1;
             }

@@ -29,7 +29,8 @@ pub struct ChunkMesh {
     /// World position of the cell's minimum corner; vertices are relative to it.
     pub origin: WorldPos,
     pub mesh: Mesh,
-    pub primitives: usize,
+    /// Kept for collision; the streamer takes it on upload.
+    pub prims: Vec<Primitive>,
     pub gen_ms: f32,
     pub mesh_ms: f32,
 }
@@ -262,7 +263,7 @@ fn build(seed: WorldSeed, cache: &L1Cache, id: ChunkId, stale: &AtomicBool) -> O
         id,
         origin,
         mesh,
-        primitives: prims.len(),
+        prims,
         gen_ms: (t1 - t0).as_secs_f32() * 1000.0,
         mesh_ms: (t2 - t1).as_secs_f32() * 1000.0,
     }))

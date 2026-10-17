@@ -20,6 +20,11 @@ pub enum Action {
     Screenshot,
     ToggleOverlay,
     ToggleDebugLines,
+    ToggleFly,
+    FlyFaster,
+    FlySlower,
+    TeleportPort,
+    TeleportSanctuary,
 }
 
 /// A physical key or mouse button.
@@ -52,6 +57,11 @@ impl Default for Bindings {
             (K::F12, A::Screenshot),
             (K::F1, A::ToggleOverlay),
             (K::F3, A::ToggleDebugLines),
+            (K::F4, A::ToggleFly),
+            (K::Equal, A::FlyFaster),
+            (K::Minus, A::FlySlower),
+            (K::F5, A::TeleportPort),
+            (K::F6, A::TeleportSanctuary),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),

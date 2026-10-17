@@ -19,6 +19,8 @@ use worldgen::seed::WorldSeed;
 
 use crate::camera::Camera;
 use crate::cellscene::busiest_l2_cell;
+use crate::controller::{Controller, MoveInput};
+use crate::debugcmd::Command;
 use crate::gpu::{Gpu, GpuError};
 use crate::gpu_timer::GpuTimer;
 use crate::input::{Action, Bindings, InputState};
@@ -54,12 +56,20 @@ struct Running {
     shader_watcher: ShaderWatcher,
 }
 
+#[allow(clippy::struct_excessive_bools)] // independent debug and input flags
 struct App {
     title: String,
     settings: Settings,
     running: Option<Running>,
     failure: Option<AppError>,
     streamer: Streamer,
+    walker: Controller,
+    debug_tx: crossbeam_channel::Sender<crate::debugcmd::Outcome>,
+    debug_rx: crossbeam_channel::Receiver<crate::debugcmd::Outcome>,
+    sanctuary_pick: u64,
+    fly_mode: bool,
+    /// Noclip speed in m/s, 1 to 1000.
+    fly_speed: f32,
     debug_boxes: bool,
     box_scratch: Vec<DebugBox>,
     input: InputState,
@@ -94,6 +104,9 @@ impl App {
         let gpu = Gpu::new(&window, s.vsync)?;
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
         self.place_camera();
+        if !self.fly_mode {
+            self.walker.set_eye(self.camera.pos);
+        }
         if cfg!(debug_assertions) {
             // Errors are logged and kept for the overlay; the embedded pipelines stay in use.
             let _ = renderer.reload_shaders(&gpu.device, &ShaderSources::load());
@@ -116,24 +129,82 @@ impl App {
         })
     }
 
-    /// Debug free-fly until the walking controller exists in `game`.
-    fn fly(&mut self, dt: f32) {
-        if !self.cursor_grabbed {
-            return;
-        }
+    /// Moves the player by one fixed step: noclip fly, or the walking controller.
+    fn move_player(&mut self, dt: f32) {
+        // Without the cursor grabbed there is no input, but gravity still applies when walking.
+        let grabbed = self.cursor_grabbed;
         let axis = |pos: Action, neg: Action| {
-            f32::from(self.input.held(pos)) - f32::from(self.input.held(neg))
+            f32::from(grabbed && self.input.held(pos)) - f32::from(grabbed && self.input.held(neg))
         };
-        let dir = self.camera.forward_flat() * axis(Action::MoveForward, Action::MoveBack)
-            + self.camera.right_flat() * axis(Action::MoveRight, Action::MoveLeft)
-            + Vec3::Y * axis(Action::MoveUp, Action::MoveDown);
-        let speed = if self.input.held(Action::Sprint) {
-            20.0
+        let flat = self.camera.forward_flat() * axis(Action::MoveForward, Action::MoveBack)
+            + self.camera.right_flat() * axis(Action::MoveRight, Action::MoveLeft);
+        if self.fly_mode {
+            let dir = flat + Vec3::Y * axis(Action::MoveUp, Action::MoveDown);
+            let boost = if grabbed && self.input.held(Action::Sprint) {
+                4.0
+            } else {
+                1.0
+            };
+            let speed = self.fly_speed * boost;
+            if let Ok(p) = self.camera.pos.offset(dir.normalize_or_zero() * speed * dt) {
+                self.camera.pos = p;
+            }
         } else {
-            5.0
-        };
-        if let Ok(p) = self.camera.pos.offset(dir.normalize_or_zero() * speed * dt) {
-            self.camera.pos = p;
+            let input = MoveInput {
+                wish: flat.normalize_or_zero(),
+                run: grabbed && self.input.held(Action::Sprint),
+            };
+            self.walker.step(dt, input, self.streamer.collision());
+            self.camera.pos = self.walker.eye();
+        }
+    }
+
+    /// Starts requested debug commands (overlay buttons and F5/F6) and applies finished ones.
+    fn run_debug_commands(&mut self) {
+        let mut cmds = Vec::new();
+        if self.input.pressed(Action::TeleportPort) {
+            cmds.push(Command::NearestPort);
+        }
+        if self.input.pressed(Action::TeleportSanctuary) {
+            cmds.push(Command::Sanctuary { pick: u64::MAX });
+        }
+        if let Some(running) = &mut self.running {
+            cmds.append(&mut running.overlay.requests);
+        }
+        for cmd in cmds {
+            let cmd = match cmd {
+                Command::Sanctuary { .. } => {
+                    self.sanctuary_pick += 1;
+                    Command::Sanctuary {
+                        pick: self.sanctuary_pick,
+                    }
+                }
+                other => other,
+            };
+            let from = self.camera.pos;
+            crate::debugcmd::spawn(
+                WorldSeed(self.settings.seed),
+                cmd,
+                from,
+                self.debug_tx.clone(),
+            );
+        }
+        while let Ok(outcome) = self.debug_rx.try_recv() {
+            let status = match outcome {
+                Ok(feet) => match feet.offset(Vec3::Y * (crate::controller::EYE_HEIGHT + 0.05)) {
+                    Ok(eye) => {
+                        self.camera.pos = eye;
+                        self.prev_cam_pos = eye;
+                        self.walker.set_eye(eye);
+                        format!("teleported to sector {:?}", feet.sector().to_array())
+                    }
+                    Err(e) => e.to_string(),
+                },
+                Err(e) => e,
+            };
+            if let Some(running) = &mut self.running {
+                running.overlay.status = status;
+            }
         }
     }
 
@@ -160,6 +231,18 @@ impl App {
         if self.input.pressed(Action::ReleaseCursor) && self.cursor_grabbed {
             self.set_cursor_grab(false);
         }
+        if self.input.pressed(Action::ToggleFly) {
+            self.fly_mode = !self.fly_mode;
+            if !self.fly_mode {
+                self.walker.set_eye(self.camera.pos);
+            }
+        }
+        if self.input.pressed(Action::FlyFaster) {
+            self.fly_speed = (self.fly_speed * 2.0).min(1000.0);
+        }
+        if self.input.pressed(Action::FlySlower) {
+            self.fly_speed = (self.fly_speed / 2.0).max(1.0);
+        }
         let Some(running) = &mut self.running else {
             return;
         };
@@ -178,7 +261,7 @@ impl App {
         }
     }
 
-    /// Start position: `SUPERSTRUCT_SECTOR=x,y,z` teleports to that sector's middle; otherwise
+    /// Start position: `SUPERSTRUCT_SECTOR=x,y,z` teleports to that sector (at `SUPERSTRUCT_LOCAL=x,y,z`, default its middle); otherwise
     /// outside the low corner of `SUPERSTRUCT_CELL` (default: the busiest L2 cell near the origin),
     /// high up and looking at its centre.
     fn place_camera(&mut self) {
@@ -186,7 +269,11 @@ impl App {
             .ok()
             .and_then(|v| parse_triple(&v))
         {
-            match WorldPos::new(I64Vec3::new(x, y, z), Vec3::splat(512.0)) {
+            let local = std::env::var("SUPERSTRUCT_LOCAL")
+                .ok()
+                .and_then(|v| parse_floats(&v))
+                .unwrap_or(Vec3::splat(512.0));
+            match WorldPos::new(I64Vec3::new(x, y, z), local) {
                 Ok(p) => {
                     self.camera.pos = p;
                     self.prev_cam_pos = p;
@@ -269,6 +356,7 @@ impl App {
                     timer: Some(&running.timer),
                 },
             );
+            let mode = mode_line(self.fly_mode, self.fly_speed, &self.walker);
             let info = OverlayInfo {
                 sector: render_camera.pos.sector(),
                 local: render_camera.pos.local(),
@@ -279,6 +367,7 @@ impl App {
                     VsyncMode::Mailbox => "mailbox",
                     VsyncMode::Off => "off",
                 },
+                mode: &mode,
                 stream: self.streamer.stats(),
                 gpu_bytes: running.renderer.gpu_bytes(),
                 shader_error: running.renderer.shader_error(),
@@ -337,13 +426,14 @@ impl App {
         crate::zone!("simulate");
         while self.accumulator >= SIM_DT {
             self.prev_cam_pos = self.camera.pos;
-            self.fly(SIM_DT as f32);
+            self.move_player(SIM_DT as f32);
             self.accumulator -= SIM_DT;
         }
         let alpha = (self.accumulator / SIM_DT) as f32;
         self.frame_count += 1;
         let autoshot = self.autoshot_after.is_some_and(|n| self.frame_count == n);
         let want_screenshot = autoshot || self.input.pressed(Action::Screenshot);
+        self.run_debug_commands();
         self.handle_actions();
         self.input.end_frame();
 
@@ -456,11 +546,18 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
     let now = Instant::now();
     let start =
         WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 513.65, 458.0)).unwrap_or(WorldPos::ORIGIN);
+    let (debug_tx, debug_rx) = crossbeam_channel::unbounded();
     let mut app = App {
         title: title.to_owned(),
         settings,
         running: None,
         failure: None,
+        walker: Controller::new(start),
+        debug_tx,
+        debug_rx,
+        sanctuary_pick: 0,
+        fly_mode: std::env::var_os("SUPERSTRUCT_WALK").is_none(),
+        fly_speed: 20.0,
         streamer: Streamer::new(
             StreamerConfig::default(),
             MeshPool::with_default_threads(WorldSeed(settings_seed)),
@@ -535,5 +632,25 @@ fn save_screenshot(gpu: &Gpu, texture: &wgpu::Texture) {
 fn parse_triple(text: &str) -> Option<[i64; 3]> {
     let mut it = text.split(',').map(|v| v.trim().parse::<i64>());
     let v = [it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?];
+    it.next().is_none().then_some(v)
+}
+
+fn mode_line(fly: bool, fly_speed: f32, walker: &Controller) -> String {
+    if fly {
+        format!("fly {fly_speed:.0} m/s (F4 walk, +/- speed)")
+    } else {
+        let state = if walker.grounded {
+            "grounded"
+        } else {
+            "airborne"
+        };
+        format!("walk, {state} (F4 fly) vel {:.2} m/s", walker.vel.length())
+    }
+}
+
+/// `x,y,z` as floats.
+fn parse_floats(text: &str) -> Option<Vec3> {
+    let mut it = text.split(',').map(|v| v.trim().parse::<f32>());
+    let v = Vec3::new(it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?);
     it.next().is_none().then_some(v)
 }
