@@ -125,7 +125,8 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 
 ### P0.8 L2 districts
 - [x] **P0.8.1** An L1 context query for an L2 cell: which volume is structure, void, deck surface or trunk interior. *Done when:* the query agrees with the L1 primitives at 10⁴ random points (test). (2026-10-17)
-- [ ] **P0.8.2** Building masses on deck surfaces (trunk-face masses deferred to P0.8.9 per `levels.md` §5.1). *Done when:* no mass intersects L1 voids, and every mass sits on a supporting surface (test).
+- [x] **P0.8.2** Building masses on deck surfaces (trunk-face masses deferred to P0.8.9 per `levels.md` §5.1). *Done when:* no mass intersects L1 voids, and every mass sits on a supporting surface (test). (2026-10-17)
+- [ ] **P0.8.3b** Masses keep an 8 m gap from L2 port corridors (`levels.md` §5.1), once P0.8.3 defines them; `l2_mass::Parent::fits` is the place. *Done when:* no mass intersects a port corridor (test).
 - [ ] **P0.8.3** L2 ports: those inherited by cascade from L1, plus the cell's own face-hash ports. *Done when:* every L1 port that crosses an L2 face appears as an L2 port (test).
 - [ ] **P0.8.4** Internal connectivity: build a port graph and generate walkways, stairs and ramps that connect all ports while respecting the slope and step limits. *Done when:* the walkability validator (P0.9) reports every port reachable in 10⁴ random cells.
 - [ ] **P0.8.5** Stair towers and lift shafts as column features, with lift stops emitted as ports. *Done when:* a shaft is identical from every L2 cell it passes through (test).

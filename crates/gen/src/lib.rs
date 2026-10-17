@@ -13,6 +13,7 @@ pub mod l1_bridge;
 pub mod l1_port;
 pub mod l1_query;
 pub mod l1_rim;
+pub mod l2_mass;
 pub mod port;
 pub mod prim;
 pub mod regime;

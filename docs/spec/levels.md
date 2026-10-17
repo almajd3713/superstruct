@@ -204,6 +204,8 @@ The ceiling and floor of a cavity are the deck undersides and tops of the cells 
 | Support | on a deck top surface in the cell (bottom = deck top). Trunk-attached masses are deferred (P0.8.9), because they need routing to the network N (`ports.md` Lemma D) |
 | Placement | up to 8 tries per mass. The mass must lie inside the cell with an 8 m margin, keep an 8 m gap from other masses and port corridors, not intersect any `KeepOut`, trunk or deck, and be fully supported. If all tries fail, the attempt is dropped |
 
+**As implemented** (`worldgen::l2_mass`, P0.8.2): all draws in order are the attempt count, then per attempt width, depth and height (steps of 4 m), then for each of 8 tries the deck-top pick and the x and z of the min corner (4 m step, 8 m margin), so each attempt draws a fixed amount. Candidate tops are deck tops in the cell with room for 16 m plus the margin. A try is accepted if the box keeps 8 m from the cell faces on top, has 8 m separation on some axis from earlier masses, strictly overlaps no parent `KeepOut` or collidable L1 solid, stays outside the trunk circle, and the footprint is exactly covered by deck pieces at that top. Port corridors join in P0.8.3b.
+
 Masses carry `kind = Mass`, the `ENVELOPE` flag and material `CONCRETE`.
 **Envelope fill (L3 obligation):** every face of the envelope must be covered by L3 exterior wall within 0.5 m of the face plane over at least 75 % of its area. All L3 solid stays inside the envelope, except features attached through ports.
 
