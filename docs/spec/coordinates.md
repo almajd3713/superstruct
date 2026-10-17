@@ -20,10 +20,12 @@ How positions, cells and camera-relative vectors are represented and converted. 
 
 ```rust
 pub struct WorldPos {
-    pub sector: I64Vec3, // which 1024 m sector
-    pub local: Vec3,     // offset inside that sector
+    sector: I64Vec3, // which 1024 m sector
+    local: Vec3,     // offset inside that sector
 }
 ```
+
+The fields are private, with `sector()` and `local()` getters, so only the validating constructor and the methods below can create a value. That keeps the invariant enforced.
 
 - `SECTOR_SIZE = 1024.0` m (2¹⁰).
 - **Invariant:** after normalization, `0.0 <= local.c < 1024.0` and `local.c` is finite on every axis `c`.
