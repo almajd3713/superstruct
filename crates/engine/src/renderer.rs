@@ -23,6 +23,8 @@ struct Globals {
     view_proj: [[f32; 4]; 4],
     cam_local: [f32; 4],
     params: [f32; 4],
+    fog: [f32; 4],
+    ambient: [f32; 4],
 }
 
 #[repr(C)]
@@ -66,7 +68,15 @@ pub struct FrameInput<'a> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct FrameParams {
+    /// Fog extinction per metre at the camera.
     pub fog_density: f32,
+    /// Fog density falls off as `exp(-k * height above the camera)`; 0 is uniform fog.
+    pub fog_height_k: f32,
+    /// Linear RGB. Also the sky and void colour: distant geometry fades into it.
+    pub fog_color: [f32; 3],
+    /// Linear RGB tint and strength of the light.
+    pub ambient: [f32; 3],
+    pub light: f32,
     pub grid: bool,
     /// 0 clear to 1 black, for the death sequence.
     pub fade: f32,
@@ -76,6 +86,10 @@ impl Default for FrameParams {
     fn default() -> Self {
         Self {
             fog_density: 0.0008,
+            fog_height_k: 0.0,
+            fog_color: [0.02, 0.025, 0.03],
+            ambient: [0.27, 0.27, 0.27],
+            light: 0.25,
             grid: true,
             fade: 0.0,
         }
@@ -393,6 +407,18 @@ impl Renderer {
             view_proj: view_proj.to_cols_array_2d(),
             cam_local: [local.x, local.y, local.z, 0.0],
             params: [params.fog_density, f32::from(params.grid), params.fade, 0.0],
+            fog: [
+                params.fog_color[0],
+                params.fog_color[1],
+                params.fog_color[2],
+                params.fog_height_k,
+            ],
+            ambient: [
+                params.ambient[0],
+                params.ambient[1],
+                params.ambient[2],
+                params.light,
+            ],
         };
         queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
@@ -424,9 +450,9 @@ impl Renderer {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.02 * f64::from(1.0 - params.fade),
-                        g: 0.025 * f64::from(1.0 - params.fade),
-                        b: 0.03 * f64::from(1.0 - params.fade),
+                        r: f64::from(params.fog_color[0] * (1.0 - params.fade)),
+                        g: f64::from(params.fog_color[1] * (1.0 - params.fade)),
+                        b: f64::from(params.fog_color[2] * (1.0 - params.fade)),
                         a: 1.0,
                     }),
                     store: wgpu::StoreOp::Store,

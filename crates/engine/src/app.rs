@@ -380,10 +380,11 @@ impl App {
                 &FrameInput {
                     camera: &render_camera,
                     size: running.gpu.size(),
-                    params: FrameParams {
-                        fade: self.survival.fade(),
-                        ..FrameParams::default()
-                    },
+                    params: frame_params(
+                        WorldSeed(self.settings.seed),
+                        &render_camera.pos,
+                        self.survival.fade(),
+                    ),
                     boxes: &self.box_scratch,
                     timer: Some(&running.timer),
                 },
@@ -694,4 +695,21 @@ fn parse_floats(text: &str) -> Option<Vec3> {
     let mut it = text.split(',').map(|v| v.trim().parse::<f32>());
     let v = Vec3::new(it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?);
     it.next().is_none().then_some(v)
+}
+
+/// Fog, sky and light for the regime around the camera.
+/// Fog thins by 1/e every 1/k metres above the camera.
+const FOG_HEIGHT_K: f32 = 1.0 / 400.0;
+
+fn frame_params(seed: WorldSeed, cam: &WorldPos, fade: f32) -> FrameParams {
+    let atm = worldgen::atmosphere::atmosphere_at(seed, cam);
+    FrameParams {
+        fog_density: atm.sigma,
+        fog_height_k: FOG_HEIGHT_K,
+        fog_color: atm.fog_color.to_array(),
+        ambient: atm.ambient.to_array(),
+        light: atm.light,
+        fade,
+        ..FrameParams::default()
+    }
 }

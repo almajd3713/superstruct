@@ -14,6 +14,10 @@ use worldgen::coord::WorldPos;
 const SIZE: (u32, u32) = (64, 64);
 const PLAIN: FrameParams = FrameParams {
     fog_density: 0.0,
+    fog_height_k: 0.0,
+    fog_color: [0.02, 0.025, 0.03],
+    ambient: [0.27, 0.27, 0.27],
+    light: 0.25,
     grid: false,
     fade: 0.0,
 };

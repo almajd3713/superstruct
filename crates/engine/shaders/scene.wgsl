@@ -66,8 +66,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let sun = normalize(vec3<f32>(0.4, 0.8, 0.3));
     let lambert = max(dot(n, sun), 0.0);
-    let ambient = 0.22 + 0.1 * n.y;
-    var colour = material_albedo(in.material) * (ambient + 0.75 * lambert);
+    // Tuned so a grey palette at light 0.25 matches the earlier flat greybox look.
+    let tint = globals.ambient.rgb / 0.27;
+    let shade = 0.22 + 0.1 * n.y + 3.0 * globals.ambient.a * lambert;
+    var colour = material_albedo(in.material) * tint * shade;
 
     if (globals.params.y > 0.5) {
         let wp = globals.cam_local.xyz + in.rel;
@@ -81,9 +83,17 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         colour = mix(colour, vec3<f32>(0.05, 0.06, 0.07), g8 * 0.8);
     }
 
+    // Exponential height fog: density sigma * exp(-k h) with h measured from the camera, integrated
+    // along the ray analytically. Thicker below the camera, thinner above.
     let dist = length(in.rel);
-    let fog = 1.0 - exp(-globals.params.x * dist);
-    colour = mix(colour, vec3<f32>(0.02, 0.025, 0.03), fog);
+    let k = globals.fog.a;
+    let kh = clamp(k * in.rel.y, -12.0, 12.0);
+    var path = dist;
+    if (abs(kh) > 1e-4) {
+        path = dist * (1.0 - exp(-kh)) / kh;
+    }
+    let fog = 1.0 - exp(-globals.params.x * path);
+    colour = mix(colour, globals.fog.rgb, fog);
     colour = colour * (1.0 - globals.params.z);
     return vec4<f32>(colour, 1.0);
 }

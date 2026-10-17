@@ -237,8 +237,8 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P2.5.3** Death sequence: let the fall play for a moment, fade to black, respawn at the safe ground, fade in. 🎮 *Done when:* the user signs off on how it feels. (Built 2026-10-18, awaiting the user's feel sign-off: 1.0 s fall, 1.5 s fade out, respawn at safe ground facing the recorded yaw, 1.5 s fade in; fade is in the scene shader. Seen working in a Windows run, shot mid-dying.)
 
 ### P2.6 Simple atmosphere
-- [ ] **P2.6.1** Exponential height fog in the forward shader, with parameters from `atmosphere_at(camera)`. *Done when:* distant forms fade correctly.
-- [ ] **P2.6.2** Sky and void colour from the regime palette. *Done when:* regimes are visibly distinct.
+- [x] **P2.6.1** Exponential height fog in the forward shader, with parameters from `atmosphere_at(camera)`. *Done when:* distant forms fade correctly. (2026-10-18) Scene shader: analytic exponential height fog (density thins above the camera, k = 1/400 m), sigma, fog colour, ambient tint and light level from `atmosphere_at(camera)` every frame; clear colour is the fog colour. Distant forms fade in Windows screenshots.
+- [x] **P2.6.2** Sky and void colour from the regime palette. *Done when:* regimes are visibly distinct. (2026-10-18) Sky and void are the fog colour of the regime palette. Screenshots in three L0 cells show cold blue, grey and sepia. There is no sky gradient or sun disc yet; the palettes are dark by spec.
 
 ### P2.7 Phase exit
 - [ ] **P2.7.1** Consistency assertion: in debug builds, check that the far-band L1 primitives equal the L1 primitives used by the near band for the same cell. *Done when:* the assertion is in place and passes during a flythrough.

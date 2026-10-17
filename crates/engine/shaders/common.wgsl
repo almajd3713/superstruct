@@ -3,7 +3,11 @@ struct Globals {
     // Camera position inside its sector, metres in [0, 1024). 1024 is a multiple of every grid
     // spacing, so the sector index never changes the grid phase.
     cam_local: vec4<f32>,
-    // x: fog density, y: grid on/off.
+    // x: fog density, y: grid on/off, z: fade to black.
     params: vec4<f32>,
+    // rgb: fog and sky colour (linear), a: fog height falloff per metre.
+    fog: vec4<f32>,
+    // rgb: ambient tint (linear), a: light level.
+    ambient: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals: Globals;
