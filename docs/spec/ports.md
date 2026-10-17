@@ -88,6 +88,11 @@ The result is that **every face between two non-cavity L1 cells carries at least
 | **Cascade** (§5) | Every L1 walkable structure that crosses the L2 face gives a port of the matching kind: deck surface, bridge deck, lift core |
 | **Own ports** `[PORT_FACE_*]` | 0–2 **Walkway** (skywalk) ports per X/Z face, with `chance(lerp(0.2, 0.6, d))` each. Allowed only where both sides have the **same L1 deck** under the face. The floor is that deck's top plus 4 m × `range(0, 8)`, one of the first 8 floors |
 
+**As implemented** (`worldgen::l2_port`, P0.8.3):
+- **Cascade on an L1 face:** every L1 port, clipped to the L2 tile, with the same kind. **Inside an L1 cell:** deck and bridge pieces that reach the plane from both sides, merged along the face, give `DeckContinuation` and `BridgeEnd` ports 4 m tall at the piece's top; the lift core gives a `LiftStop` on Y faces. Cascade ports are clipped to the tile and so can touch its edge: the 8 m margin applies to own ports only.
+- **Own ports:** two slots per X/Z face, each drawing (in order) presence, floor index `range(0, 8)`, width `2 m × range(1, 5)`, `u0` on a 2 m step inside the 8 m margin, and the deck pick. The decks are those equal on both sides with a floor in the tile. A slot is dropped if the floor leaves the tile, the rect overlaps an earlier port, or the segment meets the lift core, the staircase footprint or a kept trunk of either L1 cell. Ports are 4 m tall.
+- Ports are numbered cascade first (sorted by floor, `u`, kind), then own.
+
 L2 has no own ports on Y faces. Vertical movement inside an L1 cell uses L2 towers, which are internal, and the L1 core.
 
 ### 4.3 L3 and finer
