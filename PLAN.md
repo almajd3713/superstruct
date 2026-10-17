@@ -280,16 +280,16 @@ CPU main thread: at most 4 ms per frame. Generation and meshing run on worker th
 
 #### Generation cost (P0.11.4)
 
-`cargo bench -p gen --bench cells`, single thread, release build, recorded 2026-10-17 on WSL2 (**not a native Windows run, so provisional**; CLAUDE.md §7 requires Windows numbers, tracked as P0.11.4b).
+`cargo bench -p gen --bench cells`, single thread, release build, recorded 2026-10-17 at `GEN_VERSION` 3 on **native Windows** (x86_64-pc-windows-gnu toolchain 1.97.1, because this machine has no MSVC linker). The same bench on WSL2 gives the same numbers within noise.
 
-| Measurement | Result | Budget |
+| Measurement | Windows | Budget |
 |---|---|---|
-| L1 cell, mean over 32 cells that emit geometry | 17 µs | 5 ms |
-| L2 cell, mean over 2048 children of 4 L1 parents (most are empty air), L1 parent cached | 16 µs | 2 ms |
-| L2 cell, busy cells only (decks, skywalks, masses, railings), L1 parent cached | 97 µs | 2 ms |
-| L2 cell, busy, with its L1 parent generated per cell | 109 µs | 2 ms |
+| L1 cell, mean over 32 cells that emit geometry | 24 µs | 5 ms |
+| L2 cell, mean over 2048 children of 4 L1 parents (most are empty air), L1 parent cached | 94 µs | 2 ms |
+| L2 cell, busy cells only (83 of them: decks, skywalks, towers, masses, railings), L1 parent cached | 1.44 ms | 2 ms |
+| L2 cell, first 8 busy cells, with their L1 parent generated per cell | 0.85 ms | 2 ms |
 
-All are far inside budget, so L3 and meshing can spend the headroom. The L2 numbers include ports, skywalks, lift shafts, sanctuary, vista, masses and railings. Connectivity validation of a cell (`check_cell`) is not part of generation.
+**Budget status:** all inside budget, but the busy L2 cell is close. An earlier WSL2 run at `GEN_VERSION` 1 measured 97 µs for busy cells (34 of them, before towers, trunk-attached masses and the 2 m railing probe), so the busy cost grew about 15× while the cell set also changed. The railing pass probes every walkable edge in 2 m cells against every primitive and is the likely cost; follow-up P0.11.4c. The numbers include ports, skywalks, lift shafts, towers, sanctuary, vista, masses and railings. Connectivity validation (`check_cell`) is not part of generation.
 
 ### 11.5 Development environment caveat
 

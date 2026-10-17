@@ -153,7 +153,8 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.11.2** Thread-order test: generate the same cells serially and in a shuffled order across rayon threads, then compare. *Done when:* identical. (2026-10-17)
 - [x] **P0.11.3** Far-coordinate test: generate cells near ±2⁵⁰ sectors. *Done when:* they are valid, with no panics and connectivity intact. (2026-10-17)
 - [x] **P0.11.4** Criterion benchmarks for L1 and L2 cell generation. Budgets: L2 cell under 2 ms, L1 cell under 5 ms, single thread, release build. *Done when:* the benchmarks exist and the numbers are recorded in `PLAN.md`. (2026-10-17, WSL2 numbers; Windows re-run is P0.11.4b)
-- [ ] **P0.11.4b** Re-run `cargo bench -p gen --bench cells` natively on Windows and replace the provisional WSL2 numbers in `PLAN.md` §11.4. *Done when:* the table says Windows.
+- [x] **P0.11.4b** Re-run `cargo bench -p gen --bench cells` natively on Windows and replace the provisional WSL2 numbers in `PLAN.md` §11.4. *Done when:* the table says Windows. (2026-10-17, GNU toolchain; no MSVC linker on this machine)
+- [ ] **P0.11.4c** Cut the cost of busy L2 cells (1.44 ms mean against a 2 ms budget): profile `l2_cell`, starting with the railing pass (`l2_rail`), whose 2 m edge probes scan every primitive. *Done when:* the busy-cell mean is under 0.5 ms with identical output (golden unchanged) or the change is deliberate and `GEN_VERSION` is bumped.
 - [x] **P0.11.5** **Phase exit:** the connectivity check on 10⁶ random cells reports zero backbone failures. *Done when:* the report has been saved to `docs/playtests/phase0.md`. (2026-10-17)
 
 ---
