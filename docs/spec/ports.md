@@ -74,7 +74,7 @@ Ports are produced in a fixed order and numbered `id = 0, 1, …`. A port whose 
 - **BridgeEnd**, per bridge, draws in this order:
   1. the width, 4 m × `range(2, 8)`;
   2. `u0` on a 4 m step, so the port fits inside the margins;
-  3. 8 floor-height tries on a 4 m step in `[4 m, 4092 m]`. All 8 are always drawn, and the first clear one wins.
+  3. 8 floor-height tries on an **8 m** step in `[8 m, 4092 m]` (found by the validator in P0.9.2: floors 4 m apart on different faces stack a bridge slab directly on another bridge's floor, leaving it no headroom; on an 8 m grid the lower keeps 4 m). All 8 are always drawn, and the first clear one wins.
 - **Fallback height:** the midpoint, on the 4 m grid, of the largest vertical gap between the slabs of **both** sides and the cell's floor and ceiling. Decks are 600 m apart only within one side.
 - **Overlap:** a bridge port whose rect, extended 4 m down for the bridge slab, overlaps an earlier port is dropped. Its draws still count. Ids number only the ports that are kept.
 - **Y faces:** LiftStop `rect` is the core footprint, with `(u, v) = (x, z)`.

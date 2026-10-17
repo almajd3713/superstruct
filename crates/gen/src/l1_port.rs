@@ -23,6 +23,9 @@ pub const BRIDGE_SLAB_CLEARANCE: Q = 8 * M;
 /// Bridge deck thickness, below the floor (`levels.md` §4.5).
 pub const BRIDGE_THICKNESS: Q = 4 * M;
 const BRIDGE_HEIGHT_TRIES: u32 = 8;
+/// Bridge floors lie on an 8 m grid, so two bridges that meet in plan are either coplanar or
+/// at least 8 m apart: the lower keeps 4 m of headroom under the upper's slab.
+pub const BRIDGE_FLOOR_STEP: Q = 8 * M;
 
 /// The ports on `face`, in deterministic order with `id = 0, 1, …`.
 pub fn face_ports(seed: WorldSeed, face: FaceKey) -> Vec<Port> {
@@ -113,12 +116,12 @@ fn side_ports(
         let u0 = span.0 + 4 * M * rng.range_i32(0, (span.1 - width - span.0) / (4 * M) + 1);
         // Floor heights keep the slab below and the opening above inside the cell.
         let (lo, hi) = (
-            BRIDGE_THICKNESS / (4 * M),
-            (CELL - PORT_CLEARANCE) / (4 * M),
+            BRIDGE_THICKNESS / BRIDGE_FLOOR_STEP + 1,
+            (CELL - PORT_CLEARANCE) / BRIDGE_FLOOR_STEP,
         );
         let mut v0 = None;
         for _ in 0..BRIDGE_HEIGHT_TRIES {
-            let v = 4 * M * rng.range_i32(lo, hi + 1);
+            let v = BRIDGE_FLOOR_STEP * rng.range_i32(lo, hi + 1);
             if v0.is_none() && clear(v) {
                 v0 = Some(v);
             }
@@ -156,7 +159,7 @@ fn largest_gap_midpoint(slabs: &[&Deck]) -> Q {
         }
         floor = floor.max(top);
     }
-    i32::midpoint(best.0, best.1) / (4 * M) * (4 * M)
+    i32::midpoint(best.0, best.1) / BRIDGE_FLOOR_STEP * BRIDGE_FLOOR_STEP
 }
 
 /// The ports on all six faces of `cell`, by face in `Dir6::ALL` order.

@@ -123,6 +123,8 @@ A **walkable surface** is a region of a primitive's upward-facing boundary that 
 3. **Clearance:** the column from the surface up to `capsule_height` (1.8 m) is free of collidable solid. Parts with less headroom are removed.
 4. **Width:** what remains must contain a disk of radius `capsule_radius` (0.3 m). Narrower slivers are dropped.
 
+**As implemented** (`worldgen::walk`, P0.9.1–P0.9.2). Surfaces are plan rectangles (`Plate`), flat or sloping along one axis: box tops, ramps within 40°, and stair runs with rise ≤ 7 Q and tread ≥ 4 Q (as their equivalent ramp). A plate loses the plan footprint of every other collidable solid that meets its headroom column (29 Q above the surface); vertical cylinders are cut as 48 strips; pieces narrower than 10 Q (2 × radius) are dropped. Two plates are **linked** when their plan rectangles overlap, or touch along an edge of at least 10 Q, and their heights come within 7 Q (the step-up) somewhere on that contact. Each stop of a `LiftShaft` gives a flat platform over the shaft footprint (a stop is the top of a box inside the footprint, or the height of a flat plate meeting the footprint where every wall is open for 29 Q); a shaft's platforms are linked to each other. `Nav` holds the plates, the links and the connected components.
+
 The walkability extractor (P0.9.1) computes this per cell from primitives across the levels that are resident at that point. It does not trust any flag. Nav graph links between surfaces (steps, slopes, stairs, ports) are P0.9.2.
 
 ## 7. Cell output

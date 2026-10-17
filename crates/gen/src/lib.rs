@@ -22,6 +22,7 @@ pub mod rng;
 pub mod salt;
 pub mod sdf;
 pub mod seed;
+pub mod walk;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
