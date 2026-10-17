@@ -247,6 +247,7 @@ This implements cell-level connectivity (CLAUDE.md §3.5, `ports.md`):
 ### 5.6 Vista `[VISTA]`
 
 - An L2 cell with an L1 `KeepOut` void (shaft, chasm or cavity) within 64 m of one of its walkable surfaces gets a vista with `chance(0.25)`.
+- **As implemented** (`worldgen::l2_vista`, P0.8.7): draws are the 0.25 chance, a starting side, then eight placement offsets. For each shaft or chasm of the parent and each deck top in the cell, the four sides are tried from the starting side: a 16 m wide strip of deck 8 m behind the void's edge must be fully supported and clear, then the balcony (8 m over the void, a 0.5 m `GRATING` slab flush with the deck) and a corridor (16 m wide, 8 m high, 16–64 m long over the void) must be free of every L1 solid and `KeepOut` except the void's own, of skywalk corridors and lift shafts, and inside the 72 m margin of the cell. The first fit wins; if none does the cell has no vista. The corridor is a `KeepOut`; balcony and corridor form a `Zone { Vista }`; the cell sets `MetaFlags::VISTA`; masses avoid the zone.
 - The vista is a walkable platform at the void's edge with a 16 m wide `KeepOut` corridor facing the void, and a `Zone { Vista }` for L3. L3 must keep the corridor open.
 
 ## 6. L3: Blocks (64 m), outline

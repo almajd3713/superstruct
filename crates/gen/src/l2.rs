@@ -8,6 +8,7 @@ use crate::l1::{DECK_REGION_LOG2, decks};
 use crate::l2_column::{lift_column, span_of};
 use crate::l2_mass::masses_in;
 use crate::l2_port::{L1Cache, cell_ports_in};
+use crate::l2_vista::vista;
 use crate::l2_walk::Skywalk;
 use crate::port::PortKind;
 use crate::prim::{CellMeta, CellOutput, ChildConstraint, MetaFlags, Q, QAabb, ZoneKind};
@@ -98,6 +99,18 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
                 out.meta.flags = MetaFlags::SANCTUARY;
             }
         }
+    }
+
+    if let Some(v) = vista(seed, cell, parent_key, &parent, origin, &corridors) {
+        out.primitives.push(v.balcony);
+        out.child_constraints
+            .push(ChildConstraint::KeepOut { aabb: v.corridor });
+        out.child_constraints.push(ChildConstraint::Zone {
+            aabb: v.zone,
+            kind: ZoneKind::Vista,
+        });
+        out.meta.flags = MetaFlags(out.meta.flags.0 | MetaFlags::VISTA.0);
+        corridors.push(v.zone);
     }
 
     let first_mass = out.primitives.len();

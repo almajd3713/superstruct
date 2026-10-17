@@ -158,6 +158,10 @@ impl Parent {
         p
     }
 
+    pub(crate) fn solids(&self) -> &[QAabb] {
+        &self.solids
+    }
+
     /// Every deck top of the parent, sorted, unique.
     pub(crate) fn all_deck_tops(&self) -> Vec<Q> {
         let mut tops: Vec<Q> = self.decks.iter().map(|d| d.0).collect();
