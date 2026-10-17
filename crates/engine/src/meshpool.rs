@@ -15,7 +15,7 @@ use worldgen::coord::{CoordError, WorldPos};
 use worldgen::l1::{l1_cell, l1_far_primitives};
 use worldgen::l2::l2_cell_in;
 use worldgen::l2_port::L1Cache;
-use worldgen::prim::Primitive;
+use worldgen::prim::{PrimFlags, Primitive};
 use worldgen::seed::WorldSeed;
 
 use crate::chunkmesh::mesh_primitives;
@@ -31,6 +31,8 @@ pub struct ChunkMesh {
     pub mesh: Mesh,
     /// Kept for collision; the streamer takes it on upload.
     pub prims: Vec<Primitive>,
+    /// Debug builds, L1 only: digest of the far-visible primitives this chunk was built from.
+    pub far_digest: Option<u64>,
     pub gen_ms: f32,
     pub mesh_ms: f32,
 }
@@ -237,6 +239,23 @@ fn worker(shared: &Shared, tx: &Sender<JobResult>) {
     }
 }
 
+/// Digest of the far-visible primitives of an L1 chunk: all of a far chunk's, the flagged subset
+/// of a full chunk's. Equal digests for the same cell mean both bands draw the same structure.
+fn far_digest(id: ChunkId, prims: &[Primitive]) -> Option<u64> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    if id.key.level != Level::L1 {
+        return None;
+    }
+    let mut h = DefaultHasher::new();
+    for p in prims
+        .iter()
+        .filter(|p| id.detail == Detail::Far || p.flags.contains(PrimFlags::FAR_VISIBLE))
+    {
+        p.hash(&mut h);
+    }
+    Some(h.finish())
+}
+
 /// `None` when the job went stale before meshing; the result is not wanted any more.
 fn build(seed: WorldSeed, cache: &L1Cache, id: ChunkId, stale: &AtomicBool) -> Option<JobResult> {
     zone!("mesh job");
@@ -254,6 +273,11 @@ fn build(seed: WorldSeed, cache: &L1Cache, id: ChunkId, stale: &AtomicBool) -> O
     if stale.load(Ordering::Relaxed) {
         return None;
     }
+    let far_digest = if cfg!(debug_assertions) {
+        far_digest(id, &prims)
+    } else {
+        None
+    };
     let (mesh, _) = mesh_primitives(&prims);
     let t2 = Instant::now();
     if stale.load(Ordering::Relaxed) {
@@ -264,6 +288,7 @@ fn build(seed: WorldSeed, cache: &L1Cache, id: ChunkId, stale: &AtomicBool) -> O
         origin,
         mesh,
         prims,
+        far_digest,
         gen_ms: (t1 - t0).as_secs_f32() * 1000.0,
         mesh_ms: (t2 - t1).as_secs_f32() * 1000.0,
     }))

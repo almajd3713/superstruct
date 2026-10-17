@@ -241,7 +241,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P2.6.2** Sky and void colour from the regime palette. *Done when:* regimes are visibly distinct. (2026-10-18) Sky and void are the fog colour of the regime palette. Screenshots in three L0 cells show cold blue, grey and sepia. There is no sky gradient or sun disc yet; the palettes are dark by spec.
 
 ### P2.7 Phase exit
-- [ ] **P2.7.1** Consistency assertion: in debug builds, check that the far-band L1 primitives equal the L1 primitives used by the near band for the same cell. *Done when:* the assertion is in place and passes during a flythrough.
+- [x] **P2.7.1** Consistency assertion: in debug builds, check that the far-band L1 primitives equal the L1 primitives used by the near band for the same cell. *Done when:* the assertion is in place and passes during a flythrough. (2026-10-18) Debug builds hash the far-visible primitives of each L1 chunk in the worker; when the far and full chunk of a cell are both resident the streamer asserts the digests match (`l1 checks` counter in the overlay). Passes in the swap test. Both bands come from the same `l1_cell` call, so this guards against future divergence rather than proving a hard case; it does not cover L2 or the SDF horizon yet. Not yet seen during a manual flythrough.
 - [ ] **P2.7.2** 🎮 Playtest: pick a structure on the horizon, walk or fly to it, and confirm it is the same. Then judge the feel of walking. Write `docs/playtests/phase2.md`. *Done when:* the notes exist and next steps have been agreed.
 
 ---

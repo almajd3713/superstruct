@@ -77,6 +77,8 @@ pub struct StreamStats {
     pub rejected: u64,
     /// Frames where wanted chunks alone exceeded the memory budget.
     pub over_budget_frames: u64,
+    /// Debug builds: far and full L1 chunks of one cell compared (P2.7.1).
+    pub consistency_checks: u64,
 }
 
 struct Resident {
@@ -105,6 +107,8 @@ pub struct Streamer {
     stats: StreamStats,
     scratch: Vec<Wanted>,
     collision: CollisionWorld,
+    /// Debug builds: far-visible digest of each resident L1 chunk, for the consistency check.
+    digests: HashMap<ChunkId, u64>,
 }
 
 impl Streamer {
@@ -123,6 +127,7 @@ impl Streamer {
             stats: StreamStats::default(),
             scratch: Vec::new(),
             collision: CollisionWorld::default(),
+            digests: HashMap::new(),
         }
     }
 
@@ -165,6 +170,30 @@ impl Streamer {
         self.upload(sink);
         self.refresh_visibility(sink);
         self.evict(sink);
+    }
+
+    /// The far band must draw exactly the structure the near band does for the same cell: when
+    /// both details of an L1 cell are resident their far-visible primitives must match.
+    fn check_consistency(&mut self, chunk: &ChunkMesh) {
+        let Some(digest) = chunk.far_digest else {
+            return;
+        };
+        let other = ChunkId {
+            detail: match chunk.id.detail {
+                Detail::Full => Detail::Far,
+                Detail::Far => Detail::Full,
+            },
+            ..chunk.id
+        };
+        if let Some(theirs) = self.digests.get(&other) {
+            self.stats.consistency_checks += 1;
+            assert_eq!(
+                digest, *theirs,
+                "far and near L1 primitives differ for {:?}",
+                chunk.id.key
+            );
+        }
+        self.digests.insert(chunk.id, digest);
     }
 
     fn retarget(&mut self, cam: &WorldPos, view_dir: Vec3) {
@@ -228,6 +257,7 @@ impl Streamer {
                 break;
             };
             let (handle, actual) = sink.upload(&chunk);
+            self.check_consistency(&chunk);
             if chunk.id.detail == Detail::Full {
                 let size = chunk.id.key.level.size_m() as f32;
                 self.collision.insert(
@@ -293,6 +323,7 @@ impl Streamer {
             if let Some(r) = self.resident.remove(&id) {
                 sink.remove(r.handle);
                 self.collision.remove(&id);
+                self.digests.remove(&id);
                 self.resident_bytes -= r.bytes;
                 self.stats.evictions += 1;
             }
@@ -454,6 +485,8 @@ mod tests {
         }
         settle(&mut s, &mut sink, &pos(10.0, 3));
         assert!(s.is_resident(&full));
+        // Both details were resident at once, so the debug consistency check ran and passed.
+        assert!(s.stats().consistency_checks >= 1);
         let handle = s.resident[&far].handle;
         assert!(
             !sink.live[&handle.0].1,

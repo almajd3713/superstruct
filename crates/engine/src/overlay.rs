@@ -266,8 +266,8 @@ fn stream_lines(ui: &mut egui::Ui, s: &StreamStats, gpu_bytes: u64) {
         mib(s.upload_bytes_this_frame)
     ));
     ui.monospace(format!(
-        "evicted {} | rejected {} | over budget {}",
-        s.evictions, s.rejected, s.over_budget_frames
+        "evicted {} | rejected {} | over budget {} | l1 checks {}",
+        s.evictions, s.rejected, s.over_budget_frames, s.consistency_checks
     ));
 }
 
