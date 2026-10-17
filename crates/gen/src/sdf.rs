@@ -1,6 +1,7 @@
 //! Point-in-solid and signed distance for each primitive shape (`primitives.md` §3).
 //!
 //! Points are `f32` metres in the owning cell's local space. Distances are negative inside.
+//! Only IEEE-exact operations are used (`hashing.md` §6), so results match on every machine.
 
 use glam::{Vec2, Vec3};
 
@@ -40,7 +41,8 @@ impl Shape {
                 radius,
             } => {
                 let (a, r) = cylinder_coords(p, axis, base);
-                (0.0..q_to_m(length)).contains(&a) && r.length_squared() < q_to_m(radius).powi(2)
+                (0.0..q_to_m(length)).contains(&a)
+                    && r.length_squared() < q_to_m(radius) * q_to_m(radius)
             }
             Self::StairRun { aabb, rise, steps } => {
                 let (q, size) = rise_frame(p, aabb, rise);
@@ -64,7 +66,8 @@ impl Shape {
             Self::Ramp { aabb, rise } => {
                 let (q, size) = rise_frame(p, aabb, rise);
                 // Distance above the incline through the low edge and the high top edge.
-                let plane = (q.y * size.x - size.y * q.x) / size.x.hypot(size.y);
+                let plane =
+                    (q.y * size.x - size.y * q.x) / (size.x * size.x + size.y * size.y).sqrt();
                 box_sdf(q, Vec3::ZERO, size).max(plane)
             }
             Self::Cylinder {
