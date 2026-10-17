@@ -73,7 +73,8 @@ pub fn vista(
                 .any(|v| (k.min.x, k.min.z, k.max.x, k.max.z) == (v.x0, v.z0, v.x1, v.z1)))
     });
     let mut tops = ctx.all_deck_tops();
-    tops.retain(|&t| t >= origin[1] && t + CORRIDOR_HEIGHT + 8 * M <= origin[1] + CELL);
+    // The slab hangs 0.5 m below the deck top, so the top must be that far inside the cell.
+    tops.retain(|&t| t >= origin[1] + SLAB && t + CORRIDOR_HEIGHT + 8 * M <= origin[1] + CELL);
 
     let inner = Rect {
         x0: origin[0] + RIM,

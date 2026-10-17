@@ -248,7 +248,9 @@ fn interior_floors(seed: WorldSeed, cache: &L1Cache, f: &Frame) -> Found {
         };
         trunks.iter().any(|&(cx, cz, r)| {
             let (dx, dz) = (i64::from(x - cx), i64::from(z - cz));
-            dx * dx + dz * dz < r * r
+            // A metre of slack: a landing that ends at the trunk's surface has no floor left.
+            let reach = r + i64::from(M);
+            dx * dx + dz * dz <= reach * reach
         })
     };
     let mut out = Found::new();
