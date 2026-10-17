@@ -7,8 +7,8 @@ use glam::I64Vec3;
 
 use crate::cell::{Axis, CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::hash::hash;
-use crate::key::{ColumnKey, ColumnSpanKey};
-use crate::prim::{FeatureKind, MaterialId, PrimFlags, Primitive, Q, QVec3, Shape};
+use crate::key::{ColumnKey, ColumnSpanKey, LayerKey};
+use crate::prim::{FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb, QVec3, Shape};
 use crate::regime::{rare_stair, regime};
 use crate::rng::Rng;
 use crate::salt;
@@ -183,6 +183,129 @@ pub fn trunk_piece(trunk: &Trunk, cell: CellKey) -> Option<Primitive> {
         kind: FeatureKind::TRUNK,
         flags: PrimFlags::FAR_VISIBLE,
     })
+}
+
+/// log₂ of the deck region width in L1 cells (W = 4, 16 km).
+pub const DECK_REGION_LOG2: u32 = 2;
+
+/// One deck slab: its top surface height and its thickness below that, in cell-local quanta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Deck {
+    pub top: Q,
+    pub thickness: Q,
+}
+
+/// The decks of one layer cell in a deck region (§4.2), bottom to top. Every cell sharing
+/// the layer key gets the same decks.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)] // weights in [0, 4], n < 4
+pub fn decks(seed: WorldSeed, layer: LayerKey) -> Vec<Deck> {
+    debug_assert_eq!(layer.level, Level::L1);
+    let shift = 3 - DECK_REGION_LOG2;
+    let l0 = I64Vec3::new(
+        floor_div_pow2(layer.rx, shift),
+        floor_div_pow2(layer.y, 3),
+        floor_div_pow2(layer.rz, shift),
+    );
+    let d = f32::from(regime(seed, l0).density) / 255.0;
+    let mut rng = Rng::new(hash(seed.0, Level::L1, layer.hash_coords(), salt::DECK));
+    // Integer weights round toward zero (§2).
+    let weights = [lerp(4.0, 1.0, d), 4.0, lerp(1.0, 3.0, d), lerp(0.0, 2.0, d)].map(|w| w as u32);
+    let n = rng.pick_weighted(&weights).unwrap_or(0) as Q;
+    let step = 4 * M;
+    (0..n)
+        .map(|i| {
+            let centre = (2 * i + 1) * CELL / (2 * n) / step * step;
+            let jitter = CELL / (4 * n) / step;
+            let top = centre + step * rng.range_i32(-jitter, jitter + 1);
+            let thickness = rng.range_i32(2, 13) * step;
+            Deck { top, thickness }
+        })
+        .collect()
+}
+
+/// The holes cut through this cell's decks. Shafts, chasms and rim bites join in later items.
+pub fn deck_holes(seed: WorldSeed, cell: CellKey) -> Vec<Rect> {
+    vec![core_footprint(seed, ColumnKey::of(cell))]
+}
+
+/// The deck slabs of `cell` as boxes: the cell rectangle minus `holes`, per deck.
+pub fn deck_pieces(decks: &[Deck], holes: &[Rect]) -> Vec<Primitive> {
+    let rects = decompose(holes);
+    decks
+        .iter()
+        .flat_map(|deck| {
+            rects.iter().map(move |r| Primitive {
+                shape: Shape::Box {
+                    aabb: QAabb::new(
+                        QVec3::new(r.x0, deck.top - deck.thickness, r.z0),
+                        QVec3::new(r.x1, deck.top, r.z1),
+                    ),
+                },
+                material: MaterialId::CONCRETE,
+                kind: FeatureKind::DECK,
+                flags: PrimFlags::FAR_VISIBLE,
+            })
+        })
+        .collect()
+}
+
+/// The cell square `[0, CELL)²` minus `holes`, as disjoint rectangles (§4.2).
+///
+/// Cuts at the sorted hole edges, merges filled grid cells into runs along x within each z
+/// row, then extends a run from the previous row when its x-extent is identical. Output is
+/// sorted by `(z0, x0)`.
+pub fn decompose(holes: &[Rect]) -> Vec<Rect> {
+    let clip = |v: Q| v.clamp(0, CELL);
+    let mut xs: Vec<Q> = vec![0, CELL];
+    let mut zs: Vec<Q> = vec![0, CELL];
+    for h in holes {
+        xs.extend([clip(h.x0), clip(h.x1)]);
+        zs.extend([clip(h.z0), clip(h.z1)]);
+    }
+    xs.sort_unstable();
+    xs.dedup();
+    zs.sort_unstable();
+    zs.dedup();
+
+    let filled = |x0: Q, z0: Q| {
+        !holes
+            .iter()
+            .any(|h| h.x0 <= x0 && x0 < h.x1 && h.z0 <= z0 && z0 < h.z1)
+    };
+    let mut done: Vec<Rect> = Vec::new();
+    // Runs that are still open, from the previous row.
+    let mut open: Vec<Rect> = Vec::new();
+    for zw in zs.windows(2) {
+        let (z0, z1) = (zw[0], zw[1]);
+        let mut row: Vec<(Q, Q)> = Vec::new();
+        for xw in xs.windows(2) {
+            if filled(xw[0], z0) {
+                match row.last_mut() {
+                    Some(run) if run.1 == xw[0] => run.1 = xw[1],
+                    _ => row.push((xw[0], xw[1])),
+                }
+            }
+        }
+        let mut next = Vec::with_capacity(row.len());
+        for (x0, x1) in row {
+            if let Some(i) = open.iter().position(|r| r.x0 == x0 && r.x1 == x1) {
+                let mut r = open.remove(i);
+                r.z1 = z1;
+                next.push(r);
+            } else {
+                next.push(Rect { x0, z0, x1, z1 });
+            }
+        }
+        done.append(&mut open);
+        open = next;
+    }
+    done.append(&mut open);
+    done.sort_unstable_by_key(|r| (r.z0, r.x0));
+    done
 }
 
 /// `lo + step · range(0, n)`, uniform over the multiples of `step` in `[lo, hi]`.
@@ -365,5 +488,190 @@ mod tests {
             footprints * 10 >= l0_stairs * 9,
             "{footprints} of {l0_stairs}"
         );
+    }
+
+    fn rect(x0: Q, z0: Q, x1: Q, z1: Q) -> Rect {
+        Rect { x0, z0, x1, z1 }
+    }
+
+    fn area(r: &Rect) -> i64 {
+        i64::from(r.x1 - r.x0) * i64::from(r.z1 - r.z0)
+    }
+
+    /// The pieces tile the cell minus the holes: no overlaps, no hole coverage, full area.
+    fn assert_partition(pieces: &[Rect], holes: &[Rect]) {
+        for (i, a) in pieces.iter().enumerate() {
+            assert!(a.x0 < a.x1 && a.z0 < a.z1 && a.x0 >= 0 && a.x1 <= CELL);
+            for b in &pieces[i + 1..] {
+                assert!(a.x1 <= b.x0 || b.x1 <= a.x0 || a.z1 <= b.z0 || b.z1 <= a.z0);
+            }
+            for h in holes {
+                assert!(a.x1 <= h.x0 || h.x1 <= a.x0 || a.z1 <= h.z0 || h.z1 <= a.z0);
+            }
+        }
+        let cell = i64::from(CELL) * i64::from(CELL);
+        let total: i64 = pieces.iter().map(area).sum();
+        assert_eq!(total, cell - holes.iter().map(area).sum::<i64>());
+    }
+
+    /// Pinned decomposition: a change here changes generator output.
+    #[test]
+    fn decompose_golden() {
+        assert_eq!(decompose(&[]), vec![rect(0, 0, CELL, CELL)]);
+        let hole = rect(1000, 2000, 3000, 2500);
+        assert_eq!(
+            decompose(&[hole]),
+            vec![
+                rect(0, 0, CELL, 2000),
+                rect(0, 2000, 1000, 2500),
+                rect(3000, 2000, CELL, 2500),
+                rect(0, 2500, CELL, CELL),
+            ]
+        );
+        let holes = [rect(1000, 1000, 2000, 2000), rect(1500, 3000, 2500, 4000)];
+        assert_eq!(
+            decompose(&holes),
+            vec![
+                rect(0, 0, CELL, 1000),
+                rect(0, 1000, 1000, 2000),
+                rect(2000, 1000, CELL, 2000),
+                rect(0, 2000, CELL, 3000),
+                rect(0, 3000, 1500, 4000),
+                rect(2500, 3000, CELL, 4000),
+                rect(0, 4000, CELL, CELL),
+            ]
+        );
+    }
+
+    #[test]
+    fn decompose_partitions_random_holes() {
+        let mut rng = Rng::new(0xDEC);
+        for _ in 0..500 {
+            let mut holes: Vec<Rect> = Vec::new();
+            for _ in 0..rng.range_i32(0, 6) {
+                let side = rng.range_i32(1, 32) * 4 * M;
+                let x0 = step_range(&mut rng, SEPARATION, CELL - SEPARATION - side, M);
+                let z0 = step_range(&mut rng, SEPARATION, CELL - SEPARATION - side, M);
+                let h = Rect::square(x0, z0, side);
+                if holes.iter().all(|o| h.dist2_rect(o) > 0) {
+                    holes.push(h);
+                }
+            }
+            assert_partition(&decompose(&holes), &holes);
+        }
+    }
+
+    #[test]
+    fn decks_are_spaced_and_inside_the_cell() {
+        let seed = WorldSeed(0xDE);
+        let mut counts = [0u32; 4];
+        for rx in -20..20 {
+            for y in -10..10 {
+                for rz in [-3, 0, 4] {
+                    let layer = LayerKey {
+                        level: Level::L1,
+                        y,
+                        rx,
+                        rz,
+                    };
+                    let ds = decks(seed, layer);
+                    counts[ds.len()] += 1;
+                    for d in &ds {
+                        assert!((8 * M..=48 * M).contains(&d.thickness));
+                        assert!(d.top - d.thickness >= 0 && d.top <= CELL, "{d:?}");
+                        assert_eq!(d.top % (4 * M), 0);
+                    }
+                    for w in ds.windows(2) {
+                        assert!(w[1].top - w[0].top >= 600 * M, "{ds:?}");
+                    }
+                }
+            }
+        }
+        assert!(counts.iter().all(|&c| c > 0), "deck counts {counts:?}");
+    }
+
+    /// P0.7.2: inside a region, neighbours have the same decks, and both sides cover the shared
+    /// face over its full width at the same heights, so each deck continues flush.
+    #[test]
+    fn decks_continue_across_faces_inside_a_region() {
+        let seed = WorldSeed(0xDE);
+        let mut region_faces = 0;
+        let mut differing_region_faces = 0;
+        for x in -12..12 {
+            for y in [-1, 0, 3] {
+                for z in [-5, 2] {
+                    let a = l1(x, y, z);
+                    let b = l1(x + 1, y, z);
+                    let la = LayerKey::of(a, DECK_REGION_LOG2);
+                    let lb = LayerKey::of(b, DECK_REGION_LOG2);
+                    if la != lb {
+                        region_faces += 1;
+                        differing_region_faces += u32::from(decks(seed, la) != decks(seed, lb));
+                        continue;
+                    }
+                    let ds = decks(seed, la);
+                    assert_eq!(ds, decks(seed, lb));
+                    let face = |cell: CellKey, at: Q| -> Vec<(Q, Q, Q, Q)> {
+                        let mut spans: Vec<_> = deck_pieces(&ds, &deck_holes(seed, cell))
+                            .iter()
+                            .map(Primitive::aabb)
+                            .filter(|bb| {
+                                if at == 0 {
+                                    bb.min.x == 0
+                                } else {
+                                    bb.max.x == CELL
+                                }
+                            })
+                            .map(|bb| (bb.min.y, bb.max.y, bb.min.z, bb.max.z))
+                            .collect();
+                        spans.sort_unstable();
+                        // Piece boundaries depend on each cell's own holes; compare coverage.
+                        let mut merged: Vec<(Q, Q, Q, Q)> = Vec::new();
+                        for sp in spans {
+                            match merged.last_mut() {
+                                Some(m) if (m.0, m.1) == (sp.0, sp.1) && m.3 == sp.2 => m.3 = sp.3,
+                                _ => merged.push(sp),
+                            }
+                        }
+                        merged
+                    };
+                    let (fa, fb) = (face(a, CELL), face(b, 0));
+                    assert_eq!(fa, fb, "{a:?} | {b:?}");
+                    for d in &ds {
+                        let width: Q = fa
+                            .iter()
+                            .filter(|s| (s.0, s.1) == (d.top - d.thickness, d.top))
+                            .map(|s| s.3 - s.2)
+                            .sum();
+                        assert_eq!(width, CELL, "deck {d:?} is not flush across the face");
+                    }
+                }
+            }
+        }
+        assert!(
+            differing_region_faces * 2 > region_faces,
+            "region faces should mostly differ"
+        );
+    }
+
+    #[test]
+    fn deck_pieces_avoid_the_core() {
+        let seed = WorldSeed(0xDE);
+        for x in -10..10 {
+            let cell = l1(x, 2, -x);
+            let ds = decks(seed, LayerKey::of(cell, DECK_REGION_LOG2));
+            let holes = deck_holes(seed, cell);
+            let rects: Vec<Rect> = deck_pieces(&ds, &holes)
+                .iter()
+                .take(decompose(&holes).len())
+                .map(|p| {
+                    let bb = p.aabb();
+                    rect(bb.min.x, bb.min.z, bb.max.x, bb.max.z)
+                })
+                .collect();
+            if !ds.is_empty() {
+                assert_partition(&rects, &holes);
+            }
+        }
     }
 }

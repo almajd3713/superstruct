@@ -116,6 +116,7 @@ Each cell in `[a, b]` emits the trunk as a vertical `Cylinder` clipped to its ow
 | Thickness | 8–48 m, step 4 m |
 | Coverage | the whole cell footprint, minus holes (§4.3–4.4) and the core footprint (§4.0.1). Decks are absent in cavity cells |
 
+- **Drawing** (`l1::decks`): `n` first, then per deck from bottom to top: the jitter, then the thickness. The height is the deck's **top** surface, and the slab hangs below it. In quanta, `centre = floor((2i + 1) · 4096 m / 2n)` rounded down to 4 m, and `top = centre + 4 m × range(−J, J)` inclusive, with `J = floor(4096 m / 4n / 4 m)`. The regime is the region's L0 cell, `(rx div 2, y div 8, rz div 2)`.
 - All cells in a region and layer agree on heights and thicknesses. Decks therefore continue across every face inside the region, and these crossings are deck-continuation ports.
 - At a region face, the deck heights on either side differ in general. The decks end at the face, leaving cliff edges, and are joined only through ports (`ports.md`).
 - Each cell emits its deck as `Box` pieces: the cell rectangle minus its holes, decomposed deterministically into rectangles. The algorithm cuts at sorted hole edges and merges cells of the resulting grid row by row. It is pinned by golden tests.

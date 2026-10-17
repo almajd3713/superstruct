@@ -113,7 +113,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 
 ### P0.7 L1 megaforms
 - [x] **P0.7.1** Trunks: vertical pillars from column keys, with radius, vertical extent and style. *Done when:* a trunk spanning several L1 cells vertically is identical when generated from each of them (test). (2026-10-17)
-- [ ] **P0.7.2** Decks: horizontal slabs from layer keys or ports, with thickness and extent. *Done when:* decks continue across faces exactly as the ports specify (test).
+- [x] **P0.7.2** Decks: horizontal slabs from layer keys or ports, with thickness and extent. *Done when:* decks continue across faces exactly as the ports specify (test). (2026-10-17)
 - [ ] **P0.7.3** Shafts, chasms and voids, including giant-cavity rare events that carve out L1 content. *Done when:* a cavity region contains no L1 solids (test).
 - [ ] **P0.7.4** L1 face ports, including the backbone lattice. *Done when:* backbone faces always carry at least one walkable port (proptest).
 - [ ] **P0.7.5** Bridges joining trunks and decks along L1 ports. *Done when:* every L1 port has a bridge or deck reaching it inside the cell (test).
