@@ -63,7 +63,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
   - L3 and L4: outline only, detailed in Phase 4
 
   *Done when:* each level lists its inputs, outputs and the salts it uses. (2026-10-17)
-- [ ] **P0.2.6** `docs/spec/ports.md` covers:
+- [x] **P0.2.6** `docs/spec/ports.md` covers:
   - canonical `FaceKey`: the face is owned by the lower cell on the axis
   - port derivation from the face hash
   - port types: walkway, deck continuation, bridge end, stair landing, lift stop
@@ -72,7 +72,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
   - L1→L2→L3 cascade rules
   - an argument that global connectivity follows from local connectivity
 
-  *Done when:* the connectivity argument is written and the user has reviewed it.
+  *Done when:* the connectivity argument is written and the user has reviewed it. (2026-10-17)
 - [ ] **P0.2.7** `docs/spec/regimes.md` covers L0 fields (density, verticality, style id, fog colour and density, light level, palette), boundary blending of atmosphere only, and the rare-events table (giant cavity, infinite staircase, gravity region, …) with probabilities. *Done when:* the doc is complete.
 - [ ] **P0.2.8** 🧭 `docs/spec/traversal.md` covers:
   - player capsule dimensions and speeds (defaults in CLAUDE.md §4)

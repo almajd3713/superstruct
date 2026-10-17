@@ -46,7 +46,7 @@ If a tower 20 km away must still be there, with the same shape, when you arrive,
 
 - **Ports on shared faces.** Each face of a cell gets ports (openings, bridge ends, stair landings) derived from a hash of the face's own ID. Both neighbouring cells compute the same ports independently, so they agree without ever communicating.
 - **Each cell must connect all of its ports internally.** If every cell does that, connectivity across the whole world follows by induction.
-- **Backbone lattice.** Force ports on a sparse regular set of faces (for example every 4th face). This keeps the world from fragmenting into sealed islands while still allowing dead ends and sealed rooms for variety.
+- **Backbone lattice.** *Decided 2026-10-17:* every L1 face (4 km) carries at least one port, and every L1 column has a lift core (`docs/spec/ports.md`). This rules out unreachable islands at megastructure scale. Dead ends and sealed rooms remain at L2 and L3 for variety. It replaces the earlier idea of a sparse lattice (every 4th face).
 - **Ports cascade down levels.** An L1 bridge ending in an L2 cell forces L2 ports, which force L3 boundary conditions.
 - **WFC only inside fixed blocks.** Run WFC (or Merrell's model synthesis) only within a single L3 block whose boundary is already fixed by its ports. Failure is local: retry with a new sub-seed, then fall back to a known-good template. This is the same idea as Nested WFC (Nie et al. 2023) and Hierarchical Semantic WFC (Alaka & Bidarra 2023).
 

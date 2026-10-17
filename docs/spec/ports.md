@@ -1,6 +1,6 @@
 # Spec: ports and connectivity
 
-**Status: draft, awaiting user review of the connectivity argument (P0.2.6).**
+**Status: approved by the user on 2026-10-17 (P0.2.6).**
 
 Ports are the openings where walkable space crosses a cell face. They are how neighbouring cells agree on connectivity without communicating (CLAUDE.md §3.4–3.5). Geometry follows `primitives.md`, keys follow `levels.md` §1 and hashing follows `hashing.md`.
 
@@ -146,10 +146,4 @@ The level is part of the hash, so one salt per axis serves every level without c
 - **Local rule at L2 and finer:** each port connects to the L1 network N inside the cell (Lemma D). CLAUDE.md §3.5 has been reworded to match.
 - **Lift core:** one in every L1 column (`levels.md` §4.0.1). Approved.
 
-**Open**
-1. **Backbone at L1 is the whole grid.** PLAN.md §2 suggested a sparse lattice ("every 4th face"). This draft makes every L1 face carry a port instead, because:
-   - at 4 km scale, islands would break the horizon promise in spirit,
-   - the argument becomes a simple grid argument,
-   - dead ends and sealed rooms still exist at L2 and L3.
-
-   Awaiting the user's decision.
+- **Backbone at L1:** every face between two non-cavity L1 cells carries at least one port (§4.1). The user chose this over PLAN.md's sparse lattice: islands at 4 km scale would break the horizon promise, and local variety comes from L2 and L3 dead ends, empty deck layers, shafts and chasms.
