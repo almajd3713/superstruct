@@ -56,13 +56,13 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
   - plus **column and layer keys** for vertical features (trunks, lift shafts) and horizontal ones (decks)
 
   Record the choice in `docs/spec/levels.md`. *Done when:* the decision is recorded with its rationale. (2026-10-17)
-- [ ] **P0.2.5** `docs/spec/levels.md` covers the content, parameters, probabilities and parent-constraint inputs and outputs of each level:
+- [x] **P0.2.5** `docs/spec/levels.md` covers the content, parameters, probabilities and parent-constraint inputs and outputs of each level:
   - L0 regimes
   - L1 megaforms: trunks, decks, shafts, chasms, giant cavities
   - L2 districts: masses, bridges, stair towers, ramps, lift placement, sanctuaries, vistas
   - L3 and L4: outline only, detailed in Phase 4
 
-  *Done when:* each level lists its inputs, outputs and the salts it uses.
+  *Done when:* each level lists its inputs, outputs and the salts it uses. (2026-10-17)
 - [ ] **P0.2.6** `docs/spec/ports.md` covers:
   - canonical `FaceKey`: the face is owned by the lower cell on the axis
   - port derivation from the face hash
@@ -92,6 +92,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P0.3.4** `FaceKey` canonicalization: the cell plus axis, owned by the lower-coordinate cell. *Done when:* proptest checks that both adjacent cells produce the identical key for their shared face.
 - [ ] **P0.3.5** Column and layer key helpers (`ColumnKey(level, x, z)`, `LayerKey(level, y, region)`), if chosen in P0.2.4. *Done when:* tests pass.
 - [ ] **P0.3.6** Overflow policy: every coordinate arithmetic path uses checked or explicitly wrapping ops, per the spec. *Done when:* tests at ±(2⁶²) neither panic nor silently corrupt values.
+- [ ] **P0.3.7** `ColumnSpanKey(level, x, z, sy = y div 8)` helper per `levels.md` §1.2. *Done when:* tests confirm every cell in a span maps to the same key, and adjacent spans map to different keys.
 
 ### P0.4 Hashing and RNG
 - [ ] **P0.4.1** Implement `hash(seed, level, cell, salt) -> u64` per `hashing.md`. *Done when:* the pinned test vectors pass.
