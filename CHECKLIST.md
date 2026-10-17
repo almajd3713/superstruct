@@ -73,7 +73,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
   - an argument that global connectivity follows from local connectivity
 
   *Done when:* the connectivity argument is written and the user has reviewed it. (2026-10-17)
-- [ ] **P0.2.7** `docs/spec/regimes.md` covers L0 fields (density, verticality, style id, fog colour and density, light level, palette), boundary blending of atmosphere only, and the rare-events table (giant cavity, infinite staircase, gravity region, …) with probabilities. *Done when:* the doc is complete.
+- [x] **P0.2.7** `docs/spec/regimes.md` covers L0 fields (density, verticality, style id, fog colour and density, light level, palette), boundary blending of atmosphere only, and the rare-events table (giant cavity, infinite staircase, gravity region, …) with probabilities. *Done when:* the doc is complete. (2026-10-17)
 - [ ] **P0.2.8** 🧭 `docs/spec/traversal.md` covers:
   - player capsule dimensions and speeds (defaults in CLAUDE.md §4)
   - step-up and max slope

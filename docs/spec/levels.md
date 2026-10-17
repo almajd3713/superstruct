@@ -76,7 +76,7 @@ L1 is computed in two stages:
 1. **Keyed features** are pure functions of keys (and the regime and cavity from L0): the lift core (§4.0.1), trunks (§4.1), decks (§4.2), shafts (§4.3) and chasms (§4.4). They are cheap to evaluate, and port derivation evaluates them for **both** cells next to a face (`ports.md` §3).
 2. **Dependent content** reads the keyed features and the cell's ports: deck pieces, bridges, the sanctuary.
 
-**Separation rule.** Within a cell, all hole and obstacle footprints keep **at least 64 m** from each other and from the cell faces. That covers shafts, chasms, the core footprint and the trunk footprint. Placement draws are made in the order core → trunk → shaft → chasm, and each later feature is rejected if it would break the separation from the earlier ones. A rejected feature is absent, and the remaining draw counts stay fixed. Rejection is what guarantees each deck stays connected (`ports.md` Lemma A).
+**Separation rule.** Within a cell, all hole and obstacle footprints keep **at least 64 m** from each other and from the cell faces. That covers shafts, chasms, the core footprint and the trunk footprint. Placement draws are made in the order core → infinite staircase (if present, `regimes.md` §5.2) → trunk → shaft → chasm, and each later feature is rejected if it would break the separation from the earlier ones. A rejected feature is absent, and the remaining draw counts stay fixed. Rejection is what guarantees each deck stays connected (`ports.md` Lemma A).
 
 #### 4.0.1 Lift core: `ColumnKey(L1, x, z)` `[CORE]`
 
@@ -232,6 +232,7 @@ Values follow the blocks in `hashing.md` §4. Port salts are defined in `ports.m
 | `REGIME` | `0x0101` | cell (L0) | RNG for regime fields |
 | `RARE_EVENT` | `0x0102` | cell (L0) | which rare event, if any |
 | `RARE_EVENT_PLACE` | `0x0103` | cell (L0) | event placement in the cell |
+| `RARE_STAIR` | `0x0104` | ColumnKey (L0) | infinite staircase (`regimes.md` §5.2) |
 | `TRUNK` | `0x0201` | ColumnSpanKey (L1) | trunk existence, radius, centre, extent |
 | `DECK` | `0x0202` | LayerKey (L1, W = 4) | deck count, heights, thickness |
 | `SHAFT` | `0x0203` | ColumnSpanKey (L1) | shaft existence and footprint |
