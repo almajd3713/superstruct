@@ -97,7 +97,7 @@ L2 ports and envelope entrances become L3 boundary conditions (P4.1.1). The same
 
 **Lemma A (L1 local connectivity).** In every non-cavity L1 cell, all L1 walkable structure and all of the cell's L1 ports lie in a single walkable component, using L1 geometry only. This holds by construction (`levels.md` §4):
 
-1. Every deck in the cell is connected. Holes (shafts, chasms, the core) and trunk footprints each keep at least 64 m from each other and from the faces, so a deck minus its holes is a connected region.
+1. Every deck in the cell is connected. Holes (shafts, chasms, the core) and trunk footprints each keep at least 64 m from each other and from the faces, so a deck minus its holes is a connected region. In rim cells, the cavity bite is shrunk until a flood fill confirms that the deck still touches every port-carrying face and every core stop (`levels.md` §4.6).
 2. The lift core has a stop on every deck top in the cell. That connects all decks.
 3. Every bridge runs from its BridgeEnd port to a core stop at its own height. If no axis-aligned route clears the trunk, the trunk segment is omitted in this cell. That fallback is deterministic, counted in stats, and expected to be rare.
 4. Y-face LiftStop ports are the core itself.
@@ -109,8 +109,9 @@ By §5, finer levels do not obstruct any of this.
 
 **Lemma C (grid connectivity).**
 - Every face between two non-cavity L1 cells carries at least one port (§4.1).
-- Cavity cells form boxes aligned to the L1 grid, with at least one L1 cell of margin inside their L0 cell (`levels.md` §3), so two cavities never touch.
-- The cubic grid ℤ³ minus a set of pairwise non-touching finite boxes is connected: any path can step around a box through the layer of cells next to it.
+- Cavity cells lie in the inner 6 × 6 × 6 L1 cells of their L0 cell, so the outer layer (the *shell*) of every L0 cell is free of cavity cells (`levels.md` §3).
+- Each shell is connected (a hollow cube of thickness one cell), and adjacent L0 cells' shells share faces. The union of all shells is therefore connected.
+- Pocket filling guarantees that every non-cavity cell inside an L0 cell reaches its shell through non-cavity cells.
 - So the graph of non-cavity L1 cells joined by ported faces is connected.
 
 **Theorem (global connectivity).** N is connected.

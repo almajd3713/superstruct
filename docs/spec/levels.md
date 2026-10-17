@@ -58,7 +58,14 @@ What each hierarchy level decides, from what inputs, and with which salts. Coord
 | **Geometry** | none. L0 only shapes atmosphere and the parameters of the levels below |
 
 - Regime fields are drawn from an RNG seeded with `hash(cell, [REGIME])`. Rare events use `[RARE_EVENT]` (which event, if any) and `[RARE_EVENT_PLACE]` (where in the cell). The events and their probabilities are listed in `regimes.md`.
-- **Giant cavity** (the rare event that affects geometry): a box of 2–6 **whole L1 cells** per axis (8–24 km), aligned to the L1 grid and placed with at least one L1 cell of margin inside the L0 cell, so two cavities never touch. The cells inside are *cavity cells*: L1 emits nothing in them, not even ports (§4.6). Its rim is the deck edges of the surrounding cells. Grid alignment is what keeps the connectivity argument simple (`ports.md` §6).
+- **Giant cavity** (the rare event that affects geometry): an irregular blob of **whole L1 cells**, the *cavity cells*, with rounded bites carved from the decks of the surrounding *rim cells* (§4.6). The shape was chosen by the user on 2026-10-17. The coarse shape, computed once per L0 cell from its 8 × 8 × 8 grid of L1 cells:
+  1. **Ellipsoid.** Draw with `[RARE_EVENT_PLACE]`:
+     - a centre `c` in L1-cell units, uniform in [2.5, 5.5] per axis, step 0.25,
+     - radii `r` in [1.0, 3.0] per axis, step 0.25 (4–12 km).
+  2. **Noisy voxelization.** The L1 cell with L0-local index `i` is a candidate if `Σ ((i + 0.5 − c) / r)² ≤ 1 + n`. The noise `n` is drawn per L1 cell in [−0.25, 0.25], step 1/64, from `hash(seed, 1, cell, CAVITY_NOISE)`. The cell containing `c` is always a candidate. Candidates are restricted to the inner 6 × 6 × 6 (indices 1–6), so there is at least one L1 cell of margin and two cavities never touch.
+  3. **Pocket filling.** Flood-fill the non-candidate cells (6-neighbour) from the margin layer. Any non-candidate cell the fill does not reach is enclosed, so it becomes a cavity cell. This guarantees the cavity never encloses an unreachable pocket (`ports.md` Lemma C).
+
+  L1 emits nothing in cavity cells, not even ports. The silhouette reads as an organic abyss at 4 km scale, and the rim bites round its edges up close.
 - Regime **values** never blend across L0 faces. Only atmosphere does, in `atmosphere_at` (`regimes.md`). Generation inside a cell uses its own regime only, so L1 cells never need a neighbouring regime.
 
 ## 4. L1: Megaforms (4096 m)
@@ -139,9 +146,19 @@ Each cell in `[a, b]` emits the trunk as a vertical `Cylinder` clipped to its ow
 
 ### 4.6 Giant cavity
 
-- Cavity cells emit no geometry and no ports, and the core is absent there. Faces between a cavity cell and a normal cell carry no ports.
+- Cavity cells emit no geometry and no ports, and the core is absent there. Faces between a cavity cell and a normal cell carry no ports. Children of cavity cells generate nothing.
 - The trunk segments of a column end at the cavity.
-- Children of cavity cells generate nothing.
+
+**Rim bites `[CAVITY_BITE]`.** A *rim cell* is a non-cavity L1 cell that shares a face with a cavity cell. Each of its deck pieces gets a bite that rounds the cavity's edge:
+
+1. Draw a scale `k ∈ [0.9, 1.3]`, step 1/32, from `hash(cell, CAVITY_BITE)`. The bite region is the horizontal slice, at the deck's height, of the continuous ellipsoid `(c, k · r)` from §3. In world terms this is the same ellipsoid the voxelization used, inflated or deflated slightly.
+2. Rasterize the slice on the deck's **64 m tile grid** (64 × 64 tiles per cell). A tile is bitten if its centre is inside the slice. The result is a stepped curve, which is invisible at the scale it is seen from.
+3. Unbite every tile within 64 m of a face that carries ports (any face not shared with a cavity cell), of the core, or of the trunk and other holes (the separation rule, §4.0).
+4. **Connectivity check:** flood-fill the remaining deck tiles. If they do not form one component touching every port-carrying face band and every core stop, reduce `k` by 1/32 and repeat. If `k` falls below 0.5, there is no bite.
+
+Bitten tiles are removed from the deck pieces before the rectangle decomposition (§4.2). Children receive the bitten area as `KeepOut`.
+
+The ceiling and floor of a cavity are the deck undersides and tops of the cells above and below. They are not rounded, so vertical rounding comes from the voxel blob alone.
 
 ### 4.7 Sanctuary selection `[SANCTUARY]`
 
@@ -233,6 +250,7 @@ Values follow the blocks in `hashing.md` §4. Port salts are defined in `ports.m
 | `RARE_EVENT` | `0x0102` | cell (L0) | which rare event, if any |
 | `RARE_EVENT_PLACE` | `0x0103` | cell (L0) | event placement in the cell |
 | `RARE_STAIR` | `0x0104` | ColumnKey (L0) | infinite staircase (`regimes.md` §5.2) |
+| `CAVITY_NOISE` | `0x0105` | cell (L1) | per-cell noise of the cavity voxelization (§3) |
 | `TRUNK` | `0x0201` | ColumnSpanKey (L1) | trunk existence, radius, centre, extent |
 | `DECK` | `0x0202` | LayerKey (L1, W = 4) | deck count, heights, thickness |
 | `SHAFT` | `0x0203` | ColumnSpanKey (L1) | shaft existence and footprint |
@@ -240,6 +258,7 @@ Values follow the blocks in `hashing.md` §4. Port salts are defined in `ports.m
 | `BRIDGE` | `0x0205` | cell (L1) | bridge width and route choice |
 | `SANCTUARY` | `0x0206` | cell (L1) | sanctuary existence and child choice |
 | `CORE` | `0x0207` | ColumnKey (L1) | lift core footprint and position |
+| `CAVITY_BITE` | `0x0208` | cell (L1) | rim-bite scale (§4.6) |
 | `MASS` | `0x0301` | cell (L2) | mass count, sizes, placement |
 | `STAIR_TOWER` | `0x0302` | ColumnSpanKey (L2) | keyed stair towers |
 | `LIFT_SHAFT` | `0x0303` | ColumnSpanKey (L2) | keyed lift shafts |

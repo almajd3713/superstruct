@@ -100,7 +100,7 @@ The event is drawn with `pick_weighted` from an RNG seeded with `hash(seed, 0, c
 | Event | Weight | Effect |
 |---|---|---|
 | `None` | 920 | — |
-| `GiantCavity` | 30 | A grid-aligned void of 2–6 L1 cells per axis, placed with `[RARE_EVENT_PLACE]` (`levels.md` §3). Its rim is walkable (P5.2.2). BLAME!'s Jupiter-sized room, at the scale this world can afford |
+| `GiantCavity` | 30 | An irregular, roughly ellipsoidal void of whole L1 cells (4–12 km radii) with rounded rim bites (`levels.md` §3, §4.6). Its rim is walkable (P5.2.2). BLAME!'s Jupiter-sized room, at the scale this world can afford |
 | `Blackout` | 30 | `light = 0`, emissive suppressed, visibility forced to 1–3 km. Total darkness except the player's surroundings. Mind-breaking through absence |
 | `GravityRegion` | 20 | **Flag only** until P5.2.4 decides whether gravity can change direction. It has no effect on generation or play until then |
 
@@ -130,3 +130,4 @@ Over 10⁵ cells, each frequency must fall within ±10% of its weight / 1000 (P0
 | `RARE_EVENT` | `0x0102` | cell (L0) | event choice (§5.1) |
 | `RARE_EVENT_PLACE` | `0x0103` | cell (L0) | cavity placement |
 | `RARE_STAIR` | `0x0104` | ColumnKey (L0) | staircase presence and placement (§5.2) |
+| `CAVITY_NOISE` | `0x0105` | cell (L1) | cavity voxelization noise (`levels.md` §3) |
