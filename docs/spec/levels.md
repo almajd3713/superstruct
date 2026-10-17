@@ -179,6 +179,7 @@ The ceiling and floor of a cavity are the deck undersides and tops of the cells 
 - Each L1 cell holds at most one sanctuary, chosen with `chance(0.5)`. That gives about one per two L1 cells, a few km apart.
 - The cell lists its L2 children whose volume contains a deck top surface, in x, then y, then z order, and picks one with `below(count)`.
 - That child receives `Zone { Sanctuary }`, 32 × 16 × 32 m, placed on the deck top inside the child (§5.5). If no child contains a deck top, there is no sanctuary in the cell.
+- **As implemented** (`worldgen::sanctuary`, P0.8.6): draw order is presence, the child pick, then 16 candidate spots on an 8 m step inside a 72 m margin of the child. The first spot where the zone box is fully on deck and clear of L1 content (`Parent::fits`) and under the child's top minus 8 m wins; if none fits, the cell has no sanctuary. L1 emits the `Zone` and sets `MetaFlags::SANCTUARY`; the L2 child holding it copies both, and everything L2 adds (masses, shafts, corridors) treats the zone as a keep-out. Measured over 10⁴ cells: a sanctuary in 30–50 % of cells with a deck and a mean gap of 1.8–3.5 cells along a row (7–14 km).
 
 ### 4.8 Far-band reduction (P0.7.6)
 

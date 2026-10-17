@@ -23,6 +23,7 @@ pub mod prim;
 pub mod regime;
 pub mod rng;
 pub mod salt;
+pub mod sanctuary;
 pub mod sdf;
 pub mod seed;
 pub mod walk;

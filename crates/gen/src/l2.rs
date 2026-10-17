@@ -10,7 +10,7 @@ use crate::l2_mass::masses_in;
 use crate::l2_port::{L1Cache, cell_ports_in};
 use crate::l2_walk::Skywalk;
 use crate::port::PortKind;
-use crate::prim::{CellMeta, CellOutput, ChildConstraint, Q, QAabb};
+use crate::prim::{CellMeta, CellOutput, ChildConstraint, MetaFlags, Q, QAabb, ZoneKind};
 use crate::seed::WorldSeed;
 
 const M: Q = 16;
@@ -78,6 +78,26 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
                 .map(|&aabb| ChildConstraint::KeepOut { aabb }),
         );
         corridors.extend(keepouts);
+    }
+
+    for c in &parent.child_constraints {
+        if let ChildConstraint::Zone {
+            aabb,
+            kind: ZoneKind::Sanctuary,
+        } = c
+        {
+            let local = crate::l2_mass::shift(aabb, origin);
+            let inside = [local.min.x, local.min.y, local.min.z]
+                .into_iter()
+                .all(|v| (0..CELL).contains(&v));
+            if inside {
+                out.child_constraints.push(ChildConstraint::Zone {
+                    aabb: local,
+                    kind: ZoneKind::Sanctuary,
+                });
+                out.meta.flags = MetaFlags::SANCTUARY;
+            }
+        }
     }
 
     let first_mass = out.primitives.len();
@@ -195,5 +215,54 @@ mod tests {
             cells >= 10_000 && ports > 1000 && walkways > 100,
             "{cells} {ports} {walkways}"
         );
+    }
+
+    /// P0.8.6: exactly one L2 child carries each sanctuary, with the zone free of masses.
+    #[test]
+    fn sanctuary_is_marked_in_one_child() {
+        let seed = WorldSeed(0x0807);
+        let (mut found, mut masses) = (0, 0);
+        for x in 0..30 {
+            let parent = CellKey::new(Level::L1, I64Vec3::new(x, 0, 2));
+            let cache = L1Cache::default();
+            let zones = cache
+                .get(seed, parent)
+                .child_constraints
+                .iter()
+                .filter(|c| matches!(c, ChildConstraint::Zone { .. }))
+                .count();
+            let mut flagged = 0;
+            for k in 0..512i64 {
+                let cell = CellKey::new(
+                    Level::L2,
+                    parent.coords * 8 + I64Vec3::new(k % 8, k / 64, k / 8 % 8),
+                );
+                let out = l2_cell_in(seed, &cache, cell);
+                if !out.meta.flags.contains(MetaFlags::SANCTUARY) {
+                    continue;
+                }
+                flagged += 1;
+                let zone = out
+                    .child_constraints
+                    .iter()
+                    .find_map(|c| match c {
+                        ChildConstraint::Zone { aabb, .. } => Some(*aabb),
+                        _ => None,
+                    })
+                    .unwrap();
+                for p in out
+                    .primitives
+                    .iter()
+                    .filter(|p| p.kind == crate::prim::FeatureKind::MASS)
+                {
+                    masses += 1;
+                    assert!(!crate::l2_mass::overlaps(&zone, &p.aabb()));
+                }
+            }
+            assert_eq!(flagged, zones);
+            found += flagged;
+        }
+        assert!(found >= 5, "{found}");
+        let _ = masses;
     }
 }

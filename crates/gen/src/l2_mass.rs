@@ -132,7 +132,8 @@ impl Parent {
             decks: Vec::new(),
         };
         for c in &parent.child_constraints {
-            if let ChildConstraint::KeepOut { aabb } = c {
+            // Sanctuary zones are reserved like keep-outs for everything L2 adds.
+            if let ChildConstraint::KeepOut { aabb } | ChildConstraint::Zone { aabb, .. } = c {
                 p.keepouts.push(shift(aabb, o));
             }
         }

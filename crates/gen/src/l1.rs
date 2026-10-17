@@ -13,12 +13,13 @@ use crate::l1_bridge::bridges;
 use crate::l1_port::PORT_CLEARANCE;
 use crate::l1_rim::rim_bites;
 use crate::prim::{
-    CellMeta, CellOutput, ChildConstraint, FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb,
-    QVec3, Shape,
+    CellMeta, CellOutput, ChildConstraint, FeatureKind, MaterialId, MetaFlags, PrimFlags,
+    Primitive, Q, QAabb, QVec3, Shape, ZoneKind,
 };
 use crate::regime::{rare_stair, regime};
 use crate::rng::Rng;
 use crate::salt;
+use crate::sanctuary::sanctuary;
 use crate::seed::WorldSeed;
 
 /// One metre in quanta.
@@ -373,6 +374,13 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
             .chain(chasm(seed, cell))
             .map(full_height),
     );
+    if let Some(aabb) = sanctuary(seed, cell, &out) {
+        out.child_constraints.push(ChildConstraint::Zone {
+            aabb,
+            kind: ZoneKind::Sanctuary,
+        });
+        out.meta.flags = MetaFlags::SANCTUARY;
+    }
     out
 }
 
@@ -1465,6 +1473,6 @@ mod tests {
             }
         }
         assert_eq!(found, 3);
-        assert_eq!(h, 16_298_321_602_479_731_843);
+        assert_eq!(h, 18_146_471_219_858_894_092);
     }
 }
