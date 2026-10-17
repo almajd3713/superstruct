@@ -55,7 +55,7 @@ impl Rect {
     }
 
     /// Squared distance between two rectangles (0 if they overlap or touch).
-    fn dist2_rect(&self, o: &Rect) -> i64 {
+    pub(crate) fn dist2_rect(&self, o: &Rect) -> i64 {
         let dx = i64::from((o.x0 - self.x1).max(self.x0 - o.x1).max(0));
         let dz = i64::from((o.z0 - self.z1).max(self.z0 - o.z1).max(0));
         dx * dx + dz * dz
@@ -234,9 +234,10 @@ pub fn decks(seed: WorldSeed, layer: LayerKey) -> Vec<Deck> {
         .collect()
 }
 
-/// The holes cut through this cell's decks: core, shaft and chasm. Rim bites join in P0.7.8.
+/// The holes cut through this cell's decks: core, staircase, shaft and chasm. The core is first.
 pub fn deck_holes(seed: WorldSeed, cell: CellKey) -> Vec<Rect> {
     let mut holes = vec![core_footprint(seed, ColumnKey::of(cell))];
+    holes.extend(stair_footprint(seed, ColumnKey::of(cell)));
     holes.extend(shaft(seed, ColumnSpanKey::of(cell)));
     holes.extend(chasm(seed, cell));
     holes
@@ -330,7 +331,8 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     let ds = decks(seed, LayerKey::of(cell, DECK_REGION_LOG2));
     let core = core_footprint(seed, ColumnKey::of(cell));
     let t = trunk(seed, span).filter(|t| trunk_piece(t, cell).is_some());
-    let br = bridges(cell, &out.ports, core, t.as_ref(), !ds.is_empty());
+    let stair = stair_footprint(seed, ColumnKey::of(cell));
+    let br = bridges(cell, &out.ports, core, stair, t.as_ref(), !ds.is_empty());
     if br.trunk_kept {
         out.primitives.extend(t.and_then(|t| trunk_piece(&t, cell)));
     }
@@ -364,8 +366,9 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
         aabb: QAabb::new(QVec3::new(r.x0, 0, r.z0), QVec3::new(r.x1, CELL, r.z1)),
     };
     out.child_constraints.extend(
-        shaft(seed, span)
+        stair
             .into_iter()
+            .chain(shaft(seed, span))
             .chain(chasm(seed, cell))
             .map(full_height),
     );
@@ -1360,5 +1363,65 @@ mod tests {
         }
         assert!(rims > 100, "{rims}");
         assert!(bitten > 10, "only {bitten} bitten decks");
+    }
+
+    /// P0.7.9: the staircase footprint is the same `KeepOut` in every cell of its column,
+    /// and no L1 solid, shaft or chasm touches it.
+    #[test]
+    fn stair_footprint_is_reserved() {
+        let seed = WorldSeed(0x57A1);
+        let (mut columns_seen, mut cells) = (0, 0);
+        for i in 0..6000i64 {
+            let l0 = ColumnKey {
+                level: Level::L0,
+                x: i % 100 - 50,
+                z: i / 100 - 30,
+            };
+            let Some(st) = rare_stair(seed, l0) else {
+                continue;
+            };
+            let column = ColumnKey {
+                level: Level::L1,
+                x: l0.x * 8 + i64::from(st.l1_x),
+                z: l0.z * 8 + i64::from(st.l1_z),
+            };
+            let Some(want) = stair_footprint(seed, column) else {
+                continue;
+            };
+            columns_seen += 1;
+            let keep = QAabb::new(
+                QVec3::new(want.x0, 0, want.z0),
+                QVec3::new(want.x1, CELL, want.z1),
+            );
+            for y in -10..10 {
+                let cell = l1(column.x, y, column.z);
+                let out = l1_cell(seed, cell);
+                if out.primitives.is_empty() {
+                    continue;
+                }
+                cells += 1;
+                assert!(
+                    out.child_constraints
+                        .iter()
+                        .any(|c| matches!(c, ChildConstraint::KeepOut { aabb } if *aabb == keep)),
+                    "{cell:?} lacks the staircase KeepOut"
+                );
+                for p in &out.primitives {
+                    let bb = p.aabb();
+                    let inside = bb.min.x < want.x1
+                        && want.x0 < bb.max.x
+                        && bb.min.z < want.z1
+                        && want.z0 < bb.max.z;
+                    assert!(!inside, "{cell:?}: {p:?} intersects the staircase");
+                }
+                for r in shaft(seed, ColumnSpanKey::of(cell))
+                    .into_iter()
+                    .chain(chasm(seed, cell))
+                {
+                    assert!(r.dist2_rect(&want) >= SEP2);
+                }
+            }
+        }
+        assert!(columns_seen >= 5 && cells > 50, "{columns_seen} {cells}");
     }
 }

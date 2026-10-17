@@ -119,7 +119,7 @@ Over 10⁵ cells, each frequency must fall within ±10% of its weight / 1000 (P0
   - a 64 × 64 m footprint under the L1 separation rule (`levels.md` §4.0): the min corner is drawn on a 16 m step, x then z, with the 64 m margin. If the footprint comes within 64 m of the L1 core, the staircase is absent from that L1 column.
 - Placement is drawn **before** the trunk, shaft and chasm, so those avoid it.
 - A switchback of `StairRun`s ascends without end, with landings joined to every deck it crosses. It is an L1 keyed feature.
-- Geometry details are in P5.2.3. Until then, the generator reserves the footprint as a `KeepOut`.
+- Geometry details are in P5.2.3. Until then, the generator reserves the footprint as a full-height `KeepOut` in every cell of the column, cuts it out of every deck, and routes bridges around it (`l1_bridge`).
 
 ### 5.3 Not events
 

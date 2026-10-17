@@ -125,6 +125,10 @@ fn routes(port_t: (Q, Q), core: [Q; 4]) -> Vec<Vec<[Q; 4]>> {
     out
 }
 
+fn clear_of_stair(route: &[Rect], stair: Option<Rect>) -> bool {
+    stair.is_none_or(|s| route.iter().all(|r| r.dist2_rect(&s) > 0))
+}
+
 fn clear_of_trunk(route: &[Rect], trunk: Option<&Trunk>) -> bool {
     trunk.is_none_or(|t| {
         let r2 = i64::from(t.radius) * i64::from(t.radius);
@@ -144,10 +148,12 @@ pub struct Bridges {
 
 /// Routes every `BridgeEnd` port of `cell` to the core at its floor height. `trunk` is the
 /// trunk piece in this cell, if any; `has_deck` says whether the trunk crosses a deck.
+/// Routes also avoid the infinite-staircase footprint `stair` where they can.
 pub fn bridges(
     cell: CellKey,
     ports: &[Port],
     core: Rect,
+    stair: Option<Rect>,
     trunk: Option<&Trunk>,
     has_deck: bool,
 ) -> Bridges {
@@ -163,10 +169,13 @@ pub fn bridges(
             .collect();
         let route = candidates
             .iter()
-            .find(|r| clear_of_trunk(r, trunk))
+            .find(|r| clear_of_trunk(r, trunk) && clear_of_stair(r, stair))
             .unwrap_or_else(|| {
                 trunk_kept = false;
-                &candidates[0]
+                candidates
+                    .iter()
+                    .find(|r| clear_of_stair(r, stair))
+                    .unwrap_or(&candidates[0])
             })
             .clone();
         chosen.push((route, p));
