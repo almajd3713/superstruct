@@ -325,6 +325,46 @@ fn find(p: &mut [usize], mut i: usize) -> usize {
     i
 }
 
+fn collidable(p: &Primitive) -> bool {
+    !matches!(p.shape, Shape::LiftShaft { .. }) && !p.flags.contains(PrimFlags::NO_COLLIDE)
+}
+
+/// Whether the plan point is under a solid's footprint: its box, or the disk of a vertical
+/// cylinder.
+fn covers(p: &Primitive, x: Q, z: Q) -> bool {
+    let bb = p.aabb();
+    if let Shape::Cylinder {
+        axis: Axis::Y,
+        base,
+        radius,
+        ..
+    } = p.shape
+    {
+        let (dx, dz) = (i64::from(x - base.x), i64::from(z - base.z));
+        return dx * dx + dz * dz < i64::from(radius) * i64::from(radius);
+    }
+    bb.min.x <= x && x < bb.max.x && bb.min.z <= z && z < bb.max.z
+}
+
+/// The highest top, at or below `y`, of a collidable solid under the plan point.
+pub fn solid_top_below(prims: &[Primitive], x: Q, z: Q, y: Q) -> Option<Q> {
+    prims
+        .iter()
+        .filter(|p| collidable(p) && covers(p, x, z))
+        .map(Primitive::aabb)
+        .filter(|bb| bb.min.y < y)
+        .map(|bb| bb.max.y.min(y))
+        .max()
+}
+
+/// Whether a collidable solid occupies the plan point somewhere strictly inside `(y0, y1)`.
+pub fn solid_in_column(prims: &[Primitive], x: Q, z: Q, y0: Q, y1: Q) -> bool {
+    prims.iter().any(|p| {
+        let bb = p.aabb();
+        collidable(p) && covers(p, x, z) && bb.min.y < y1 && bb.max.y > y0
+    })
+}
+
 /// The primitives of `parent` that meet the cube of `size` quanta at `origin` (in the parent's
 /// frame), moved into that cube's frame. Boxes are cut to the cube in plan, never in height,
 /// so a deck's top stays where it is. Lift shafts and cylinders move whole.

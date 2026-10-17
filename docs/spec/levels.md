@@ -237,6 +237,7 @@ This implements cell-level connectivity (CLAUDE.md §3.5, `ports.md`):
 
 - Every walkable edge with a drop greater than the fall threshold (`traversal.md`, about 15 m) is either guarded with `chance(0.85)` or left deliberately unguarded.
 - A guarded edge gets a railing: a `Box` 1.1 m tall and 0.1 m thick, kind `Railing`.
+- **As implemented** (`worldgen::l2_rail`, P0.8.8): flat walkable plates (from the validator's extractor, over the L1 window plus L2 content, masses excluded) are walked edge by edge in -z, +z, -x, +x order, in runs of at most 64 m. A run is a drop edge if, 0.5 m past the edge at the run's midpoint, no solid fills the 1.8 m above the surface and the nearest solid below is more than 15 m down (or there is none). Each drop run draws `chance(0.85)`; a guarded run gets a 18 Q × 2 Q (1.1 m × 0.1 m) `METAL` box along the inside of the edge. Edges on the cell's faces are skipped, and stairs and ramps get no railings yet.
 - Edges are visited in a deterministic order (by surface, then edge), and the RNG is seeded once per cell.
 
 ### 5.5 Sanctuary (from the L1 `Zone`)

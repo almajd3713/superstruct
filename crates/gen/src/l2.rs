@@ -8,11 +8,13 @@ use crate::l1::{DECK_REGION_LOG2, decks};
 use crate::l2_column::{lift_column, span_of};
 use crate::l2_mass::masses_in;
 use crate::l2_port::{L1Cache, cell_ports_in};
+use crate::l2_rail::railings;
 use crate::l2_vista::vista;
 use crate::l2_walk::Skywalk;
 use crate::port::PortKind;
 use crate::prim::{CellMeta, CellOutput, ChildConstraint, MetaFlags, Q, QAabb, ZoneKind};
 use crate::seed::WorldSeed;
+use crate::walk::cell_window;
 
 const M: Q = 16;
 /// L2 cell edge in quanta.
@@ -121,6 +123,9 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
             prim: u32::try_from(i).unwrap_or(u32::MAX),
         });
     }
+    let mut seen = cell_window(&parent.primitives, origin, CELL);
+    seen.extend(out.primitives.iter().copied());
+    out.primitives.extend(railings(seed, cell, &seen).0);
     for i in 0..out.ports.len() {
         out.child_constraints.push(ChildConstraint::ForcedPort {
             port: u32::try_from(i).unwrap_or(u32::MAX),

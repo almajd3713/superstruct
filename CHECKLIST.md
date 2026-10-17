@@ -134,7 +134,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P0.8.5b** Stair towers `[STAIR_TOWER]` (`levels.md` §5.2). Open question: a flight with the spec rise (3 Q) has no whole-step height dividing the 8192 Q L2 cell, so towers cannot align with cell boundaries; decide the tower rise or how a flight crosses an L2 cell face, then build stacked `StairRun`s in `Box` walls with landings. *Done when:* a tower is identical from every L2 cell it passes through (test), and the validator links its landings.
 - [x] **P0.8.6** Sanctuary placement: chosen at the L1 level so they sit a few km apart along walkable routes, and marked in L2 metadata. *Done when:* the spacing distribution over 10⁴ L1 cells matches the spec. (2026-10-17)
 - [x] **P0.8.7** Vista rule: occasionally guarantee an opening that frames a view (an opening facing an L1 void). *Done when:* the vista frequency matches the spec, and the openings face a void (test). (2026-10-17)
-- [ ] **P0.8.8** Railing and edge flags: mark walkable edges with a drop greater than the fall threshold as guarded or deliberately unguarded. *Done when:* the unguarded fraction matches the spec.
+- [x] **P0.8.8** Railing and edge flags: mark walkable edges with a drop greater than the fall threshold as guarded or deliberately unguarded. *Done when:* the unguarded fraction matches the spec. (2026-10-17)
 - [ ] **P0.8.9** Trunk-attached masses, with walkway routing to the L1 network so they stay reachable (`ports.md` Lemma D). *Done when:* the validator reports every trunk-attached mass reachable in 10⁴ random cells.
 
 ### P0.9 Walkability validator

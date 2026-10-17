@@ -17,6 +17,7 @@ pub mod l2;
 pub mod l2_column;
 pub mod l2_mass;
 pub mod l2_port;
+pub mod l2_rail;
 pub mod l2_vista;
 pub mod l2_walk;
 pub mod port;
