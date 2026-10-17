@@ -11,6 +11,7 @@ use crate::hash::hash;
 use crate::key::{ColumnKey, ColumnSpanKey, LayerKey};
 use crate::l1_bridge::bridges;
 use crate::l1_port::PORT_CLEARANCE;
+use crate::l1_rim::rim_bites;
 use crate::prim::{
     CellMeta, CellOutput, ChildConstraint, FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb,
     QVec3, Shape,
@@ -333,8 +334,19 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     if br.trunk_kept {
         out.primitives.extend(t.and_then(|t| trunk_piece(&t, cell)));
     }
-    out.primitives
-        .extend(deck_pieces(&ds, &deck_holes(seed, cell)));
+    let holes = deck_holes(seed, cell);
+    let bites = rim_bites(seed, cell, &ds, &holes, t.as_ref());
+    out.primitives.extend(deck_pieces(&ds, &holes, &bites));
+    // Children keep clear of the bitten slabs.
+    for (deck, rects) in ds.iter().zip(&bites) {
+        out.child_constraints
+            .extend(rects.iter().map(|r| ChildConstraint::KeepOut {
+                aabb: QAabb::new(
+                    QVec3::new(r.x0, deck.top - deck.thickness, r.z0),
+                    QVec3::new(r.x1, deck.top + PORT_CLEARANCE, r.z1),
+                ),
+            }));
+    }
     // Children keep bridge decks and the opening above them clear.
     out.child_constraints.extend(br.primitives.iter().map(|p| {
         let bb = p.aabb();
@@ -424,12 +436,18 @@ pub fn core_pieces(core: Rect, stops: &[Q]) -> Vec<Primitive> {
 }
 
 /// The deck slabs of `cell` as boxes: the cell rectangle minus `holes`, per deck.
-pub fn deck_pieces(decks: &[Deck], holes: &[Rect]) -> Vec<Primitive> {
-    let rects = decompose(holes);
+pub fn deck_pieces(decks: &[Deck], holes: &[Rect], bites: &[Vec<Rect>]) -> Vec<Primitive> {
+    let base = decompose(holes);
     decks
         .iter()
-        .flat_map(|deck| {
-            rects.iter().map(move |r| Primitive {
+        .zip(bites)
+        .flat_map(|(deck, bite)| {
+            let rects = if bite.is_empty() {
+                base.clone()
+            } else {
+                decompose(&[holes, bite].concat())
+            };
+            rects.into_iter().map(move |r| Primitive {
                 shape: Shape::Box {
                     aabb: QAabb::new(
                         QVec3::new(r.x0, deck.top - deck.thickness, r.z0),
@@ -811,18 +829,19 @@ mod tests {
                     let ds = decks(seed, la);
                     assert_eq!(ds, decks(seed, lb));
                     let face = |cell: CellKey, at: Q| -> Vec<(Q, Q, Q, Q)> {
-                        let mut spans: Vec<_> = deck_pieces(&ds, &deck_holes(seed, cell))
-                            .iter()
-                            .map(Primitive::aabb)
-                            .filter(|bb| {
-                                if at == 0 {
-                                    bb.min.x == 0
-                                } else {
-                                    bb.max.x == CELL
-                                }
-                            })
-                            .map(|bb| (bb.min.y, bb.max.y, bb.min.z, bb.max.z))
-                            .collect();
+                        let mut spans: Vec<_> =
+                            deck_pieces(&ds, &deck_holes(seed, cell), &no_bites(&ds))
+                                .iter()
+                                .map(Primitive::aabb)
+                                .filter(|bb| {
+                                    if at == 0 {
+                                        bb.min.x == 0
+                                    } else {
+                                        bb.max.x == CELL
+                                    }
+                                })
+                                .map(|bb| (bb.min.y, bb.max.y, bb.min.z, bb.max.z))
+                                .collect();
                         spans.sort_unstable();
                         // Piece boundaries depend on each cell's own holes; compare coverage.
                         let mut merged: Vec<(Q, Q, Q, Q)> = Vec::new();
@@ -860,7 +879,7 @@ mod tests {
             let cell = l1(x, 2, -x);
             let ds = decks(seed, LayerKey::of(cell, DECK_REGION_LOG2));
             let holes = deck_holes(seed, cell);
-            let rects: Vec<Rect> = deck_pieces(&ds, &holes)
+            let rects: Vec<Rect> = deck_pieces(&ds, &holes, &no_bites(&ds))
                 .iter()
                 .take(decompose(&holes).len())
                 .map(|p| {
@@ -1242,5 +1261,104 @@ mod tests {
             }
         }
         assert!(with_bridges > 0);
+    }
+
+    fn no_bites(ds: &[Deck]) -> Vec<Vec<Rect>> {
+        vec![Vec::new(); ds.len()]
+    }
+
+    /// P0.7.8: bites never disconnect a deck from its port faces or the core.
+    #[test]
+    fn rim_decks_stay_connected() {
+        use crate::cavity::cavity_mask;
+        use crate::regime::{RareEvent, rare_event};
+        let seed = WorldSeed(0xCA7);
+        let (mut rims, mut bitten) = (0, 0);
+        for i in 0..2000i64 {
+            let l0 = I64Vec3::new(i % 50 - 25, i / 50 - 20, 3);
+            if rare_event(seed, l0) != RareEvent::GiantCavity {
+                continue;
+            }
+            let mask = cavity_mask(seed, l0);
+            for z in 0..8usize {
+                for y in 0..8usize {
+                    for x in 0..8usize {
+                        let cell = CellKey::new(
+                            Level::L1,
+                            l0 * 8
+                                + I64Vec3::from_array([x, y, z].map(|v| i64::try_from(v).unwrap())),
+                        );
+                        if mask.get([x, y, z]) || !crate::l1_rim::is_rim(seed, cell) {
+                            continue;
+                        }
+                        rims += 1;
+                        let out = l1_cell(seed, cell);
+                        let core = core_footprint(seed, ColumnKey::of(cell));
+                        let ds = decks(seed, LayerKey::of(cell, DECK_REGION_LOG2));
+                        let faces: Vec<usize> = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, (dx, dz))| {
+                                !is_cavity(
+                                    seed,
+                                    l1(cell.coords.x + dx, cell.coords.y, cell.coords.z + dz),
+                                )
+                            })
+                            .map(|(s, _)| s)
+                            .collect();
+                        for d in &ds {
+                            let rects: Vec<Rect> = out
+                                .primitives
+                                .iter()
+                                .filter(|p| p.kind == FeatureKind::DECK && p.aabb().max.y == d.top)
+                                .map(|p| {
+                                    let bb = p.aabb();
+                                    Rect {
+                                        x0: bb.min.x,
+                                        z0: bb.min.z,
+                                        x1: bb.max.x,
+                                        z1: bb.max.z,
+                                    }
+                                })
+                                .collect();
+                            let full = decompose(&deck_holes(seed, cell)).len();
+                            bitten += usize::from(rects.len() != full);
+                            // Edge-sharing connectivity (positive overlap on one axis).
+                            let share = |a: &Rect, b: &Rect| {
+                                (a.x1 == b.x0 || b.x1 == a.x0) && a.z0 < b.z1 && b.z0 < a.z1
+                                    || (a.z1 == b.z0 || b.z1 == a.z0) && a.x0 < b.x1 && b.x0 < a.x1
+                            };
+                            let mut seen = vec![false; rects.len()];
+                            let mut stack = vec![0];
+                            seen[0] = true;
+                            while let Some(a) = stack.pop() {
+                                for b in 0..rects.len() {
+                                    if !seen[b] && share(&rects[a], &rects[b]) {
+                                        seen[b] = true;
+                                        stack.push(b);
+                                    }
+                                }
+                            }
+                            assert!(seen.iter().all(|&s| s), "{cell:?} deck {d:?} split");
+                            for &f in &faces {
+                                let at = |r: &Rect| match f {
+                                    0 => r.x0 == 0,
+                                    1 => r.x1 == CELL,
+                                    2 => r.z0 == 0,
+                                    _ => r.z1 == CELL,
+                                };
+                                assert!(rects.iter().any(at), "{cell:?} deck misses face {f}");
+                            }
+                            assert!(
+                                rects.iter().any(|r| r.dist2_rect(&core) == 0),
+                                "{cell:?} deck misses core"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(rims > 100, "{rims}");
+        assert!(bitten > 10, "only {bitten} bitten decks");
     }
 }

@@ -170,6 +170,8 @@ Each cell in `[a, b]` emits the trunk as a vertical `Cylinder` clipped to its ow
 
 Bitten tiles are removed from the deck pieces before the rectangle decomposition (§4.2). Children receive the bitten area as `KeepOut`.
 
+**As implemented** (`worldgen::l1_rim`, P0.7.8): `k` is drawn as `range(29, 42) / 32`. Tiles are kept (never bitten) on the edge row of every port-carrying face, and within 64 m of any hole (core, shaft, chasm) or of the cell's trunk (radius + 64 m). Connectivity is checked on the 4-connected unbitten tile set, which must be one component containing every kept face-edge tile and every tile within 64 m of the core. A deck whose slice is empty has no bite. `KeepOut` per bite rectangle spans the slab from its underside to 4 m above its top.
+
 The ceiling and floor of a cavity are the deck undersides and tops of the cells above and below. They are not rounded, so vertical rounding comes from the voxel blob alone.
 
 ### 4.7 Sanctuary selection `[SANCTUARY]`
