@@ -186,6 +186,8 @@ The ceiling and floor of a cavity are the deck undersides and tops of the cells 
 
 ## 5. L2: Districts (512 m)
 
+**L1 context query** (`worldgen::l1_query::L1Context`, P0.8.1): `classify(p)` for a point in L1-cell-local metres returns `TrunkInterior` inside a trunk, else `Structure` inside any other collidable solid (deck, bridge, core wall), else `DeckSurface` for open air within 0.5 m above a deck or bridge top, else `Void`. Lift-shaft volumes and `NO_COLLIDE` pieces are ignored.
+
 | | |
 |---|---|
 | **Inputs** | parent L1 output (context query P0.8.1: structure, void, deck top, trunk interior), the regime, the parent's `KeepOut`, `ForcedPort` and `Zone` constraints, keys |
