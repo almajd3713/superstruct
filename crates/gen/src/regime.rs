@@ -5,6 +5,7 @@ use glam::I64Vec3;
 
 use crate::cell::Level;
 use crate::hash::hash;
+use crate::key::ColumnKey;
 use crate::rng::Rng;
 use crate::salt;
 use crate::seed::WorldSeed;
@@ -186,6 +187,38 @@ fn rare_event_draw(seed: WorldSeed, cell: I64Vec3) -> (RareEvent, Rng) {
         .pick_weighted(&weights)
         .map_or(RareEvent::None, |i| RareEvent::TABLE[i].0);
     (event, rng)
+}
+
+/// The infinite staircase through one L0 column (spec §5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RareStair {
+    /// The L1 column it occupies inside the L0 column, each in `0..8`.
+    pub l1_x: u8,
+    pub l1_z: u8,
+}
+
+/// Staircase presence per L0 column, out of 1000.
+pub const RARE_STAIR_PER_MILLE: u64 = 4;
+
+/// The infinite staircase of an L0 column, if it has one. The footprint inside the L1 column
+/// is placed by L1 under its separation rule.
+#[allow(clippy::cast_possible_truncation)] // below(8) < 8
+pub fn rare_stair(seed: WorldSeed, column: ColumnKey) -> Option<RareStair> {
+    debug_assert_eq!(column.level, Level::L0);
+    let mut rng = Rng::new(hash(
+        seed.0,
+        Level::L0,
+        column.hash_coords(),
+        salt::RARE_STAIR,
+    ));
+    if rng.below(1000) >= RARE_STAIR_PER_MILLE {
+        return None;
+    }
+    Some(RareStair {
+        l1_x: rng.below(8) as u8,
+        l1_z: rng.below(8) as u8,
+    })
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // result in [lo, hi]
@@ -398,6 +431,89 @@ mod tests {
                     "{} palette {p:?}",
                     def.name
                 );
+            }
+        }
+    }
+
+    /// P0.6.2: each event's frequency over 10⁵ cells is within ±10% of its weight.
+    #[test]
+    fn event_frequencies() {
+        let seed = WorldSeed(0xE7E7);
+        let mut counts = [0u32; RareEvent::TABLE.len()];
+        for i in 0..100_000i64 {
+            let event = rare_event(seed, I64Vec3::new(i % 400 - 200, i / 400 - 125, -i % 3));
+            let k = RareEvent::TABLE
+                .iter()
+                .position(|&(e, _)| e == event)
+                .unwrap();
+            counts[k] += 1;
+        }
+        for (&(event, weight), count) in RareEvent::TABLE.iter().zip(counts) {
+            let expected = 100.0 * f64::from(weight);
+            let ratio = f64::from(count) / expected;
+            assert!(
+                (0.9..1.1).contains(&ratio),
+                "{event:?}: {count} vs {expected}"
+            );
+        }
+    }
+
+    /// The regime's event is the per-cell event.
+    #[test]
+    fn regime_event_matches_rare_event() {
+        let seed = WorldSeed(3);
+        for x in -50..50 {
+            let cell = I64Vec3::new(x, 1, -x);
+            assert_eq!(regime(seed, cell).event, rare_event(seed, cell));
+        }
+    }
+
+    /// Staircase columns: frequency 4/1000 (±10%), and the L1 column is uniform over 8×8.
+    #[test]
+    fn rare_stair_frequency_and_placement() {
+        let seed = WorldSeed(0x57A1);
+        let mut present = 0u32;
+        let mut per_l1 = [0u32; 64];
+        for x in -500..500 {
+            for z in -500..500 {
+                let column = ColumnKey {
+                    level: Level::L0,
+                    x,
+                    z,
+                };
+                if let Some(s) = rare_stair(seed, column) {
+                    assert!(s.l1_x < 8 && s.l1_z < 8);
+                    present += 1;
+                    per_l1[usize::from(s.l1_z * 8 + s.l1_x)] += 1;
+                }
+            }
+        }
+        let ratio = f64::from(present) / 4_000.0;
+        assert!(
+            (0.9..1.1).contains(&ratio),
+            "{present} staircases in 10⁶ columns"
+        );
+        let e = f64::from(present) / 64.0;
+        let chi2: f64 = per_l1.iter().map(|&c| (f64::from(c) - e).powi(2) / e).sum();
+        // 63 degrees of freedom: p = 0.001 at 103.4.
+        assert!(chi2 < 103.4, "L1 column chi-square {chi2:.1}");
+    }
+
+    /// Every L0 cell in a column agrees on the staircase.
+    #[test]
+    fn rare_stair_is_per_column() {
+        use crate::cell::CellKey;
+        let seed = WorldSeed(0x57A1);
+        for x in -40..40 {
+            for z in -40..40 {
+                let at = |y| {
+                    rare_stair(
+                        seed,
+                        ColumnKey::of(CellKey::new(Level::L0, I64Vec3::new(x, y, z))),
+                    )
+                };
+                assert_eq!(at(-3), at(0));
+                assert_eq!(at(0), at(1_000_000));
             }
         }
     }
