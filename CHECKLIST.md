@@ -26,7 +26,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.1.4** Add workspace lints (`[workspace.lints]`: `unsafe_code = "deny"` in `gen`, clippy pedantic subset) and `rustfmt.toml`. *Done when:* `cargo clippy --workspace --all-targets -- -D warnings` passes. (2026-10-17)
 - [x] **P0.1.5** Add release and dev profiles: release with `lto = "thin"` and `codegen-units = 1`, dev with `opt-level = 1` for `gen` and deps. *Done when:* both profiles build. (2026-10-17)
 - [x] **P0.1.6** Write `scripts/check.sh` (fmt check, clippy `-D warnings`, `cargo test --workspace`). *Done when:* the script exits 0 on the empty workspace and non-zero on a deliberate fmt violation. (2026-10-17)
-- [ ] **P0.1.7** Create the `docs/spec/`, `docs/playtests/` and `out/` directories, each with a `.gitkeep` where needed. *Done when:* the directories exist and `out/` is ignored.
+- [x] **P0.1.7** Create the `docs/spec/`, `docs/playtests/` and `out/` directories, each with a `.gitkeep` where needed. *Done when:* the directories exist and `out/` is ignored. (2026-10-17)
 - [ ] **P0.1.8** Update docs that say `gen::…` (e.g. CLAUDE.md §6 `gen::salt`) to the library name `worldgen`: `gen` is a reserved keyword in edition 2024, so the `gen` package exposes its lib as `worldgen`. CLAUDE.md edits need user agreement. *Done when:* no doc refers to a `gen::` path.
 
 ### P0.2 Specification documents (spec before code)
