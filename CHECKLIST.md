@@ -27,7 +27,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.1.5** Add release and dev profiles: release with `lto = "thin"` and `codegen-units = 1`, dev with `opt-level = 1` for `gen` and deps. *Done when:* both profiles build. (2026-10-17)
 - [x] **P0.1.6** Write `scripts/check.sh` (fmt check, clippy `-D warnings`, `cargo test --workspace`). *Done when:* the script exits 0 on the empty workspace and non-zero on a deliberate fmt violation. (2026-10-17)
 - [x] **P0.1.7** Create the `docs/spec/`, `docs/playtests/` and `out/` directories, each with a `.gitkeep` where needed. *Done when:* the directories exist and `out/` is ignored. (2026-10-17)
-- [ ] **P0.1.8** Update docs that say `gen::…` (e.g. CLAUDE.md §6 `gen::salt`) to the library name `worldgen`: `gen` is a reserved keyword in edition 2024, so the `gen` package exposes its lib as `worldgen`. CLAUDE.md edits need user agreement. *Done when:* no doc refers to a `gen::` path.
+- [x] **P0.1.8** Update docs that say `gen::…` (e.g. CLAUDE.md §6 `gen::salt`) to the library name `worldgen`: `gen` is a reserved keyword in edition 2024, so the `gen` package exposes its lib as `worldgen`. CLAUDE.md edits need user agreement. *Done when:* no doc refers to a `gen::` path. (2026-10-17)
 
 ### P0.2 Specification documents (spec before code)
 - [ ] **P0.2.1** `docs/spec/coordinates.md` covers:
@@ -96,7 +96,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 ### P0.4 Hashing and RNG
 - [ ] **P0.4.1** Implement `hash(seed, level, cell, salt) -> u64` per `hashing.md`. *Done when:* the pinned test vectors pass.
 - [ ] **P0.4.2** Implement the in-house RNG with `next_u32`, `next_f32` (in [0,1)), `range_i32`, `chance(p)` and `pick_weighted`. *Done when:* pinned sequence tests pass, plus a basic uniformity test (chi-square over 10⁶ samples).
-- [ ] **P0.4.3** Add the `gen::salt` registry module with a test that asserts all salts are unique. *Done when:* the test passes.
+- [ ] **P0.4.3** Add the `worldgen::salt` registry module with a test that asserts all salts are unique. *Done when:* the test passes.
 - [ ] **P0.4.4** Add `GEN_VERSION` and `WorldSeed` types, with the seed parsed from a string or number. *Done when:* the same string always gives the same seed (tested).
 
 ### P0.5 Primitives and cell output

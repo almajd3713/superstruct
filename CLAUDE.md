@@ -125,7 +125,7 @@ out/                    tool and screenshot output (git-ignored)
 ## 6. Hashing and randomness
 
 - A single hash entry point: `hash(seed, level, cell: I64Vec3, salt: u64) -> u64`. The exact algorithm and pinned test vectors live in `docs/spec/hashing.md`.
-- Every distinct decision uses its own **salt constant** from a single registry module (`gen::salt`). Never reuse a salt for two different purposes, and never inline magic salts.
+- Every distinct decision uses its own **salt constant** from a single registry module (`worldgen::salt`; the `gen` package's library is named `worldgen` because `gen` is a reserved keyword in edition 2024). Never reuse a salt for two different purposes, and never inline magic salts.
 - Per-cell sequential randomness comes from a small in-house RNG seeded from that hash. Do not use the `rand` crate in `gen`.
 
 ## 7. Environment and running
