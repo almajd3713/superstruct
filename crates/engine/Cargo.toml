@@ -22,5 +22,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 toml = "1.1.8"
 tracing = "0.1.44"
+tracy-client = { version = "0.19.0", optional = true }
 wgpu = "30.0.1"
 winit = "0.30.13"
+
+[features]
+tracy = ["dep:tracy-client"]

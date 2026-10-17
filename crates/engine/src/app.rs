@@ -206,6 +206,7 @@ impl App {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("frame"),
                     });
+            crate::zone!("record scene");
             running.renderer.render(
                 &running.gpu.queue,
                 &mut encoder,
@@ -231,6 +232,7 @@ impl App {
                 shader_error: running.renderer.shader_error(),
                 timer: &running.timer,
             };
+            crate::zone!("overlay prepare");
             running.overlay.prepare(
                 &running.gpu.device,
                 &running.gpu.queue,
@@ -247,12 +249,14 @@ impl App {
                 .overlay
                 .render(&mut encoder, &ui_view, running.gpu.size(), &running.timer);
             running.timer.resolve(&mut encoder);
+            crate::zone!("submit");
             running.gpu.queue.submit([encoder.finish()]);
             running.timer.after_submit();
             if want_screenshot {
                 save_screenshot(&running.gpu, &frame.texture);
             }
             running.window.pre_present_notify();
+            crate::zone!("present");
             running.gpu.queue.present(frame);
             presented = true;
         }
@@ -263,6 +267,7 @@ impl App {
         if self.running.is_none() {
             return;
         }
+        crate::zone!("frame");
         let now = Instant::now();
         let frame_time = now
             .duration_since(self.last_frame)
@@ -277,6 +282,7 @@ impl App {
         }
 
         self.accumulator += frame_time;
+        crate::zone!("simulate");
         while self.accumulator >= SIM_DT {
             self.prev_cam_pos = self.camera.pos;
             self.fly(SIM_DT as f32);
@@ -289,9 +295,13 @@ impl App {
         self.handle_actions();
         self.input.end_frame();
 
-        let presented = self.draw(alpha, frame_time, want_screenshot);
+        let presented = {
+            crate::zone!("draw");
+            self.draw(alpha, frame_time, want_screenshot)
+        };
         self.quit |= presented && autoshot;
 
+        crate::profile::frame_mark();
         self.fps_frames += 1;
         let elapsed = now.duration_since(self.fps_window_start);
         if elapsed >= Duration::from_secs(1) {

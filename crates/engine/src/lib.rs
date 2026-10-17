@@ -12,6 +12,7 @@ pub mod headless;
 pub mod input;
 pub mod mesh;
 pub mod overlay;
+pub mod profile;
 pub mod readback;
 pub mod renderer;
 pub mod settings;
