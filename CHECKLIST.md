@@ -87,7 +87,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 
 ### P0.3 `gen` core types
 - [x] **P0.3.1** `WorldPos { sector: I64Vec3, local: Vec3 }` with `normalize()`, `offset(Vec3)` and `delta(&WorldPos) -> DVec3`. *Done when:* unit tests cover crossing sector boundaries in both directions on every axis. (2026-10-17)
-- [ ] **P0.3.2** Floor-division helpers for i64 and `CellKey { level, coords: I64Vec3 }` with `WorldPos → CellKey` for each level. *Done when:* tests pass at 0, −1, sector edges and ±2⁵⁰.
+- [x] **P0.3.2** Floor-division helpers for i64 and `CellKey { level, coords: I64Vec3 }` with `WorldPos → CellKey` for each level. *Done when:* tests pass at 0, −1, sector edges and ±2⁵⁰. (2026-10-17)
 - [ ] **P0.3.3** `CellKey::parent()`, `children()`, `aabb_world()` and `neighbor(dir)`. *Done when:* proptest checks that `child.parent() == cell` for every child, and that a neighbour's neighbour in the opposite direction is the original cell.
 - [ ] **P0.3.4** `FaceKey` canonicalization: the cell plus axis, owned by the lower-coordinate cell. *Done when:* proptest checks that both adjacent cells produce the identical key for their shared face.
 - [ ] **P0.3.5** Column and layer key helpers (`ColumnKey(level, x, z)`, `LayerKey(level, y, region)`), if chosen in P0.2.4. *Done when:* tests pass.
