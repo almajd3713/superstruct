@@ -47,6 +47,54 @@ pub struct DebugBox {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkHandle(pub u32);
 
+/// Per-chunk record in the instance storage buffer; mirrored by `Instance` in `scene.wgsl`.
+/// The culling pass (P3.1.3) reads `bounds` and `mesh` and writes the indirect arguments.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct Instance {
+    /// Camera-relative chunk origin; w unused.
+    origin: [f32; 4],
+    /// Chunk-local bounding sphere: centre xyz, radius w.
+    bounds: [f32; 4],
+    /// first index, index count, base vertex (bit cast from i32), LOD band (0 until P3.2).
+    mesh: [u32; 4],
+}
+
+/// Layout of `wgpu`'s indirect indexed draw arguments.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct IndirectArgs {
+    index_count: u32,
+    instance_count: u32,
+    first_index: u32,
+    base_vertex: i32,
+    first_instance: u32,
+}
+
+/// Consecutive instances that live in the same buffer page and share one multi-draw.
+#[derive(Clone, Copy)]
+struct DrawRun {
+    page: usize,
+    start: u32,
+    count: u32,
+}
+
+fn bounding_sphere(vertices: &[Vertex]) -> [f32; 4] {
+    let mut lo = Vec3::splat(f32::MAX);
+    let mut hi = Vec3::splat(f32::MIN);
+    for v in vertices {
+        let p = Vec3::from(v.position);
+        lo = lo.min(p);
+        hi = hi.max(p);
+    }
+    let c = (lo + hi) * 0.5;
+    let r = vertices
+        .iter()
+        .map(|v| Vec3::from(v.position).distance(c))
+        .fold(0.0, f32::max);
+    [c.x, c.y, c.z, r]
+}
+
 /// Vertices and indices per shared buffer page. A chunk bigger than a page gets a page of its
 /// own size.
 const PAGE_VERTICES: u32 = 1 << 21;
@@ -104,6 +152,7 @@ struct GpuChunk {
     page: usize,
     vertices: Range,
     indices: Range,
+    bounds: [f32; 4],
     bytes: u64,
     visible: bool,
 }
@@ -153,8 +202,11 @@ pub struct Renderer {
     depth_size: (u32, u32),
     globals_buf: wgpu::Buffer,
     globals_bg: wgpu::BindGroup,
-    draws_buf: wgpu::Buffer,
-    draws_bg: wgpu::BindGroup,
+    instances_buf: wgpu::Buffer,
+    instances_bg: wgpu::BindGroup,
+    indirect_buf: wgpu::Buffer,
+    /// Whether indirect draws may use a non-zero first instance.
+    indirect_first_instance: bool,
     scene_layout: wgpu::PipelineLayout,
     lines_layout: wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
@@ -166,7 +218,9 @@ pub struct Renderer {
     next_handle: u32,
     gpu_bytes: u64,
     page_bytes: u64,
-    origins_scratch: Vec<[f32; 4]>,
+    instance_scratch: Vec<Instance>,
+    indirect_scratch: Vec<IndirectArgs>,
+    runs: Vec<DrawRun>,
     lines_buf: wgpu::Buffer,
     lines_scratch: Vec<LineVertex>,
 }
@@ -221,10 +275,16 @@ impl Renderer {
             }],
         });
 
-        let draws_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("draw origins"),
-            size: (MAX_DRAWS * 16) as u64,
+        let instances_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("instances"),
+            size: (MAX_DRAWS * std::mem::size_of::<Instance>()) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let indirect_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("indirect args"),
+            size: (MAX_DRAWS * std::mem::size_of::<IndirectArgs>()) as u64,
+            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let draws_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -245,7 +305,7 @@ impl Renderer {
             layout: &draws_bgl,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: draws_buf.as_entire_binding(),
+                resource: instances_buf.as_entire_binding(),
             }],
         });
 
@@ -278,8 +338,12 @@ impl Renderer {
             depth_size: size,
             globals_buf,
             globals_bg,
-            draws_buf,
-            draws_bg,
+            instances_buf,
+            instances_bg: draws_bg,
+            indirect_buf,
+            indirect_first_instance: device
+                .features()
+                .contains(wgpu::Features::INDIRECT_FIRST_INSTANCE),
             scene_layout,
             lines_layout,
             format,
@@ -291,7 +355,9 @@ impl Renderer {
             next_handle: 0,
             gpu_bytes: 0,
             page_bytes: 0,
-            origins_scratch: Vec::with_capacity(MAX_DRAWS),
+            instance_scratch: Vec::with_capacity(MAX_DRAWS),
+            indirect_scratch: Vec::with_capacity(MAX_DRAWS),
+            runs: Vec::new(),
             lines_buf,
             lines_scratch: Vec::with_capacity(4096),
         }
@@ -356,6 +422,7 @@ impl Renderer {
             page,
             vertices,
             indices,
+            bounds: bounding_sphere(&mesh.vertices),
             bytes,
             visible: true,
         });
@@ -455,23 +522,54 @@ impl Renderer {
     }
 
     /// Camera-relative origin of every drawn chunk, in draw order.
-    fn write_draw_origins(&mut self, queue: &wgpu::Queue, cam: &WorldPos) {
-        self.origins_scratch.clear();
-        self.origins_scratch.extend(
-            self.chunks
-                .iter()
-                .filter(|c| c.visible)
-                .take(MAX_DRAWS)
-                .map(|d| {
-                    let r = camera_relative(&d.origin, cam);
-                    [r.x, r.y, r.z, 0.0]
+    /// Rebuilds the instance and indirect-argument arrays for the visible chunks, grouped by
+    /// buffer page so each page needs one multi-draw.
+    fn write_instances(&mut self, queue: &wgpu::Queue, cam: &WorldPos) {
+        self.instance_scratch.clear();
+        self.indirect_scratch.clear();
+        self.runs.clear();
+        let mut order: Vec<&GpuChunk> = self.chunks.iter().filter(|c| c.visible).collect();
+        order.truncate(MAX_DRAWS);
+        order.sort_by_key(|c| c.page);
+        for (i, c) in order.iter().enumerate() {
+            let r = camera_relative(&c.origin, cam);
+            let base_vertex = c.vertices.offset.cast_signed();
+            self.instance_scratch.push(Instance {
+                origin: [r.x, r.y, r.z, 0.0],
+                bounds: c.bounds,
+                mesh: [
+                    c.indices.offset,
+                    c.indices.len,
+                    base_vertex.cast_unsigned(),
+                    0,
+                ],
+            });
+            self.indirect_scratch.push(IndirectArgs {
+                index_count: c.indices.len,
+                instance_count: 1,
+                first_index: c.indices.offset,
+                base_vertex,
+                first_instance: i as u32,
+            });
+            match self.runs.last_mut() {
+                Some(run) if run.page == c.page => run.count += 1,
+                _ => self.runs.push(DrawRun {
+                    page: c.page,
+                    start: i as u32,
+                    count: 1,
                 }),
-        );
-        if !self.origins_scratch.is_empty() {
+            }
+        }
+        if !self.instance_scratch.is_empty() {
             queue.write_buffer(
-                &self.draws_buf,
+                &self.instances_buf,
                 0,
-                bytemuck::cast_slice(&self.origins_scratch),
+                bytemuck::cast_slice(&self.instance_scratch),
+            );
+            queue.write_buffer(
+                &self.indirect_buf,
+                0,
+                bytemuck::cast_slice(&self.indirect_scratch),
             );
         }
     }
@@ -514,7 +612,7 @@ impl Renderer {
         };
         queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
-        self.write_draw_origins(queue, &camera.pos);
+        self.write_instances(queue, &camera.pos);
 
         self.lines_scratch.clear();
         for b in boxes {
@@ -561,27 +659,28 @@ impl Renderer {
             timestamp_writes: timer.and_then(|t| t.pass_writes(Zone::Scene)),
             ..Default::default()
         });
-        if self.chunks.iter().any(|c| c.visible) {
+        if !self.runs.is_empty() {
             pass.set_pipeline(&self.scene_pipeline);
             pass.set_bind_group(0, &self.globals_bg, &[]);
-            pass.set_bind_group(1, &self.draws_bg, &[]);
-            for (i, c) in self
-                .chunks
-                .iter()
-                .filter(|c| c.visible)
-                .take(MAX_DRAWS)
-                .enumerate()
-            {
-                let i = i as u32;
-                let page = &self.pages[c.page];
+            pass.set_bind_group(1, &self.instances_bg, &[]);
+            let stride = std::mem::size_of::<IndirectArgs>() as u64;
+            for run in &self.runs {
+                let page = &self.pages[run.page];
                 pass.set_vertex_buffer(0, page.vertex_buf.slice(..));
                 pass.set_index_buffer(page.index_buf.slice(..), wgpu::IndexFormat::Uint32);
-                let first = c.indices.offset;
-                pass.draw_indexed(
-                    first..first + c.indices.len,
-                    c.vertices.offset.cast_signed(),
-                    i..i + 1,
-                );
+                if self.indirect_first_instance {
+                    pass.multi_draw_indexed_indirect(
+                        &self.indirect_buf,
+                        u64::from(run.start) * stride,
+                        run.count,
+                    );
+                } else {
+                    let range = run.start as usize..(run.start + run.count) as usize;
+                    for (a, i) in self.indirect_scratch[range].iter().zip(run.start..) {
+                        let first = a.first_index;
+                        pass.draw_indexed(first..first + a.index_count, a.base_vertex, i..i + 1);
+                    }
+                }
             }
         }
         if !self.lines_scratch.is_empty() {

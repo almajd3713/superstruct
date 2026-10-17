@@ -1,7 +1,15 @@
 // Greybox scene shader: Lambert plus a world-aligned 1 m / 8 m grid.
 // `common.wgsl` is prepended at load time.
 
-@group(1) @binding(0) var<storage, read> draw_origins: array<vec4<f32>>;
+struct Instance {
+    origin: vec4<f32>,
+    // Chunk-local bounding sphere, used by the culling pass.
+    bounds: vec4<f32>,
+    // First index, index count, base vertex, LOD band.
+    mesh: vec4<u32>,
+};
+
+@group(1) @binding(0) var<storage, read> instances: array<Instance>;
 
 struct VsIn {
     @builtin(instance_index) draw: u32,
@@ -30,7 +38,7 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
 fn vs_main(in: VsIn) -> VsOut {
     var out: VsOut;
     // Camera-relative: the chunk origin was subtracted on the CPU in f64.
-    let rel = draw_origins[in.draw].xyz + in.position;
+    let rel = instances[in.draw].origin.xyz + in.position;
     out.rel = rel;
     out.clip = globals.view_proj * vec4<f32>(rel, 1.0);
     out.normal = oct_decode(in.normal_oct);

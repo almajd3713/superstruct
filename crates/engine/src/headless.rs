@@ -29,12 +29,16 @@ impl Headless {
             ..Default::default()
         }))
         .ok()?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("headless"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            ..Default::default()
-        }))
+        let (device, queue) = pollster::block_on(
+            adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("headless"),
+                required_features: adapter
+                    .features()
+                    .intersection(wgpu::Features::INDIRECT_FIRST_INSTANCE),
+                required_limits: adapter.limits(),
+                ..Default::default()
+            }),
+        )
         .ok()?;
         Some(Self {
             device,
