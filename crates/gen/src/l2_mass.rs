@@ -5,7 +5,6 @@
 
 use crate::cell::{CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::hash::hash;
-use crate::l1::l1_cell;
 use crate::prim::{
     CellOutput, ChildConstraint, FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb, QVec3,
     Shape,
@@ -22,21 +21,19 @@ pub const CELL: Q = 512 * M;
 const GAP: Q = 8 * M;
 const TRIES: u32 = 8;
 
-/// The L2 masses of `cell`, in order of attempt. Computes the parent L1 cell itself; use
-/// `masses_in` when generating many L2 cells of one parent.
-pub fn masses(seed: WorldSeed, cell: CellKey) -> Vec<Primitive> {
-    debug_assert_eq!(cell.level, Level::L2);
-    let parent = CellKey::new(Level::L1, cell.coords.map(|v| floor_div_pow2(v, 3)));
-    masses_in(seed, cell, &l1_cell(seed, parent))
-}
-
-/// `masses` given the output of the parent L1 cell.
+/// The L2 masses of `cell`, in order of attempt. `parent` is the output of the parent L1 cell
+/// and `avoid` the volumes (port corridors) masses keep 8 m away from.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss
 )] // weights ≤ 3, tries < 8
-pub fn masses_in(seed: WorldSeed, cell: CellKey, parent: &CellOutput) -> Vec<Primitive> {
+pub fn masses_in(
+    seed: WorldSeed,
+    cell: CellKey,
+    parent: &CellOutput,
+    avoid: &[QAabb],
+) -> Vec<Primitive> {
     debug_assert_eq!(cell.level, Level::L2);
     let c = cell.coords;
     let l0 = c.map(|v| floor_div_pow2(v, 6));
@@ -62,7 +59,8 @@ pub fn masses_in(seed: WorldSeed, cell: CellKey, parent: &CellOutput) -> Vec<Pri
     // The cell's offset inside its L1 parent.
     let o = c.map(|v| floor_mod_pow2(v, 3) * i64::from(CELL));
     let [ox, oy, oz] = [o.x, o.y, o.z].map(|v| v as Q);
-    let ctx = Parent::new(parent, [ox, oy, oz]);
+    let mut ctx = Parent::new(parent, [ox, oy, oz]);
+    ctx.keepouts.extend(avoid.iter().map(|a| inflate(a, GAP)));
     let tops = ctx.deck_tops();
 
     let mut placed: Vec<QAabb> = Vec::new();
@@ -102,8 +100,8 @@ pub fn masses_in(seed: WorldSeed, cell: CellKey, parent: &CellOutput) -> Vec<Pri
 }
 
 /// The parent's data shifted into the L2 cell's frame.
-struct Parent {
-    keepouts: Vec<QAabb>,
+pub(crate) struct Parent {
+    pub(crate) keepouts: Vec<QAabb>,
     solids: Vec<QAabb>,
     /// `(x, z, radius)` of each trunk.
     trunks: Vec<(Q, Q, Q)>,
@@ -111,7 +109,14 @@ struct Parent {
     decks: Vec<(Q, [Q; 4])>,
 }
 
-fn shift(bb: &QAabb, [ox, oy, oz]: [Q; 3]) -> QAabb {
+fn inflate(a: &QAabb, by: Q) -> QAabb {
+    QAabb::new(
+        QVec3::new(a.min.x - by, a.min.y - by, a.min.z - by),
+        QVec3::new(a.max.x + by, a.max.y + by, a.max.z + by),
+    )
+}
+
+pub(crate) fn shift(bb: &QAabb, [ox, oy, oz]: [Q; 3]) -> QAabb {
     QAabb::new(
         QVec3::new(bb.min.x - ox, bb.min.y - oy, bb.min.z - oz),
         QVec3::new(bb.max.x - ox, bb.max.y - oy, bb.max.z - oz),
@@ -119,7 +124,7 @@ fn shift(bb: &QAabb, [ox, oy, oz]: [Q; 3]) -> QAabb {
 }
 
 impl Parent {
-    fn new(parent: &CellOutput, o: [Q; 3]) -> Self {
+    pub(crate) fn new(parent: &CellOutput, o: [Q; 3]) -> Self {
         let mut p = Self {
             keepouts: Vec::new(),
             solids: Vec::new(),
@@ -166,7 +171,7 @@ impl Parent {
     }
 
     /// Whether `a` is fully supported by deck at its bottom, and clear of everything else.
-    fn fits(&self, a: &QAabb) -> bool {
+    pub(crate) fn fits(&self, a: &QAabb) -> bool {
         let area = i64::from(a.max.x - a.min.x) * i64::from(a.max.z - a.min.z);
         let covered: i64 = self
             .decks
@@ -216,6 +221,7 @@ mod tests {
     use glam::{I64Vec3, Vec3};
 
     use super::*;
+    use crate::l1::l1_cell;
     use crate::l1_query::{L1Context, Volume};
 
     /// P0.8.2: no mass touches an L1 solid, keep-out or void, and every mass stands on deck.
@@ -236,8 +242,7 @@ mod tests {
                     for k in 0..512i64 {
                         let o = I64Vec3::new(k % 8, k / 64, k / 8 % 8);
                         let cell = CellKey::new(Level::L2, l1.coords * 8 + o);
-                        let ms = masses_in(seed, cell, &out);
-                        assert_eq!(ms, masses(seed, cell));
+                        let ms = masses_in(seed, cell, &out, &[]);
                         total += ms.len();
                         let origin = Vec3::new(o.x as f32, o.y as f32, o.z as f32) * 512.0;
                         check(&ctx, &out, &ms, origin, CELL, cell);

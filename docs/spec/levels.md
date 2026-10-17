@@ -219,6 +219,8 @@ The span is the parent L1 cell's 8 L2 cells. A tower connects the walkable level
 
 ### 5.3 Walkways, ramps and stairs `[WALKWAY]`, `[RAMP]`
 
+**As implemented** (`worldgen::l2`, `l2_walk`, P0.8.4): for each walkway port, each cell builds its half of the skywalk (`Skywalk`): a 0.5 m `GRATING` slab 8 m long from the face at the port's floor, then a `StairRun` (rise 3 Q, tread 5 Q) descending away from the face to the deck top, ending up to 2 Q below the slab (a step). Heights are multiples of 4 m, so every stair is over 3 m and no ramp is needed. The corridor is a `KeepOut`, and masses keep 8 m from it (P0.8.3b). Skywalk halves use only ports and L1 data, so the walkway-port connectivity is by construction; the validator confirms it in tests. Spanning trees between ports, loops and mass entrances are not implemented yet.
+
 This implements cell-level connectivity (CLAUDE.md §3.5, `ports.md`):
 
 1. Gather this cell's ports (cascaded and own face ports), the mass entrances and the tower or shaft landings.

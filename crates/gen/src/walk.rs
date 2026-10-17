@@ -325,6 +325,86 @@ fn find(p: &mut [usize], mut i: usize) -> usize {
     i
 }
 
+/// The primitives of `parent` that meet the cube of `size` quanta at `origin` (in the parent's
+/// frame), moved into that cube's frame. Boxes are cut to the cube in plan, never in height,
+/// so a deck's top stays where it is. Lift shafts and cylinders move whole.
+pub fn cell_window(parent: &[Primitive], origin: [Q; 3], size: Q) -> Vec<Primitive> {
+    let [ox, oy, oz] = origin;
+    let shift = |v: crate::prim::QVec3| crate::prim::QVec3::new(v.x - ox, v.y - oy, v.z - oz);
+    let margin = 2 * crate::prim::Q_PER_M;
+    parent
+        .iter()
+        .filter_map(|p| {
+            let bb = p.aabb();
+            let (lo, hi) = (shift(bb.min), shift(bb.max));
+            let meets = lo.x < size
+                && hi.x > 0
+                && lo.z < size
+                && hi.z > 0
+                && lo.y < size + margin
+                && hi.y > -margin;
+            if !meets {
+                return None;
+            }
+            let shape = match p.shape {
+                Shape::Box { .. } => Shape::Box {
+                    aabb: crate::prim::QAabb::new(
+                        crate::prim::QVec3::new(lo.x.max(0), lo.y, lo.z.max(0)),
+                        crate::prim::QVec3::new(hi.x.min(size), hi.y, hi.z.min(size)),
+                    ),
+                },
+                Shape::LiftShaft { .. } => Shape::LiftShaft {
+                    aabb: crate::prim::QAabb::new(lo, hi),
+                },
+                Shape::Cylinder {
+                    axis,
+                    base,
+                    length,
+                    radius,
+                } => Shape::Cylinder {
+                    axis,
+                    base: shift(base),
+                    length,
+                    radius,
+                },
+                Shape::Ramp { rise, .. } => Shape::Ramp {
+                    aabb: crate::prim::QAabb::new(lo, hi),
+                    rise,
+                },
+                Shape::StairRun { rise, steps, .. } => Shape::StairRun {
+                    aabb: crate::prim::QAabb::new(lo, hi),
+                    rise,
+                    steps,
+                },
+            };
+            Some(Primitive { shape, ..*p })
+        })
+        .collect()
+}
+
+/// The plates a person standing in the opening of a port can step onto: those whose plan
+/// rectangle reaches the face plane at `plane` along `axis`, overlaps the opening `u` along the
+/// face, and is within a step of the port's `floor` there.
+pub fn plates_at_port(nav: &Nav, axis: Axis, plane: Q, u: (Q, Q), floor: Q) -> Vec<usize> {
+    (0..nav.plates.len())
+        .filter(|&i| {
+            let r = &nav.plates[i].rect;
+            let (n0, n1, t0, t1) = match axis {
+                Axis::X => (r.x0, r.x1, r.z0, r.z1),
+                _ => (r.z0, r.z1, r.x0, r.x1),
+            };
+            if !(n0 <= plane && plane <= n1) || t0.max(u.0) >= t1.min(u.1) {
+                return false;
+            }
+            let (x, z) = match axis {
+                Axis::X => (plane, t0.max(u.0)),
+                _ => (t0.max(u.0), plane),
+            };
+            (nav.plates[i].height_at(x, z) - f64::from(floor)).abs() <= f64::from(STEP_UP)
+        })
+        .collect()
+}
+
 /// The nav graph of one set of primitives.
 #[derive(Debug, Clone)]
 pub struct Nav {

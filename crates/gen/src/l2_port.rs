@@ -4,17 +4,20 @@
 //! the L1 walkable structure that crosses the face. **Own** ports are skywalks over a deck that
 //! both sides share. Geometry is in quanta in the face plane `(u, v)`, as `ports.md` §1 defines.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use crate::cavity::CavityView;
 use crate::cell::{Axis, CellKey, Dir6, FaceKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::hash::hash;
-use crate::key::{ColumnKey, ColumnSpanKey, LayerKey};
-use crate::l1::{
-    DECK_REGION_LOG2, Deck, Rect, core_footprint, decks, l1_cell, stair_footprint, trunk,
-    trunk_piece,
-};
+use crate::key::{ColumnKey, LayerKey};
+use crate::l1::{DECK_REGION_LOG2, Deck, core_footprint, decks, l1_cell};
 use crate::l1_port::{PORT_CLEARANCE, face_ports as l1_face_ports};
+use crate::l2_mass::Parent;
+use crate::l2_walk::Skywalk;
 use crate::port::{Port, PortKind};
-use crate::prim::{FeatureKind, Q, QRect, Shape};
+use crate::prim::{CellOutput, FeatureKind, Q, QRect, Shape};
 use crate::regime::regime;
 use crate::rng::Rng;
 use crate::salt;
@@ -23,27 +26,55 @@ use crate::seed::WorldSeed;
 const M: Q = 16;
 /// L2 cell edge in quanta.
 pub const CELL: Q = 512 * M;
-/// Own ports keep this far from the face edges.
-const MARGIN: Q = 8 * M;
-/// Skywalk widths are `2 m × range(1, 5)`.
+/// Own ports keep this far from the face edges: the depth of their corridors, so corridors on
+/// perpendicular faces can never meet.
+pub const MARGIN: Q = 64 * M;
+/// Skywalk widths are `2 m × range(2, 5)`.
 const WIDTH_STEP: Q = 2 * M;
 /// A skywalk floor is its deck's top plus `4 m × range(0, 8)`.
 const FLOORS: i32 = 8;
 const SLOTS: u32 = 2;
 
+/// L1 cell outputs for one batch of port queries. Lookups only; never iterated.
+#[derive(Default)]
+pub struct L1Cache {
+    cells: RefCell<HashMap<CellKey, Rc<CellOutput>>>,
+}
+
+impl L1Cache {
+    pub fn get(&self, seed: WorldSeed, cell: CellKey) -> Rc<CellOutput> {
+        Rc::clone(
+            self.cells
+                .borrow_mut()
+                .entry(cell)
+                .or_insert_with(|| Rc::new(l1_cell(seed, cell))),
+        )
+    }
+}
+
 /// All ports on the six faces of L2 cell `cell`, in `Dir6::ALL` order.
 pub fn cell_ports(seed: WorldSeed, cell: CellKey) -> Vec<Port> {
+    cell_ports_in(seed, &L1Cache::default(), cell)
+}
+
+/// `cell_ports` reading L1 cells through `cache`.
+pub fn cell_ports_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> Vec<Port> {
     Dir6::ALL
         .iter()
         .filter_map(|&dir| FaceKey::of(cell, dir).ok())
-        .flat_map(|face| face_ports(seed, face))
+        .flat_map(|face| face_ports_in(seed, cache, face))
         .collect()
 }
 
 /// The ports on L2 face `face`, cascade first (by floor, then `u`), then own ports, with
 /// `id = 0, 1, …`.
-#[allow(clippy::cast_possible_truncation)] // a handful per face
 pub fn face_ports(seed: WorldSeed, face: FaceKey) -> Vec<Port> {
+    face_ports_in(seed, &L1Cache::default(), face)
+}
+
+/// `face_ports` reading L1 cells through `cache`.
+#[allow(clippy::cast_possible_truncation)] // a handful per face
+pub fn face_ports_in(seed: WorldSeed, cache: &L1Cache, face: FaceKey) -> Vec<Port> {
     debug_assert_eq!(face.owner.level, Level::L2);
     let dir = match face.axis {
         Axis::X => Dir6::PosX,
@@ -54,9 +85,9 @@ pub fn face_ports(seed: WorldSeed, face: FaceKey) -> Vec<Port> {
         return Vec::new();
     };
     let frame = Frame::new(face, other);
-    let mut rects = cascade(seed, &frame);
+    let mut rects = cascade(seed, cache, &frame);
     if face.axis != Axis::Y {
-        own(seed, &frame, &mut rects);
+        own(seed, cache, &frame, &mut rects);
     }
     rects
         .into_iter()
@@ -126,7 +157,7 @@ impl Frame {
 
 type Found = Vec<(PortKind, QRect)>;
 
-fn cascade(seed: WorldSeed, f: &Frame) -> Found {
+fn cascade(seed: WorldSeed, cache: &L1Cache, f: &Frame) -> Found {
     let (tu, tv) = f.origin();
     let mut out: Found = Vec::new();
     if f.on_l1_face() {
@@ -160,20 +191,20 @@ fn cascade(seed: WorldSeed, f: &Frame) -> Found {
             out.push((PortKind::LiftStop, r));
         }
     } else {
-        out = interior_floors(seed, f);
+        out = interior_floors(seed, cache, f);
     }
     out.sort_unstable_by_key(|&(k, r)| (r.v0, r.u0, k as u8));
     out
 }
 
 /// Deck and bridge floors that cross an X/Z plane inside an L1 cell, merged along the face.
-fn interior_floors(seed: WorldSeed, f: &Frame) -> Found {
+fn interior_floors(seed: WorldSeed, cache: &L1Cache, f: &Frame) -> Found {
     let (tu, tv) = f.origin();
     let a = f.plane();
     let (n, u) = (f.axis_index(), f.uv().0);
     // Left and right of the plane: pieces that reach it from each side.
     let mut sides: [Vec<(u8, Q, Q, Q)>; 2] = [Vec::new(), Vec::new()];
-    for p in l1_cell(seed, f.po).primitives {
+    for p in &cache.get(seed, f.po).primitives {
         let kind = match p.kind {
             FeatureKind::DECK => 0,
             FeatureKind::BRIDGE => 1,
@@ -199,11 +230,32 @@ fn interior_floors(seed: WorldSeed, f: &Frame) -> Found {
         }
     }
     let [left, right] = sides.map(merge);
+    // Trunks as (x, z, radius): a landing that ends on a trunk's axis is buried there.
+    let trunks: Vec<(Q, Q, i64)> = cache
+        .get(seed, f.po)
+        .primitives
+        .iter()
+        .filter_map(|p| match p.shape {
+            Shape::Cylinder { base, radius, .. } => Some((base.x, base.z, i64::from(radius))),
+            _ => None,
+        })
+        .collect();
+    let buried = |u: Q| {
+        let (x, z) = if f.face.axis == Axis::X {
+            (a, u)
+        } else {
+            (u, a)
+        };
+        trunks.iter().any(|&(cx, cz, r)| {
+            let (dx, dz) = (i64::from(x - cx), i64::from(z - cz));
+            dx * dx + dz * dz < r * r
+        })
+    };
     let mut out = Found::new();
     for l in &left {
         for r in right.iter().filter(|r| r.0 == l.0 && r.1 == l.1) {
             let (u0, u1) = (l.2.max(r.2), l.3.min(r.3));
-            if u0 < u1 {
+            if u0 < u1 && !buried(u0 + (u1 - u0) / 2) {
                 let kind = if l.0 == 0 {
                     PortKind::DeckContinuation
                 } else {
@@ -243,7 +295,7 @@ fn merge(mut v: Vec<(u8, Q, Q, Q)>) -> Vec<(u8, Q, Q, Q)> {
 
 /// Skywalk ports `[PORT_FACE_*]`: up to two per face, over a deck that both sides share.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // few decks, weights ≤ 1
-fn own(seed: WorldSeed, f: &Frame, out: &mut Found) {
+fn own(seed: WorldSeed, cache: &L1Cache, f: &Frame, out: &mut Found) {
     let salt = match f.face.axis {
         Axis::X => salt::PORT_FACE_X,
         Axis::Y => salt::PORT_FACE_Y,
@@ -256,7 +308,7 @@ fn own(seed: WorldSeed, f: &Frame, out: &mut Found) {
 
     let cavity = |c: CellKey| CavityView::new(seed, c).is_cavity(c);
     let usable = !cavity(f.po) && (f.po == f.pn || !cavity(f.pn));
-    let (tu, tv) = f.origin();
+    let (_, tv) = f.origin();
     let layer = |c: CellKey| decks(seed, LayerKey::of(c, DECK_REGION_LOG2));
     let (da, db) = (layer(f.po), layer(f.pn));
     // Decks that are the same slab on both sides, with at least one floor inside this tile.
@@ -265,17 +317,19 @@ fn own(seed: WorldSeed, f: &Frame, out: &mut Found) {
         .filter(|d| db.contains(d))
         .copied()
         .filter(|d| {
-            (0..FLOORS).any(|k| {
-                let v0 = d.top + 4 * M * k - tv;
-                (0..=CELL - PORT_CLEARANCE).contains(&v0)
-            })
+            // The stair stands on the deck, so the deck top must lie inside the tile too.
+            d.top >= tv
+                && (0..FLOORS).any(|k| {
+                    let v0 = d.top + 4 * M * k - tv;
+                    (0..=CELL - PORT_CLEARANCE).contains(&v0)
+                })
         })
         .collect();
 
     for _ in 0..SLOTS {
         let present = rng.chance(chance);
         let k = rng.range_i32(0, FLOORS);
-        let width = WIDTH_STEP * rng.range_i32(1, 5);
+        let width = WIDTH_STEP * rng.range_i32(2, 5);
         let u0 =
             MARGIN + WIDTH_STEP * rng.range_i32(0, (CELL - 2 * MARGIN - width) / WIDTH_STEP + 1);
         let pick = rng.below(shared.len().max(1) as u64) as usize;
@@ -290,52 +344,39 @@ fn own(seed: WorldSeed, f: &Frame, out: &mut Found) {
             v1: v0 + PORT_CLEARANCE,
         };
         let in_tile = (0..=CELL - PORT_CLEARANCE).contains(&v0);
-        let overlaps = out
-            .iter()
-            .any(|(_, r)| r.u0 < rect.u1 && rect.u0 < r.u1 && r.v0 < rect.v1 && rect.v0 < r.v1);
-        if in_tile && !overlaps && !blocked(seed, f, (rect.u0 + tu, rect.u1 + tu)) {
+        // Skywalks need disjoint corridors; other ports only need disjoint openings.
+        let overlaps = out.iter().any(|(kind, r)| {
+            r.u0 < rect.u1
+                && rect.u0 < r.u1
+                && (*kind == PortKind::Walkway || (r.v0 < rect.v1 && rect.v0 < r.v1))
+        });
+        if in_tile && !overlaps && skywalk_fits(seed, cache, f, &rect, 4 * M * k) {
             out.push((PortKind::Walkway, rect));
         }
     }
 }
 
-/// Whether the face's segment `t` meets the lift core, the staircase footprint or a trunk in
-/// either L1 cell beside the face.
-fn blocked(seed: WorldSeed, f: &Frame, t: (Q, Q)) -> bool {
-    let along_x = f.face.axis == Axis::X;
-    [
-        (f.po, f.plane()),
-        (f.pn, if f.on_l1_face() { 0 } else { f.plane() }),
-    ]
-    .into_iter()
-    .any(|(cell, a)| {
-        let seg = if along_x {
-            Rect {
-                x0: a,
-                x1: a,
-                z0: t.0,
-                z1: t.1,
-            }
-        } else {
-            Rect {
-                x0: t.0,
-                x1: t.1,
-                z0: a,
-                z1: a,
-            }
-        };
-        let column = ColumnKey::of(cell);
-        let hits = |r: Rect| seg.dist2_rect(&r) == 0;
-        let trunk_hit = trunk(seed, ColumnSpanKey::of(cell))
-            .filter(|tr| trunk_piece(tr, cell).is_some())
-            .is_some_and(|tr| {
-                let r = i64::from(tr.radius);
-                seg.dist2_point(tr.centre_x, tr.centre_z) < r * r
-            });
-        hits(core_footprint(seed, column))
-            || stair_footprint(seed, column).is_some_and(hits)
-            || trunk_hit
-    })
+/// Whether both cells' halves of the skywalk fit their L1 parent: corridor clear of solids,
+/// `KeepOut`s and trunks, and the stair standing on deck.
+fn skywalk_fits(seed: WorldSeed, cache: &L1Cache, f: &Frame, rect: &QRect, height: Q) -> bool {
+    let axis = f.face.axis;
+    let n = f.axis_index();
+    let mut other_idx = f.idx;
+    other_idx[n] = (other_idx[n] + 1) % 8;
+    [(f.po, f.idx, CELL), (f.pn, other_idx, 0)]
+        .into_iter()
+        .all(|(parent, idx, plane)| {
+            let walk = Skywalk {
+                axis,
+                plane,
+                u0: rect.u0,
+                u1: rect.u1,
+                floor: rect.v0,
+                height,
+            };
+            let out = cache.get(seed, parent);
+            Parent::new(&out, idx.map(|i| i * CELL)).fits(&walk.corridor())
+        })
 }
 
 #[cfg(test)]
