@@ -95,7 +95,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.3.7** `ColumnSpanKey(level, x, z, sy = y div 8)` helper per `levels.md` §1.2. *Done when:* tests confirm every cell in a span maps to the same key, and adjacent spans map to different keys. (2026-10-17)
 
 ### P0.4 Hashing and RNG
-- [ ] **P0.4.1** Implement `hash(seed, level, cell, salt) -> u64` per `hashing.md`. *Done when:* the pinned test vectors pass.
+- [x] **P0.4.1** Implement `hash(seed, level, cell, salt) -> u64` per `hashing.md`. *Done when:* the pinned test vectors pass. (2026-10-17)
 - [ ] **P0.4.2** Implement the in-house RNG with `next_u32`, `next_f32` (in [0,1)), `range_i32`, `chance(p)` and `pick_weighted`. *Done when:* pinned sequence tests pass, plus a basic uniformity test (chi-square over 10⁶ samples).
 - [ ] **P0.4.3** Add the `worldgen::salt` registry module with a test that asserts all salts are unique. *Done when:* the test passes.
 - [ ] **P0.4.4** Add `GEN_VERSION` and `WorldSeed` types, with the seed parsed from a string or number. *Done when:* the same string always gives the same seed (tested).
