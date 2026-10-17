@@ -5,7 +5,7 @@
 
 use glam::I64Vec3;
 
-use crate::cavity::is_cavity;
+use crate::cavity::CavityView;
 use crate::cell::{Axis, CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::hash::hash;
 use crate::key::{ColumnKey, ColumnSpanKey, LayerKey};
@@ -323,10 +323,11 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
         child_constraints: Vec::new(),
         meta: CellMeta::default(),
     };
-    if is_cavity(seed, cell) {
+    let cavity = CavityView::new(seed, cell);
+    if cavity.is_cavity(cell) {
         return out;
     }
-    out.ports = crate::l1_port::cell_ports(seed, cell);
+    out.ports = crate::l1_port::cell_ports_in(seed, &cavity, cell);
     let span = ColumnSpanKey::of(cell);
     let ds = decks(seed, LayerKey::of(cell, DECK_REGION_LOG2));
     let core = core_footprint(seed, ColumnKey::of(cell));
@@ -337,7 +338,7 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
         out.primitives.extend(t.and_then(|t| trunk_piece(&t, cell)));
     }
     let holes = deck_holes(seed, cell);
-    let bites = rim_bites(seed, cell, &ds, &holes, t.as_ref());
+    let bites = rim_bites(seed, &cavity, cell, &ds, &holes, t.as_ref());
     out.primitives.extend(deck_pieces(&ds, &holes, &bites));
     // Children keep clear of the bitten slabs.
     for (deck, rects) in ds.iter().zip(&bites) {
@@ -541,6 +542,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cavity::is_cavity;
 
     fn l1(x: i64, y: i64, z: i64) -> CellKey {
         CellKey::new(Level::L1, I64Vec3::new(x, y, z))
@@ -1291,7 +1293,9 @@ mod tests {
                             l0 * 8
                                 + I64Vec3::from_array([x, y, z].map(|v| i64::try_from(v).unwrap())),
                         );
-                        if mask.get([x, y, z]) || !crate::l1_rim::is_rim(seed, cell) {
+                        if mask.get([x, y, z])
+                            || !crate::l1_rim::is_rim(&CavityView::new(seed, cell), cell)
+                        {
                             continue;
                         }
                         rims += 1;
@@ -1423,5 +1427,36 @@ mod tests {
             }
         }
         assert!(columns_seen >= 5 && cells > 50, "{columns_seen} {cells}");
+    }
+
+    /// FNV-1a over the debug text of `l1_cell` for a fixed sample, including cavity rims.
+    /// A change here is a generator output change: bump `GEN_VERSION`.
+    #[test]
+    fn l1_cell_golden() {
+        use crate::regime::{RareEvent, rare_event};
+        let seed = WorldSeed(0x601D);
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut feed = |cell: CellKey| {
+            for b in format!("{:?}", l1_cell(seed, cell)).bytes() {
+                h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+            }
+        };
+        sample_cells().for_each(&mut feed);
+        let mut found = 0;
+        for i in 0..2000i64 {
+            let l0 = I64Vec3::new(i % 50 - 25, i / 50 - 20, 3);
+            if found < 3 && rare_event(seed, l0) == RareEvent::GiantCavity {
+                found += 1;
+                for k in 0..512i64 {
+                    feed(l1(
+                        l0.x * 8 + k % 8,
+                        l0.y * 8 + k / 64,
+                        l0.z * 8 + k / 8 % 8,
+                    ));
+                }
+            }
+        }
+        assert_eq!(found, 3);
+        assert_eq!(h, 7_959_094_394_650_427_204);
     }
 }

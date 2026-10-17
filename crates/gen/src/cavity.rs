@@ -140,6 +140,38 @@ fn fill_pockets(mask: &mut CavityMask) {
     }
 }
 
+/// The cavity mask of one L0 cell, computed once for all the `is_cavity` queries of an L1 cell
+/// and its neighbours. Cavities keep to the inner 6 × 6 × 6 of their L0 cell, so a cell in
+/// another L0 cell next to the view's is never a cavity cell.
+#[derive(Debug, Clone, Copy)]
+pub struct CavityView {
+    l0: I64Vec3,
+    mask: CavityMask,
+}
+
+impl CavityView {
+    /// The view of the L0 cell containing L1 cell `cell`.
+    pub fn new(seed: WorldSeed, cell: CellKey) -> Self {
+        debug_assert_eq!(cell.level, Level::L1);
+        let l0 = cell.coords.map(|v| floor_div_pow2(v, 3));
+        Self {
+            l0,
+            mask: cavity_mask(seed, l0),
+        }
+    }
+
+    /// Whether `cell`, in the view's L0 cell or adjacent to it, is a cavity cell.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // floor_mod < 8
+    pub fn is_cavity(&self, cell: CellKey) -> bool {
+        let c = cell.coords;
+        if c.map(|v| floor_div_pow2(v, 3)) != self.l0 {
+            return false;
+        }
+        self.mask
+            .get([c.x, c.y, c.z].map(|v| floor_mod_pow2(v, 3) as usize))
+    }
+}
+
 /// Whether L1 cell `cell` is a cavity cell.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // floor_mod < 8
 pub fn is_cavity(seed: WorldSeed, cell: CellKey) -> bool {

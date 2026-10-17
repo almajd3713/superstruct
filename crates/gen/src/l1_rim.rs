@@ -6,7 +6,7 @@
 
 use glam::I64Vec3;
 
-use crate::cavity::{Ellipsoid, cavity_ellipsoid, is_cavity};
+use crate::cavity::{CavityView, Ellipsoid, cavity_ellipsoid};
 use crate::cell::{CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::hash::hash;
 use crate::l1::{CELL, Deck, Rect, SEPARATION, Trunk};
@@ -25,8 +25,8 @@ const K_MIN: i32 = 16;
 const SIDES: [(i64, i64); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
 
 /// Whether `cell` shares a face with a cavity cell.
-pub fn is_rim(seed: WorldSeed, cell: CellKey) -> bool {
-    !is_cavity(seed, cell) && neighbours(cell).into_iter().any(|n| is_cavity(seed, n))
+pub fn is_rim(cavity: &CavityView, cell: CellKey) -> bool {
+    !cavity.is_cavity(cell) && neighbours(cell).into_iter().any(|n| cavity.is_cavity(n))
 }
 
 fn neighbours(cell: CellKey) -> [CellKey; 6] {
@@ -47,13 +47,14 @@ fn neighbours(cell: CellKey) -> [CellKey; 6] {
 #[allow(clippy::cast_precision_loss)] // tile and quanta values are far below 2^24
 pub fn rim_bites(
     seed: WorldSeed,
+    cavity: &CavityView,
     cell: CellKey,
     decks: &[Deck],
     holes: &[Rect],
     trunk: Option<&Trunk>,
 ) -> Vec<Vec<Rect>> {
     let none = || vec![Vec::new(); decks.len()];
-    if decks.is_empty() || !is_rim(seed, cell) {
+    if decks.is_empty() || !is_rim(cavity, cell) {
         return none();
     }
     let c = cell.coords;
@@ -73,7 +74,7 @@ pub fn rim_bites(
     let mut required: Vec<usize> = Vec::new();
     for (side, (dx, dz)) in SIDES.into_iter().enumerate() {
         let n = CellKey::new(Level::L1, c + I64Vec3::new(dx, 0, dz));
-        if is_cavity(seed, n) {
+        if cavity.is_cavity(n) {
             continue;
         }
         for t in 0..N {

@@ -3,7 +3,7 @@
 //! A face's ports depend only on its key and the keyed features of the two cells beside it,
 //! so both cells derive the same list.
 
-use crate::cavity::is_cavity;
+use crate::cavity::CavityView;
 use crate::cell::{Axis, CellKey, Dir6, FaceKey, Level};
 use crate::hash::hash;
 use crate::key::{ColumnKey, LayerKey};
@@ -26,6 +26,11 @@ const BRIDGE_HEIGHT_TRIES: u32 = 8;
 
 /// The ports on `face`, in deterministic order with `id = 0, 1, …`.
 pub fn face_ports(seed: WorldSeed, face: FaceKey) -> Vec<Port> {
+    face_ports_in(seed, &CavityView::new(seed, face.owner), face)
+}
+
+/// `face_ports` with the cavity view of the L0 cell of the owner or of the cell across the face.
+pub fn face_ports_in(seed: WorldSeed, cavity: &CavityView, face: FaceKey) -> Vec<Port> {
     debug_assert_eq!(face.owner.level, Level::L1);
     let dir = match face.axis {
         Axis::X => Dir6::PosX,
@@ -35,7 +40,7 @@ pub fn face_ports(seed: WorldSeed, face: FaceKey) -> Vec<Port> {
     let Ok(other) = face.owner.neighbor(dir) else {
         return Vec::new();
     };
-    if is_cavity(seed, face.owner) || is_cavity(seed, other) {
+    if cavity.is_cavity(face.owner) || cavity.is_cavity(other) {
         return Vec::new();
     }
     let salt = match face.axis {
@@ -156,16 +161,22 @@ fn largest_gap_midpoint(slabs: &[&Deck]) -> Q {
 
 /// The ports on all six faces of `cell`, by face in `Dir6::ALL` order.
 pub fn cell_ports(seed: WorldSeed, cell: CellKey) -> Vec<Port> {
+    cell_ports_in(seed, &CavityView::new(seed, cell), cell)
+}
+
+/// `cell_ports` with the cavity view of the cell's L0 cell.
+pub fn cell_ports_in(seed: WorldSeed, cavity: &CavityView, cell: CellKey) -> Vec<Port> {
     Dir6::ALL
         .iter()
         .filter_map(|&dir| FaceKey::of(cell, dir).ok())
-        .flat_map(|face| face_ports(seed, face))
+        .flat_map(|face| face_ports_in(seed, cavity, face))
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cavity::is_cavity;
     use glam::I64Vec3;
     use proptest::prelude::*;
 
