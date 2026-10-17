@@ -99,6 +99,7 @@ impl Headless {
                 size,
                 params,
                 boxes,
+                timer: None,
             },
         );
         self.queue.submit([encoder.finish()]);

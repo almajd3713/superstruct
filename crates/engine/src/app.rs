@@ -19,10 +19,12 @@ use worldgen::coord::WorldPos;
 use crate::camera::Camera;
 use crate::demo::demo_scene;
 use crate::gpu::{Gpu, GpuError};
+use crate::gpu_timer::GpuTimer;
 use crate::input::{Action, Bindings, InputState};
+use crate::overlay::{Overlay, OverlayInfo};
 use crate::readback;
 use crate::renderer::{DebugBox, FrameInput, FrameParams, Renderer};
-use crate::settings::Settings;
+use crate::settings::{Settings, VsyncMode};
 use crate::shaders::{ShaderSources, ShaderWatcher};
 use crate::window::toggle_fullscreen;
 
@@ -44,6 +46,8 @@ struct Running {
     window: Arc<Window>,
     gpu: Gpu,
     renderer: Renderer,
+    overlay: Overlay,
+    timer: GpuTimer,
     shader_watcher: ShaderWatcher,
 }
 
@@ -90,10 +94,20 @@ impl App {
             // Errors are logged and kept for the overlay; the embedded pipelines stay in use.
             let _ = renderer.reload_shaders(&gpu.device, &ShaderSources::load());
         }
+        let overlay = Overlay::new(&gpu.device, gpu.config.format.remove_srgb_suffix(), &window);
+        let mut overlay = overlay;
+        overlay.visible = std::env::var_os("SUPERSTRUCT_OVERLAY").is_some();
+        let timer = GpuTimer::new(
+            &gpu.device,
+            &gpu.queue,
+            gpu.features.contains(wgpu::Features::TIMESTAMP_QUERY),
+        );
         Ok(Running {
             window,
             gpu,
             renderer,
+            overlay,
+            timer,
             shader_watcher: ShaderWatcher::new(),
         })
     }
@@ -148,6 +162,9 @@ impl App {
         if self.input.pressed(Action::ToggleFullscreen) {
             toggle_fullscreen(&running.window);
         }
+        if self.input.pressed(Action::ToggleOverlay) {
+            running.overlay.visible = !running.overlay.visible;
+        }
         if self.input.pressed(Action::ToggleDebugLines) {
             self.debug_boxes = !self.debug_boxes;
         }
@@ -155,6 +172,91 @@ impl App {
             let next = running.gpu.vsync().next();
             running.gpu.set_vsync(next);
         }
+    }
+
+    fn draw(&mut self, alpha: f32, frame_time: f64, want_screenshot: bool) -> bool {
+        let Some(running) = &mut self.running else {
+            return false;
+        };
+        let mut presented = false;
+        if running.shader_watcher.changed() {
+            let _ = running
+                .renderer
+                .reload_shaders(&running.gpu.device, &ShaderSources::load());
+        }
+        let mut render_camera = self.camera;
+        let step = self.camera.pos.delta(&self.prev_cam_pos).as_vec3();
+        if let Ok(p) = self.prev_cam_pos.offset(step * alpha) {
+            render_camera.pos = p;
+        }
+        self.box_scratch.clear();
+        if self.debug_boxes {
+            cell_boxes(&render_camera.pos, &mut self.box_scratch);
+        }
+        running.overlay.push_frame_time(frame_time as f32);
+        running.timer.begin_frame(&running.gpu.device);
+        if let Some(frame) = running.gpu.acquire() {
+            let view = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let mut encoder =
+                running
+                    .gpu
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("frame"),
+                    });
+            running.renderer.render(
+                &running.gpu.queue,
+                &mut encoder,
+                &view,
+                &FrameInput {
+                    camera: &render_camera,
+                    size: running.gpu.size(),
+                    params: FrameParams::default(),
+                    boxes: &self.box_scratch,
+                    timer: Some(&running.timer),
+                },
+            );
+            let info = OverlayInfo {
+                sector: render_camera.pos.sector(),
+                local: render_camera.pos.local(),
+                seed: self.settings.seed,
+                adapter: &running.gpu.adapter_info.name,
+                vsync: match running.gpu.vsync() {
+                    VsyncMode::On => "on",
+                    VsyncMode::Mailbox => "mailbox",
+                    VsyncMode::Off => "off",
+                },
+                shader_error: running.renderer.shader_error(),
+                timer: &running.timer,
+            };
+            running.overlay.prepare(
+                &running.gpu.device,
+                &running.gpu.queue,
+                &mut encoder,
+                &running.window,
+                running.gpu.size(),
+                &info,
+            );
+            let ui_view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(running.gpu.config.format.remove_srgb_suffix()),
+                ..Default::default()
+            });
+            running
+                .overlay
+                .render(&mut encoder, &ui_view, running.gpu.size(), &running.timer);
+            running.timer.resolve(&mut encoder);
+            running.gpu.queue.submit([encoder.finish()]);
+            running.timer.after_submit();
+            if want_screenshot {
+                save_screenshot(&running.gpu, &frame.texture);
+            }
+            running.window.pre_present_notify();
+            running.gpu.queue.present(frame);
+            presented = true;
+        }
+        presented
     }
 
     fn frame(&mut self) {
@@ -187,53 +289,8 @@ impl App {
         self.handle_actions();
         self.input.end_frame();
 
-        let Some(running) = &mut self.running else {
-            return;
-        };
-        if running.shader_watcher.changed() {
-            let _ = running
-                .renderer
-                .reload_shaders(&running.gpu.device, &ShaderSources::load());
-        }
-        let mut render_camera = self.camera;
-        let step = self.camera.pos.delta(&self.prev_cam_pos).as_vec3();
-        if let Ok(p) = self.prev_cam_pos.offset(step * alpha) {
-            render_camera.pos = p;
-        }
-        self.box_scratch.clear();
-        if self.debug_boxes {
-            cell_boxes(&render_camera.pos, &mut self.box_scratch);
-        }
-        if let Some(frame) = running.gpu.acquire() {
-            let view = frame
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-            let mut encoder =
-                running
-                    .gpu
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("frame"),
-                    });
-            running.renderer.render(
-                &running.gpu.queue,
-                &mut encoder,
-                &view,
-                &FrameInput {
-                    camera: &render_camera,
-                    size: running.gpu.size(),
-                    params: FrameParams::default(),
-                    boxes: &self.box_scratch,
-                },
-            );
-            running.gpu.queue.submit([encoder.finish()]);
-            if want_screenshot {
-                save_screenshot(&running.gpu, &frame.texture);
-            }
-            running.window.pre_present_notify();
-            running.gpu.queue.present(frame);
-            self.quit |= autoshot;
-        }
+        let presented = self.draw(alpha, frame_time, want_screenshot);
+        self.quit |= presented && autoshot;
 
         self.fps_frames += 1;
         let elapsed = now.duration_since(self.fps_window_start);
@@ -270,6 +327,9 @@ impl ApplicationHandler for App {
         let Some(running) = &mut self.running else {
             return;
         };
+        if !self.cursor_grabbed && running.overlay.on_window_event(&running.window, &event) {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {

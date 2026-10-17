@@ -5,6 +5,7 @@ use glam::{Mat4, Vec3, Vec4};
 use worldgen::coord::WorldPos;
 
 use crate::camera::{Camera, camera_relative};
+use crate::gpu_timer::{GpuTimer, Zone};
 use crate::mesh::Mesh;
 use crate::shaders::ShaderSources;
 use crate::vertex::Vertex;
@@ -54,6 +55,7 @@ pub struct FrameInput<'a> {
     pub size: (u32, u32),
     pub params: FrameParams,
     pub boxes: &'a [DebugBox],
+    pub timer: Option<&'a GpuTimer>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -305,6 +307,7 @@ impl Renderer {
             size,
             params,
             boxes,
+            timer,
         } = *frame;
         let aspect = size.0 as f32 / size.1 as f32;
         let view_proj: Mat4 = camera.view_proj(aspect);
@@ -371,6 +374,7 @@ impl Renderer {
                 }),
                 stencil_ops: None,
             }),
+            timestamp_writes: timer.and_then(|t| t.pass_writes(Zone::Scene)),
             ..Default::default()
         });
         if let (Some(vb), Some(ib)) = (&self.vertex_buf, &self.index_buf) {

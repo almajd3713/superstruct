@@ -90,6 +90,8 @@ impl Gpu {
         if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
             config.usage |= wgpu::TextureUsages::COPY_SRC;
         }
+        // egui wants to blend in gamma space, so the overlay draws through a non-sRGB view.
+        config.view_formats = vec![config.format.remove_srgb_suffix()];
         config.present_mode = pick_present_mode(vsync, &present_modes);
         surface.configure(&device, &config);
         info!(format = ?config.format, mode = ?config.present_mode, "surface");
