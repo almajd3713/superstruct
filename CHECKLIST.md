@@ -30,7 +30,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.1.8** Update docs that say `gen::…` (e.g. CLAUDE.md §6 `gen::salt`) to the library name `worldgen`: `gen` is a reserved keyword in edition 2024, so the `gen` package exposes its lib as `worldgen`. CLAUDE.md edits need user agreement. *Done when:* no doc refers to a `gen::` path. (2026-10-17)
 
 ### P0.2 Specification documents (spec before code)
-- [ ] **P0.2.1** `docs/spec/coordinates.md` covers:
+- [x] **P0.2.1** `docs/spec/coordinates.md` covers:
   - units and axes
   - `WorldPos` (sector of 1024 m, i64; local f32)
   - normalization
@@ -40,7 +40,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
   - camera-relative conversion
   - overflow policy at extreme coordinates
 
-  *Done when:* each formula has a worked numeric example that includes negative coordinates.
+  *Done when:* each formula has a worked numeric example that includes negative coordinates. (2026-10-17)
 - [ ] **P0.2.2** `docs/spec/hashing.md` covers the hash algorithm choice (a 64-bit mix of `seed, level, x, y, z, salt`), the RNG choice (for example PCG32 or SplitMix64), the salt registry rules and **pinned test vectors**. *Done when:* the vectors are listed and the user has reviewed the doc.
 - [ ] **P0.2.3** `docs/spec/primitives.md` covers:
   - primitive types (Box, Ramp, Cylinder, StairRun, LiftShaft placeholder)
