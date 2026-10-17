@@ -435,6 +435,14 @@ pub fn decompose(holes: &[Rect]) -> Vec<Rect> {
     done
 }
 
+/// The far-band reduction (§4.8): the `FAR_VISIBLE` primitives of the full output, in order.
+/// Trunks, deck pieces and bridges at least 16 m wide. The same data, never a simplification.
+pub fn l1_far_primitives(seed: WorldSeed, cell: CellKey) -> Vec<Primitive> {
+    let mut prims = l1_cell(seed, cell).primitives;
+    prims.retain(|p| p.flags.contains(PrimFlags::FAR_VISIBLE));
+    prims
+}
+
 /// `lo + step · range(0, n)`, uniform over the multiples of `step` in `[lo, hi]`.
 fn step_range(rng: &mut Rng, lo: Q, hi: Q, step: Q) -> Q {
     debug_assert!(lo <= hi && (hi - lo) % step == 0, "{lo}..={hi} step {step}");
@@ -1069,5 +1077,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// P0.7.6: the far set is an ordered subset of the full output, drops only narrow bridges,
+    /// and is strictly smaller wherever there is a narrow bridge.
+    #[test]
+    fn far_primitives_are_a_subset() {
+        use crate::l1_bridge::FAR_BRIDGE_WIDTH;
+        let seed = WorldSeed(0xFA2);
+        let mut strict = 0;
+        for cell in sample_cells() {
+            let full = l1_cell(seed, cell).primitives;
+            let far = l1_far_primitives(seed, cell);
+            let mut it = full.iter();
+            for p in &far {
+                assert!(it.any(|q| q == p), "{p:?} not in order in the full output");
+            }
+            for p in full.iter().filter(|p| !far.contains(p)) {
+                assert_eq!(p.kind, FeatureKind::BRIDGE, "{p:?}");
+                let bb = p.aabb();
+                let narrow = (bb.max.x - bb.min.x).min(bb.max.z - bb.min.z) < FAR_BRIDGE_WIDTH;
+                assert!(narrow, "{p:?}");
+            }
+            strict += u32::from(far.len() < full.len());
+        }
+        assert!(strict > 20, "only {strict} cells drop anything");
     }
 }
