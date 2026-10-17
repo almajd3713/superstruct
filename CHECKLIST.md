@@ -119,6 +119,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P0.7.5** Bridges joining trunks and decks along L1 ports. *Done when:* every L1 port has a bridge or deck reaching it inside the cell (test).
 - [ ] **P0.7.6** `l1_far_primitives(cell)`: the reduced set used by the far LOD band. *Done when:* it is a strict subset of the full L1 output (test).
 - [ ] **P0.7.7** Lift core per L1 column (`levels.md` §4.0.1): footprint from `ColumnKey`, stops at every deck top and bridge height, absent in cavity cells. *Done when:* the core is identical from every cell in a column (test), and every deck and bridge in a cell has a stop (test).
+- [ ] **P0.7.8** Giant-cavity blob and rim bites (`levels.md` §3, §4.6): noisy voxelization, pocket filling, and tile-grid bites with the connectivity shrink loop. *Done when:* tests show that no cavity encloses a pocket (10⁴ L0 cells), and every rim cell's deck still reaches all its port-carrying faces and core stops.
 
 ### P0.8 L2 districts
 - [ ] **P0.8.1** An L1 context query for an L2 cell: which volume is structure, void, deck surface or trunk interior. *Done when:* the query agrees with the L1 primitives at 10⁴ random points (test).
