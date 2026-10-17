@@ -62,7 +62,9 @@ What each hierarchy level decides, from what inputs, and with which salts. Coord
   1. **Ellipsoid.** Draw with `[RARE_EVENT_PLACE]`:
      - a centre `c` in L1-cell units, uniform in [2.5, 5.5] per axis, step 0.25,
      - radii `r` in [1.0, 3.0] per axis, step 0.25 (4–12 km).
-  2. **Noisy voxelization.** The L1 cell with L0-local index `i` is a candidate if `Σ ((i + 0.5 − c) / r)² ≤ 1 + n`. The noise `n` is drawn per L1 cell in [−0.25, 0.25], step 1/64, from `hash(seed, 1, cell, CAVITY_NOISE)`. The cell containing `c` is always a candidate. Candidates are restricted to the inner 6 × 6 × 6 (indices 1–6), so there is at least one L1 cell of margin and two cavities never touch.
+
+     The draw order is c.x, c.y, c.z, then r.x, r.y, r.z.
+  2. **Noisy voxelization.** The L1 cell with L0-local index `i` is a candidate if `Σ ((i + 0.5 − c) / r)² ≤ 1 + n`. The noise `n` is drawn per L1 cell in [−0.25, 0.25], step 1/64 (`range(−16, 16) / 64`, the first draw), from `hash(seed, 1, cell, CAVITY_NOISE)`. The sum is evaluated in x, y, z order. The cell containing `c` is always a candidate. Candidates are restricted to the inner 6 × 6 × 6 (indices 1–6), so there is at least one L1 cell of margin and two cavities never touch.
   3. **Pocket filling.** Flood-fill the non-candidate cells (6-neighbour) from the margin layer. Any non-candidate cell the fill does not reach is enclosed, so it becomes a cavity cell. This guarantees the cavity never encloses an unreachable pocket (`ports.md` Lemma C).
 
   L1 emits nothing in cavity cells, not even ports. The silhouette reads as an organic abyss at 4 km scale, and the rim bites round its edges up close.
@@ -124,13 +126,13 @@ Each cell in `[a, b]` emits the trunk as a vertical `Cylinder` clipped to its ow
 ### 4.3 Shafts: `ColumnSpanKey(L1, x, z, sy)` `[SHAFT]`
 
 - Exists with `chance(lerp(0.40, 0.10, d))`, so hollow regimes have more shafts.
-- Footprint 64–512 m per side, step 16 m. Placed under the separation rule (§4.0).
+- Footprint 64–512 m per side, step 16 m, with width (x) and depth (z) drawn independently. Draw order: exists, width, depth, then the min corner x and z on a 16 m step. Placed under the separation rule (§4.0): it is rejected if it comes within 64 m of the core, the staircase or the span's trunk footprint.
 - A shaft cuts every deck in the span (32 km of vertical void). It is emitted as `KeepOut` for children.
 
 ### 4.4 Chasms: cell `[CHASM]`
 
 - Exists with `chance(lerp(0.30, 0.05, d))`.
-- Footprint 256–2048 m per side, step 64 m, placed under the separation rule (§4.0). It cuts the decks of this cell only.
+- Footprint 256–2048 m per side, step 64 m, with width and depth drawn independently, then the min corner on a 64 m step. Placed under the separation rule (§4.0): it is rejected near the core, staircase, trunk footprint or shaft. It cuts the decks of this cell only.
 - Emitted as `KeepOut` over the full cell height.
 
 ### 4.5 Bridges `[BRIDGE]`

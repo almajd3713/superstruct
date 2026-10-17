@@ -5,10 +5,14 @@
 
 use glam::I64Vec3;
 
+use crate::cavity::is_cavity;
 use crate::cell::{Axis, CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::hash::hash;
 use crate::key::{ColumnKey, ColumnSpanKey, LayerKey};
-use crate::prim::{FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb, QVec3, Shape};
+use crate::prim::{
+    CellMeta, CellOutput, ChildConstraint, FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb,
+    QVec3, Shape,
+};
 use crate::regime::{rare_stair, regime};
 use crate::rng::Rng;
 use crate::salt;
@@ -227,9 +231,114 @@ pub fn decks(seed: WorldSeed, layer: LayerKey) -> Vec<Deck> {
         .collect()
 }
 
-/// The holes cut through this cell's decks. Shafts, chasms and rim bites join in later items.
+/// The holes cut through this cell's decks: core, shaft and chasm. Rim bites join in P0.7.8.
 pub fn deck_holes(seed: WorldSeed, cell: CellKey) -> Vec<Rect> {
-    vec![core_footprint(seed, ColumnKey::of(cell))]
+    let mut holes = vec![core_footprint(seed, ColumnKey::of(cell))];
+    holes.extend(shaft(seed, ColumnSpanKey::of(cell)));
+    holes.extend(chasm(seed, cell));
+    holes
+}
+
+/// Squared separation, for comparing against `dist2_*`.
+const SEP2: i64 = (SEPARATION as i64) * (SEPARATION as i64);
+
+/// A rectangle of `w × d` with its min corner drawn on `step`, keeping the face margin.
+fn place_rect(rng: &mut Rng, w: Q, d: Q, step: Q) -> Rect {
+    let x0 = step_range(rng, SEPARATION, CELL - SEPARATION - w, step);
+    let z0 = step_range(rng, SEPARATION, CELL - SEPARATION - d, step);
+    Rect {
+        x0,
+        z0,
+        x1: x0 + w,
+        z1: z0 + d,
+    }
+}
+
+/// Whether `r` keeps the separation from the footprints placed before it in the column.
+fn clear_of_column(seed: WorldSeed, column: ColumnKey, span: ColumnSpanKey, r: &Rect) -> bool {
+    let core = core_footprint(seed, column);
+    let stair = stair_footprint(seed, column);
+    let trunk_ok = trunk(seed, span).is_none_or(|t| {
+        let need = i64::from(t.radius + SEPARATION);
+        r.dist2_point(t.centre_x, t.centre_z) >= need * need
+    });
+    r.dist2_rect(&core) >= SEP2 && stair.is_none_or(|s| r.dist2_rect(&s) >= SEP2) && trunk_ok
+}
+
+/// The shaft of a column span (§4.3): a 32 km vertical void, 64–512 m per side.
+pub fn shaft(seed: WorldSeed, span: ColumnSpanKey) -> Option<Rect> {
+    debug_assert_eq!(span.level, Level::L1);
+    let l0 = I64Vec3::new(
+        floor_div_pow2(span.x, 3),
+        span.sy,
+        floor_div_pow2(span.z, 3),
+    );
+    let d = f32::from(regime(seed, l0).density) / 255.0;
+    let mut rng = Rng::new(hash(seed.0, Level::L1, span.hash_coords(), salt::SHAFT));
+    if !rng.chance(lerp(0.40, 0.10, d)) {
+        return None;
+    }
+    let step = 16 * M;
+    let w = rng.range_i32(4, 33) * step;
+    let depth = rng.range_i32(4, 33) * step;
+    let r = place_rect(&mut rng, w, depth, step);
+    let column = ColumnKey {
+        level: Level::L1,
+        x: span.x,
+        z: span.z,
+    };
+    clear_of_column(seed, column, span, &r).then_some(r)
+}
+
+/// The chasm of one cell (§4.4): 256–2048 m per side, through this cell's decks only.
+pub fn chasm(seed: WorldSeed, cell: CellKey) -> Option<Rect> {
+    debug_assert_eq!(cell.level, Level::L1);
+    let l0 = cell.parent().map_or(I64Vec3::ZERO, |p| p.coords);
+    let d = f32::from(regime(seed, l0).density) / 255.0;
+    let mut rng = Rng::new(hash(seed.0, Level::L1, cell.coords, salt::CHASM));
+    if !rng.chance(lerp(0.30, 0.05, d)) {
+        return None;
+    }
+    let step = 64 * M;
+    let w = rng.range_i32(4, 33) * step;
+    let depth = rng.range_i32(4, 33) * step;
+    let r = place_rect(&mut rng, w, depth, step);
+    let span = ColumnSpanKey::of(cell);
+    let clear = clear_of_column(seed, ColumnKey::of(cell), span, &r)
+        && shaft(seed, span).is_none_or(|sh| r.dist2_rect(&sh) >= SEP2);
+    clear.then_some(r)
+}
+
+/// Everything L1 emits for one cell so far: trunk piece, deck pieces, and `KeepOut` for the
+/// shaft and chasm. Cavity cells emit nothing. Core, bridges and ports join in later items.
+pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
+    let mut out = CellOutput {
+        key: cell,
+        primitives: Vec::new(),
+        ports: Vec::new(),
+        child_constraints: Vec::new(),
+        meta: CellMeta::default(),
+    };
+    if is_cavity(seed, cell) {
+        return out;
+    }
+    let span = ColumnSpanKey::of(cell);
+    if let Some(t) = trunk(seed, span) {
+        out.primitives.extend(trunk_piece(&t, cell));
+    }
+    let ds = decks(seed, LayerKey::of(cell, DECK_REGION_LOG2));
+    out.primitives
+        .extend(deck_pieces(&ds, &deck_holes(seed, cell)));
+    let full_height = |r: Rect| ChildConstraint::KeepOut {
+        aabb: QAabb::new(QVec3::new(r.x0, 0, r.z0), QVec3::new(r.x1, CELL, r.z1)),
+    };
+    out.child_constraints.extend(
+        shaft(seed, span)
+            .into_iter()
+            .chain(chasm(seed, cell))
+            .map(full_height),
+    );
+    out
 }
 
 /// The deck slabs of `cell` as boxes: the cell rectangle minus `holes`, per deck.
@@ -673,5 +782,108 @@ mod tests {
                 assert_partition(&rects, &holes);
             }
         }
+    }
+
+    /// Shafts and chasms keep the separation from everything placed before them, and shafts
+    /// are identical through their span.
+    #[test]
+    fn shafts_and_chasms_respect_separation() {
+        let seed = WorldSeed(0x5AF);
+        let (mut shafts, mut chasms) = (0, 0);
+        for col in columns() {
+            let span = ColumnSpanKey {
+                level: Level::L1,
+                x: col.x,
+                z: col.z,
+                sy: -1,
+            };
+            let sh = shaft(seed, span);
+            for j in 0..8 {
+                let cell = l1(col.x, -8 + j, col.z);
+                assert_eq!(shaft(seed, ColumnSpanKey::of(cell)), sh);
+            }
+            let cell = l1(col.x, -5, col.z);
+            let ch = chasm(seed, cell);
+            for r in sh.iter().chain(&ch) {
+                assert!(r.x0 >= SEPARATION && r.x1 <= CELL - SEPARATION, "{r:?}");
+                assert!(r.z0 >= SEPARATION && r.z1 <= CELL - SEPARATION, "{r:?}");
+                assert!(clear_of_column(seed, col, span, r), "{r:?}");
+            }
+            if let (Some(a), Some(b)) = (sh, ch) {
+                assert!(a.dist2_rect(&b) >= SEP2);
+            }
+            shafts += u32::from(sh.is_some());
+            chasms += u32::from(ch.is_some());
+        }
+        assert!(
+            shafts > 300 && chasms > 200,
+            "{shafts} shafts, {chasms} chasms"
+        );
+    }
+
+    /// Deck pieces never enter a hole, and every hole is a full-height `KeepOut` for children.
+    #[test]
+    fn decks_avoid_all_holes() {
+        let seed = WorldSeed(0x5AF);
+        for x in -20..20 {
+            for z in [-7, 3] {
+                let cell = l1(x, 1, z);
+                let out = l1_cell(seed, cell);
+                let holes = deck_holes(seed, cell);
+                for p in out
+                    .primitives
+                    .iter()
+                    .filter(|p| p.kind == FeatureKind::DECK)
+                {
+                    let bb = p.aabb();
+                    for h in &holes {
+                        let apart = bb.max.x <= h.x0
+                            || h.x1 <= bb.min.x
+                            || bb.max.z <= h.z0
+                            || h.z1 <= bb.min.z;
+                        assert!(apart, "{bb:?} in hole {h:?}");
+                    }
+                }
+                let keepouts = out
+                    .child_constraints
+                    .iter()
+                    .filter(|c| matches!(c, ChildConstraint::KeepOut { .. }))
+                    .count();
+                assert_eq!(keepouts, holes.len() - 1, "one per shaft and chasm");
+            }
+        }
+    }
+
+    /// P0.7.3: a cavity region contains no L1 solids.
+    #[test]
+    fn cavity_cells_emit_nothing() {
+        use crate::cavity::cavity_mask;
+        use crate::regime::{RareEvent, rare_event};
+        let seed = WorldSeed(0xCA7);
+        let mut checked = 0;
+        for i in 0..2000i64 {
+            let l0 = I64Vec3::new(i % 50 - 25, i / 50 - 20, 3);
+            if rare_event(seed, l0) != RareEvent::GiantCavity {
+                continue;
+            }
+            let mask = cavity_mask(seed, l0);
+            for z in 0..8 {
+                for y in 0..8 {
+                    for x in 0..8 {
+                        let cell = CellKey::new(
+                            Level::L1,
+                            l0 * 8
+                                + I64Vec3::from_array([x, y, z].map(|v| i64::try_from(v).unwrap())),
+                        );
+                        let out = l1_cell(seed, cell);
+                        if mask.get([x, y, z]) {
+                            checked += 1;
+                            assert!(out.primitives.is_empty() && out.child_constraints.is_empty());
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 500, "only {checked} cavity cells checked");
     }
 }
