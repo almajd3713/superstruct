@@ -312,8 +312,7 @@ pub fn chasm(seed: WorldSeed, cell: CellKey) -> Option<Rect> {
 }
 
 /// Everything L1 emits for one cell so far: face ports, trunk piece, deck pieces, half-bridges,
-/// and `KeepOut` for bridges, the shaft and the chasm. Cavity cells emit nothing. The core
-/// joins in P0.7.7.
+/// the lift core, and `KeepOut` for bridges, the shaft and the chasm. Cavity cells emit nothing.
 pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     let mut out = CellOutput {
         key: cell,
@@ -346,6 +345,8 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
             ),
         }
     }));
+    let stops = core_stops(&ds, &br.primitives);
+    out.primitives.extend(core_pieces(core, &stops));
     out.primitives.extend(br.primitives);
     let full_height = |r: Rect| ChildConstraint::KeepOut {
         aabb: QAabb::new(QVec3::new(r.x0, 0, r.z0), QVec3::new(r.x1, CELL, r.z1)),
@@ -357,6 +358,69 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
             .map(full_height),
     );
     out
+}
+
+/// Wall thickness of the lift core.
+const CORE_WALL: Q = M;
+
+/// Lift stop heights in a cell (§4.0.1): every deck top and every bridge floor, sorted, unique.
+pub fn core_stops(decks: &[Deck], bridges: &[Primitive]) -> Vec<Q> {
+    let mut stops: Vec<Q> = decks
+        .iter()
+        .map(|d| d.top)
+        .chain(bridges.iter().map(|b| b.aabb().max.y))
+        .collect();
+    stops.sort_unstable();
+    stops.dedup();
+    stops
+}
+
+/// The lift core of one cell: the `LiftShaft` volume and its four `METAL` walls, open for
+/// `PORT_CLEARANCE` above each stop.
+pub fn core_pieces(core: Rect, stops: &[Q]) -> Vec<Primitive> {
+    let mut prims = vec![Primitive {
+        shape: Shape::LiftShaft {
+            aabb: QAabb::new(
+                QVec3::new(core.x0, 0, core.z0),
+                QVec3::new(core.x1, CELL, core.z1),
+            ),
+        },
+        material: MaterialId::METAL,
+        kind: FeatureKind::SHAFT_WALL,
+        flags: PrimFlags::NONE,
+    }];
+    // Solid wall spans are the gaps between openings.
+    let mut y = 0;
+    let mut spans: Vec<(Q, Q)> = Vec::new();
+    for &s in stops {
+        if s > y {
+            spans.push((y, s.min(CELL)));
+        }
+        y = y.max(s + PORT_CLEARANCE);
+    }
+    if y < CELL {
+        spans.push((y, CELL));
+    }
+    let t = CORE_WALL;
+    let walls = [
+        (core.x0, core.z0, core.x0 + t, core.z1),
+        (core.x1 - t, core.z0, core.x1, core.z1),
+        (core.x0 + t, core.z0, core.x1 - t, core.z0 + t),
+        (core.x0 + t, core.z1 - t, core.x1 - t, core.z1),
+    ];
+    for (y0, y1) in spans {
+        for (x0, z0, x1, z1) in walls {
+            prims.push(Primitive {
+                shape: Shape::Box {
+                    aabb: QAabb::new(QVec3::new(x0, y0, z0), QVec3::new(x1, y1, z1)),
+                },
+                material: MaterialId::METAL,
+                kind: FeatureKind::SHAFT_WALL,
+                flags: PrimFlags::NONE,
+            });
+        }
+    }
+    prims
 }
 
 /// The deck slabs of `cell` as boxes: the cell rectangle minus `holes`, per deck.
@@ -1079,7 +1143,7 @@ mod tests {
         }
     }
 
-    /// P0.7.6: the far set is an ordered subset of the full output, drops only narrow bridges,
+    /// P0.7.6: the far set is an ordered subset of the full output, drops only narrow bridges and core pieces,
     /// and is strictly smaller wherever there is a narrow bridge.
     #[test]
     fn far_primitives_are_a_subset() {
@@ -1094,6 +1158,9 @@ mod tests {
                 assert!(it.any(|q| q == p), "{p:?} not in order in the full output");
             }
             for p in full.iter().filter(|p| !far.contains(p)) {
+                if p.kind == FeatureKind::SHAFT_WALL {
+                    continue;
+                }
                 assert_eq!(p.kind, FeatureKind::BRIDGE, "{p:?}");
                 let bb = p.aabb();
                 let narrow = (bb.max.x - bb.min.x).min(bb.max.z - bb.min.z) < FAR_BRIDGE_WIDTH;
@@ -1102,5 +1169,78 @@ mod tests {
             strict += u32::from(far.len() < full.len());
         }
         assert!(strict > 20, "only {strict} cells drop anything");
+    }
+
+    fn lift_shaft(out: &CellOutput) -> Vec<QAabb> {
+        out.primitives
+            .iter()
+            .filter_map(|p| match p.shape {
+                Shape::LiftShaft { aabb } => Some(aabb),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn core_identical_in_column_and_absent_in_cavities() {
+        let seed = WorldSeed(11);
+        let mut checked = 0;
+        for column in columns().take(200) {
+            let want = core_footprint(seed, column);
+            for y in [-9, -1, 0, 5, 12] {
+                let cell = l1(column.x, y, column.z);
+                let shafts = lift_shaft(&l1_cell(seed, cell));
+                if is_cavity(seed, cell) {
+                    assert!(shafts.is_empty());
+                    continue;
+                }
+                assert_eq!(shafts.len(), 1);
+                let a = shafts[0];
+                assert_eq!(
+                    (a.min.x, a.min.z, a.max.x, a.max.z),
+                    (want.x0, want.z0, want.x1, want.z1)
+                );
+                assert_eq!((a.min.y, a.max.y), (0, CELL));
+                checked += 1;
+            }
+        }
+        assert!(checked > 500);
+    }
+
+    #[test]
+    fn every_deck_and_bridge_has_a_stop() {
+        let seed = WorldSeed(11);
+        let mut with_bridges = 0;
+        for cell in sample_cells() {
+            let out = l1_cell(seed, cell);
+            if out.primitives.is_empty() {
+                continue;
+            }
+            let walls: Vec<QAabb> = out
+                .primitives
+                .iter()
+                .filter(|p| p.kind == FeatureKind::SHAFT_WALL)
+                .filter_map(|p| match p.shape {
+                    Shape::Box { aabb } => Some(aabb),
+                    _ => None,
+                })
+                .collect();
+            let floors = out.primitives.iter().filter_map(|p| match p.kind {
+                FeatureKind::DECK | FeatureKind::BRIDGE => Some(p.aabb().max.y),
+                _ => None,
+            });
+            for f in floors {
+                assert!(
+                    walls
+                        .iter()
+                        .all(|w| w.max.y <= f || w.min.y >= f + PORT_CLEARANCE),
+                    "no opening at {f} in {cell:?}"
+                );
+                if out.primitives.iter().any(|p| p.kind == FeatureKind::BRIDGE) {
+                    with_bridges += 1;
+                }
+            }
+        }
+        assert!(with_bridges > 0);
     }
 }

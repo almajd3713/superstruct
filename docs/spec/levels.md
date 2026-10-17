@@ -94,6 +94,7 @@ L1 is computed in two stages:
 - It is emitted as a `LiftShaft` with `METAL` box walls. The walls have openings at every stop, and the footprint is a hole in every deck.
 - **Stops:** one on every deck top in the cell, and one at every bridge height in the cell (§4.5).
 - It passes through every Y face as that face's `LiftStop` port. In cavity cells it is absent.
+- **As implemented** (`l1::core_pieces`, P0.7.7): one `LiftShaft` over the full cell height plus 1 m `METAL` walls (kind `SHAFT_WALL`) on all four sides. Each stop opens all four walls from the stop height up to `PORT_CLEARANCE` (4 m). Core pieces are not `FAR_VISIBLE`.
 
 ### 4.1 Trunks: `ColumnSpanKey(L1, x, z, sy)` `[TRUNK]`
 
