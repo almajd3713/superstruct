@@ -141,3 +141,29 @@ fn demo_scene_matches_reference() {
         h.adapter_name
     );
 }
+
+#[test]
+fn broken_shader_keeps_the_old_pipeline() {
+    let Some(h) = headless() else { return };
+    let cam = camera_at(I64Vec3::ZERO);
+    let scene = [wall(&cam, 2.0, 1.0, 1)];
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, SIZE);
+    renderer.set_scene(&h.device, &scene);
+    let before = h
+        .render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
+        .unwrap();
+
+    let mut broken = engine::shaders::ShaderSources::embedded();
+    broken.scene.push_str("\nfn oops( { this is not wgsl");
+    assert!(renderer.reload_shaders(&h.device, &broken).is_err());
+    assert!(renderer.shader_error().is_some());
+    let after = h
+        .render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
+        .unwrap();
+    assert_eq!(before, after, "old pipeline must keep rendering");
+
+    renderer
+        .reload_shaders(&h.device, &engine::shaders::ShaderSources::embedded())
+        .unwrap();
+    assert!(renderer.shader_error().is_none());
+}

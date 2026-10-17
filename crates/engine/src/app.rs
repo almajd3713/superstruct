@@ -23,6 +23,7 @@ use crate::input::{Action, Bindings, InputState};
 use crate::readback;
 use crate::renderer::{DebugBox, FrameInput, FrameParams, Renderer};
 use crate::settings::Settings;
+use crate::shaders::{ShaderSources, ShaderWatcher};
 use crate::window::toggle_fullscreen;
 
 /// Simulation rate (PLAN.md §11).
@@ -43,6 +44,7 @@ struct Running {
     window: Arc<Window>,
     gpu: Gpu,
     renderer: Renderer,
+    shader_watcher: ShaderWatcher,
 }
 
 struct App {
@@ -84,10 +86,15 @@ impl App {
         let gpu = Gpu::new(&window, s.vsync)?;
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
         renderer.set_scene(&gpu.device, &demo_scene());
+        if cfg!(debug_assertions) {
+            // Errors are logged and kept for the overlay; the embedded pipelines stay in use.
+            let _ = renderer.reload_shaders(&gpu.device, &ShaderSources::load());
+        }
         Ok(Running {
             window,
             gpu,
             renderer,
+            shader_watcher: ShaderWatcher::new(),
         })
     }
 
@@ -183,6 +190,11 @@ impl App {
         let Some(running) = &mut self.running else {
             return;
         };
+        if running.shader_watcher.changed() {
+            let _ = running
+                .renderer
+                .reload_shaders(&running.gpu.device, &ShaderSources::load());
+        }
         let mut render_camera = self.camera;
         let step = self.camera.pos.delta(&self.prev_cam_pos).as_vec3();
         if let Ok(p) = self.prev_cam_pos.offset(step * alpha) {

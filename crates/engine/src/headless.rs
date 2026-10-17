@@ -47,10 +47,24 @@ impl Headless {
         })
     }
 
-    /// Renders one frame and returns tightly packed sRGB RGBA8 pixels.
+    /// Renders one frame with a fresh renderer and returns tightly packed sRGB RGBA8 pixels.
     pub fn render(
         &self,
         meshes: &[(WorldPos, Mesh)],
+        camera: &Camera,
+        size: (u32, u32),
+        params: FrameParams,
+        boxes: &[DebugBox],
+    ) -> Result<Vec<u8>, ReadbackError> {
+        let mut renderer = Renderer::new(&self.device, FORMAT, size);
+        renderer.set_scene(&self.device, meshes);
+        self.render_with(&mut renderer, camera, size, params, boxes)
+    }
+
+    /// Like [`Headless::render`] but with a caller-owned renderer, whose scene is already set.
+    pub fn render_with(
+        &self,
+        renderer: &mut Renderer,
         camera: &Camera,
         size: (u32, u32),
         params: FrameParams,
@@ -71,8 +85,6 @@ impl Headless {
             view_formats: &[],
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut renderer = Renderer::new(&self.device, FORMAT, size);
-        renderer.set_scene(&self.device, meshes);
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

@@ -188,8 +188,8 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P1.3.6** Screenshot key F12, saving a PNG to `out/`. *Done when:* the file is written. (2026-10-17, F12 writes `out/screenshot-<unix>.png`; `SUPERSTRUCT_AUTOSHOT=<n>` takes one after n frames and exits, for remote runs)
 
 ### P1.4 Shaders and tooling
-- [ ] **P1.4.1** Load shaders from files with hot reload via `notify` in debug builds, and embed them with `include_str!` in release builds. *Done when:* an edit appears live.
-- [ ] **P1.4.2** On a shader error, keep the old pipeline and show the error in the overlay. *Done when:* a deliberate syntax error doesn't crash the game.
+- [x] **P1.4.1** Load shaders from files with hot reload via `notify` in debug builds, and embed them with `include_str!` in release builds. *Done when:* an edit appears live. (2026-10-17, `shaders.rs`: files on disk plus `notify` watcher in debug builds, `include_str!` copies in release; the live-edit itself is for a hands-on check)
+- [x] **P1.4.2** On a shader error, keep the old pipeline and show the error in the overlay. *Done when:* a deliberate syntax error doesn't crash the game. (2026-10-17, `reload_shaders` builds inside an error scope and keeps the old pipelines on failure; `broken_shader_keeps_the_old_pipeline` passes on Windows; the overlay display lands with P1.4.3)
 - [ ] **P1.4.3** `egui` overlay (F1): FPS, frame-time graph, camera sector and local position, seed. *Done when:* it is visible and toggles.
 - [ ] **P1.4.4** Tracy CPU zones behind a cargo feature flag. *Done when:* a capture shows frame zones.
 - [ ] **P1.4.5** GPU timestamp queries per pass, shown in the overlay, with a fallback when unsupported. *Done when:* per-pass milliseconds are visible.

@@ -6,6 +6,7 @@ use worldgen::coord::WorldPos;
 
 use crate::camera::{Camera, camera_relative};
 use crate::mesh::Mesh;
+use crate::shaders::ShaderSources;
 use crate::vertex::Vertex;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -77,6 +78,10 @@ pub struct Renderer {
     globals_bg: wgpu::BindGroup,
     draws_buf: wgpu::Buffer,
     draws_bg: wgpu::BindGroup,
+    scene_layout: wgpu::PipelineLayout,
+    lines_layout: wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+    shader_error: Option<String>,
     scene_pipeline: wgpu::RenderPipeline,
     lines_pipeline: wgpu::RenderPipeline,
     vertex_buf: Option<wgpu::Buffer>,
@@ -85,22 +90,6 @@ pub struct Renderer {
     origins_scratch: Vec<[f32; 4]>,
     lines_buf: wgpu::Buffer,
     lines_scratch: Vec<LineVertex>,
-}
-
-fn scene_source() -> String {
-    format!(
-        "{}\n{}",
-        include_str!("../shaders/common.wgsl"),
-        include_str!("../shaders/scene.wgsl")
-    )
-}
-
-fn lines_source() -> String {
-    format!(
-        "{}\n{}",
-        include_str!("../shaders/common.wgsl"),
-        include_str!("../shaders/lines.wgsl")
-    )
 }
 
 fn create_depth(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
@@ -191,30 +180,12 @@ impl Renderer {
             bind_group_layouts: &[Some(&globals_bgl)],
             immediate_size: 0,
         });
-        let scene_pipeline = build_pipeline(
+        let (scene_pipeline, lines_pipeline) = build_pipelines(
             device,
-            "scene",
-            &scene_source(),
+            &ShaderSources::embedded(),
             &scene_layout,
-            format,
-            &[Some(Vertex::LAYOUT)],
-            wgpu::PrimitiveTopology::TriangleList,
-            true,
-        );
-        let line_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<LineVertex>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
-        };
-        let lines_pipeline = build_pipeline(
-            device,
-            "lines",
-            &lines_source(),
             &lines_layout,
             format,
-            &[Some(line_layout)],
-            wgpu::PrimitiveTopology::LineList,
-            false,
         );
         let lines_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("debug lines"),
@@ -230,6 +201,10 @@ impl Renderer {
             globals_bg,
             draws_buf,
             draws_bg,
+            scene_layout,
+            lines_layout,
+            format,
+            shader_error: None,
             scene_pipeline,
             lines_pipeline,
             vertex_buf: None,
@@ -276,6 +251,38 @@ impl Renderer {
             wgpu::BufferUsages::INDEX,
             bytemuck::cast_slice(&indices),
         );
+    }
+
+    /// The last shader compile error, cleared by the next successful reload.
+    pub fn shader_error(&self) -> Option<&str> {
+        self.shader_error.as_deref()
+    }
+
+    /// Rebuilds the pipelines from `sources`. On any error the previous pipelines keep running
+    /// and the error is returned (and kept for [`Renderer::shader_error`]).
+    pub fn reload_shaders(
+        &mut self,
+        device: &wgpu::Device,
+        sources: &ShaderSources,
+    ) -> Result<(), String> {
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let pipelines = build_pipelines(
+            device,
+            sources,
+            &self.scene_layout,
+            &self.lines_layout,
+            self.format,
+        );
+        if let Some(err) = pollster::block_on(scope.pop()) {
+            let msg = err.to_string();
+            tracing::error!("shader reload failed, keeping previous pipelines:\n{msg}");
+            self.shader_error = Some(msg.clone());
+            return Err(msg);
+        }
+        (self.scene_pipeline, self.lines_pipeline) = pipelines;
+        self.shader_error = None;
+        tracing::info!("shaders reloaded");
+        Ok(())
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, size: (u32, u32)) {
@@ -463,4 +470,39 @@ fn push_box_lines(out: &mut Vec<LineVertex>, min: Vec3, size: f32, colour: [f32;
 pub fn depth_at(proj: Mat4, z: f32) -> f32 {
     let c = proj * Vec4::new(0.0, 0.0, -z, 1.0);
     c.z / c.w
+}
+
+fn build_pipelines(
+    device: &wgpu::Device,
+    sources: &ShaderSources,
+    scene_layout: &wgpu::PipelineLayout,
+    lines_layout: &wgpu::PipelineLayout,
+    format: wgpu::TextureFormat,
+) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+    let scene = build_pipeline(
+        device,
+        "scene",
+        &sources.scene,
+        scene_layout,
+        format,
+        &[Some(Vertex::LAYOUT)],
+        wgpu::PrimitiveTopology::TriangleList,
+        true,
+    );
+    let line_vertex = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<LineVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
+    };
+    let lines = build_pipeline(
+        device,
+        "lines",
+        &sources.lines,
+        lines_layout,
+        format,
+        &[Some(line_vertex)],
+        wgpu::PrimitiveTopology::LineList,
+        false,
+    );
+    (scene, lines)
 }

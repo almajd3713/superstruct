@@ -13,5 +13,6 @@ pub mod mesh;
 pub mod readback;
 pub mod renderer;
 pub mod settings;
+pub mod shaders;
 pub mod vertex;
 pub mod window;
