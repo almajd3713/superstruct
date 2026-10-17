@@ -140,8 +140,8 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 ### P0.9 Walkability validator
 - [x] **P0.9.1** Extract walkable surfaces from primitives: top faces with clearance of at least the capsule height. *Done when:* tests on hand-built cells pass. (2026-10-17)
 - [x] **P0.9.2** Build the per-cell nav graph (surfaces linked by step, slope and stair rules). *Done when:* tests on hand-built cells pass. (2026-10-17)
-- [ ] **P0.9.3** Cross-cell linking through ports, plus a reachability query. *Done when:* a 3×3×3 block of L2 cells is reachable from the backbone (test).
-- [ ] **P0.9.4** Connectivity check over N random cells, multithreaded, with a report of failures and their seeds and cells. *Done when:* it runs on 10⁴ cells in CI time (< 60 s).
+- [x] **P0.9.3** Cross-cell linking through ports, plus a reachability query. *Done when:* a 3×3×3 block of L2 cells is reachable from the backbone (test). (2026-10-17)
+- [x] **P0.9.4** Connectivity check over N random cells, multithreaded, with a report of failures and their seeds and cells. *Done when:* it runs on 10⁴ cells in CI time (< 60 s). (2026-10-17)
 
 ### P0.10 Slice tool
 - [ ] **P0.10.1** CLI arguments: `--seed --level --axis --at --center --extent --res --out` and overlay toggles. *Done when:* `--help` documents everything.

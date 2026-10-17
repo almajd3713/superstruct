@@ -29,6 +29,7 @@ pub mod salt;
 pub mod sanctuary;
 pub mod sdf;
 pub mod seed;
+pub mod validate;
 pub mod walk;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
