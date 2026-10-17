@@ -5,6 +5,7 @@ use glam::I64Vec3;
 use crate::coord::{CoordError, SECTOR_SIZE_LOG2, WorldPos};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum Level {
     L0 = 0,
@@ -58,10 +59,15 @@ impl Level {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Axis {
     X,
     Y,
     Z,
+}
+
+impl Axis {
+    pub const ALL: [Axis; 3] = [Axis::X, Axis::Y, Axis::Z];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -138,6 +144,7 @@ pub struct CellBounds {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CellKey {
     pub level: Level,
     pub coords: I64Vec3,
@@ -253,6 +260,7 @@ impl CellKey {
 
 /// The face between `owner` and `owner + axis`, owned by the lower cell (`ports.md` §1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FaceKey {
     pub owner: CellKey,
     pub axis: Axis,

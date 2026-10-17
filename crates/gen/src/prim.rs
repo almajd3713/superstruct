@@ -2,6 +2,9 @@
 //!
 //! Geometry is integer quanta of 1/16 m in the owning cell's local space.
 
+use crate::cell::{Axis, CellKey};
+use crate::port::Port;
+
 /// One quantum is 1/16 m.
 pub type Q = i32;
 
@@ -9,6 +12,7 @@ pub type Q = i32;
 pub const Q_PER_M: Q = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QVec3 {
     pub x: Q,
     pub y: Q,
@@ -20,17 +24,18 @@ impl QVec3 {
         Self { x, y, z }
     }
 
-    pub const fn get(self, axis: Axis3) -> Q {
+    pub const fn get(self, axis: Axis) -> Q {
         match axis {
-            Axis3::X => self.x,
-            Axis3::Y => self.y,
-            Axis3::Z => self.z,
+            Axis::X => self.x,
+            Axis::Y => self.y,
+            Axis::Z => self.z,
         }
     }
 }
 
 /// Half-open on every axis, with `min < max`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QAabb {
     pub min: QVec3,
     pub max: QVec3,
@@ -45,7 +50,7 @@ impl QAabb {
         Self { min, max }
     }
 
-    pub const fn size(&self, axis: Axis3) -> Q {
+    pub const fn size(&self, axis: Axis) -> Q {
         self.max.get(axis) - self.min.get(axis)
     }
 
@@ -67,8 +72,19 @@ impl QAabb {
     }
 }
 
+/// A rectangle in a face plane `(u, v)`, half-open, with `u0 < u1` and `v0 < v1`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct QRect {
+    pub u0: Q,
+    pub v0: Q,
+    pub u1: Q,
+    pub v1: Q,
+}
+
 /// Direction of ascent for ramps and stairs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Dir4 {
     PosX,
     NegX,
@@ -80,26 +96,16 @@ impl Dir4 {
     pub const ALL: [Self; 4] = [Self::PosX, Self::NegX, Self::PosZ, Self::NegZ];
 
     /// The horizontal axis the run lies along.
-    pub const fn axis(self) -> Axis3 {
+    pub const fn axis(self) -> Axis {
         match self {
-            Self::PosX | Self::NegX => Axis3::X,
-            Self::PosZ | Self::NegZ => Axis3::Z,
+            Self::PosX | Self::NegX => Axis::X,
+            Self::PosZ | Self::NegZ => Axis::Z,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Axis3 {
-    X,
-    Y,
-    Z,
-}
-
-impl Axis3 {
-    pub const ALL: [Self; 3] = [Self::X, Self::Y, Self::Z];
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Shape {
     Box {
         aabb: QAabb,
@@ -110,7 +116,7 @@ pub enum Shape {
     },
     /// `base` is the centre of the cap at the axis minimum.
     Cylinder {
-        axis: Axis3,
+        axis: Axis,
         base: QVec3,
         length: Q,
         radius: Q,
@@ -127,7 +133,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub fn cylinder(axis: Axis3, base: QVec3, length: Q, radius: Q) -> Self {
+    pub fn cylinder(axis: Axis, base: QVec3, length: Q, radius: Q) -> Self {
         debug_assert!(length > 0 && radius > 0, "degenerate cylinder");
         Self::Cylinder {
             axis,
@@ -141,7 +147,7 @@ impl Shape {
     pub fn stair_run(aabb: QAabb, rise: Dir4, steps: u16) -> Self {
         debug_assert!(steps > 0, "stair run with no steps");
         debug_assert!(
-            aabb.size(Axis3::Y) % Q::from(steps) == 0
+            aabb.size(Axis::Y) % Q::from(steps) == 0
                 && aabb.size(rise.axis()) % Q::from(steps) == 0,
             "stair run {aabb:?} not divisible into {steps} steps"
         );
@@ -160,14 +166,14 @@ impl Shape {
                 length,
                 radius,
             } => {
-                let lo = |a: Axis3| {
+                let lo = |a: Axis| {
                     if a == axis {
                         base.get(a)
                     } else {
                         base.get(a) - radius
                     }
                 };
-                let hi = |a: Axis3| {
+                let hi = |a: Axis| {
                     if a == axis {
                         base.get(a) + length
                     } else {
@@ -175,8 +181,8 @@ impl Shape {
                     }
                 };
                 QAabb::new(
-                    QVec3::new(lo(Axis3::X), lo(Axis3::Y), lo(Axis3::Z)),
-                    QVec3::new(hi(Axis3::X), hi(Axis3::Y), hi(Axis3::Z)),
+                    QVec3::new(lo(Axis::X), lo(Axis::Y), lo(Axis::Z)),
+                    QVec3::new(hi(Axis::X), hi(Axis::Y), hi(Axis::Z)),
                 )
             }
         }
@@ -185,6 +191,7 @@ impl Shape {
 
 /// Index into the material table. Append-only: renumbering changes output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MaterialId(pub u16);
 
 impl MaterialId {
@@ -198,6 +205,7 @@ impl MaterialId {
 
 /// What a primitive belongs to. Append-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FeatureKind(pub u8);
 
 impl FeatureKind {
@@ -216,6 +224,7 @@ impl FeatureKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PrimFlags(pub u8);
 
 impl PrimFlags {
@@ -241,6 +250,7 @@ impl std::ops::BitOr for PrimFlags {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Primitive {
     pub shape: Shape,
     pub material: MaterialId,
@@ -251,6 +261,61 @@ pub struct Primitive {
 impl Primitive {
     pub fn aabb(&self) -> QAabb {
         self.shape.aabb()
+    }
+}
+
+/// Everything a level emits for one cell (spec §7). All vectors are in a fixed,
+/// code-defined order, and all coordinates are in the cell's local space.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CellOutput {
+    pub key: CellKey,
+    pub primitives: Vec<Primitive>,
+    pub ports: Vec<Port>,
+    pub child_constraints: Vec<ChildConstraint>,
+    pub meta: CellMeta,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ChildConstraint {
+    /// Children may not place collidable solid here.
+    KeepOut { aabb: QAabb },
+    /// Children refine `primitives[prim]`, an `ENVELOPE`.
+    Envelope { prim: u32 },
+    /// Children must realize `ports[port]` on their boundary.
+    ForcedPort { port: u32 },
+    /// A region with a purpose children must honour.
+    Zone { aabb: QAabb, kind: ZoneKind },
+}
+
+/// Append-only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ZoneKind {
+    Sanctuary,
+    Vista,
+    GiantCavity,
+}
+
+/// Level-specific summary (`levels.md`). Fields are added by the items that produce them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CellMeta {
+    pub flags: MetaFlags,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct MetaFlags(pub u8);
+
+impl MetaFlags {
+    pub const NONE: Self = Self(0);
+    pub const SANCTUARY: Self = Self(1 << 0);
+    pub const VISTA: Self = Self(1 << 1);
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
     }
 }
 
@@ -285,9 +350,9 @@ mod tests {
     fn cylinder_aabb_per_axis() {
         let base = QVec3::new(100, -50, 7);
         let cases = [
-            (Axis3::X, bx((100, -54, 3), (140, -46, 11))),
-            (Axis3::Y, bx((96, -50, 3), (104, -10, 11))),
-            (Axis3::Z, bx((96, -54, 7), (104, -46, 47))),
+            (Axis::X, bx((100, -54, 3), (140, -46, 11))),
+            (Axis::Y, bx((96, -50, 3), (104, -10, 11))),
+            (Axis::Z, bx((96, -54, 7), (104, -46, 47))),
         ];
         for (axis, expected) in cases {
             assert_eq!(
@@ -300,7 +365,7 @@ mod tests {
 
     #[test]
     fn primitive_aabb_is_shape_aabb() {
-        let shape = Shape::cylinder(Axis3::Y, QVec3::new(0, 0, 0), 64, 16);
+        let shape = Shape::cylinder(Axis::Y, QVec3::new(0, 0, 0), 64, 16);
         let prim = Primitive {
             shape,
             material: MaterialId::CONCRETE,
@@ -320,7 +385,7 @@ mod tests {
     #[test]
     fn dir4_axis() {
         let axes = Dir4::ALL.map(Dir4::axis);
-        assert_eq!(axes, [Axis3::X, Axis3::X, Axis3::Z, Axis3::Z]);
+        assert_eq!(axes, [Axis::X, Axis::X, Axis::Z, Axis::Z]);
     }
 
     #[test]
@@ -335,5 +400,79 @@ mod tests {
         let f = PrimFlags::ENVELOPE | PrimFlags::FAR_VISIBLE;
         assert!(f.contains(PrimFlags::ENVELOPE));
         assert!(!f.contains(PrimFlags::NO_COLLIDE));
+    }
+
+    /// A `CellOutput` that uses every shape, constraint and port field.
+    #[cfg(feature = "serde")]
+    fn sample_output() -> CellOutput {
+        use crate::cell::{FaceKey, Level};
+        use crate::port::PortKind;
+        use glam::I64Vec3;
+
+        let key = CellKey::new(Level::L2, I64Vec3::new(-3, 7, i64::from(i32::MIN)));
+        let aabb = bx((-16, 0, 3), (32, 8, 48));
+        let prim = |shape, kind| Primitive {
+            shape,
+            material: MaterialId::METAL,
+            kind,
+            flags: PrimFlags::ENVELOPE | PrimFlags::FAR_VISIBLE,
+        };
+        CellOutput {
+            key,
+            primitives: vec![
+                prim(Shape::Box { aabb }, FeatureKind::MASS),
+                prim(
+                    Shape::Ramp {
+                        aabb,
+                        rise: Dir4::NegX,
+                    },
+                    FeatureKind::RAMP,
+                ),
+                prim(
+                    Shape::cylinder(Axis::Z, QVec3::new(1, -2, 3), 40, 4),
+                    FeatureKind::PIPE,
+                ),
+                prim(
+                    Shape::stair_run(bx((0, 0, 0), (16, 8, 32)), Dir4::PosZ, 4),
+                    FeatureKind::STAIR_TOWER,
+                ),
+                prim(Shape::LiftShaft { aabb }, FeatureKind::MISC),
+            ],
+            ports: vec![Port {
+                face: FaceKey {
+                    owner: key,
+                    axis: Axis::X,
+                },
+                id: 2,
+                kind: PortKind::BridgeEnd,
+                rect: QRect {
+                    u0: 128,
+                    v0: 64,
+                    u1: 256,
+                    v1: 128,
+                },
+            }],
+            child_constraints: vec![
+                ChildConstraint::KeepOut { aabb },
+                ChildConstraint::Envelope { prim: 0 },
+                ChildConstraint::ForcedPort { port: 0 },
+                ChildConstraint::Zone {
+                    aabb,
+                    kind: ZoneKind::Sanctuary,
+                },
+            ],
+            meta: CellMeta {
+                flags: MetaFlags::SANCTUARY,
+            },
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn cell_output_serde_round_trip() {
+        let out = sample_output();
+        let json = serde_json::to_string(&out).unwrap();
+        let back: CellOutput = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, out);
     }
 }

@@ -10,6 +10,7 @@ Primitive geometry is stored in **integer quanta of 1/16 m** (`Q = 0.0625 m`) as
 pub type Q = i32;                 // 1 quantum = 1/16 m
 pub struct QVec3 { pub x: Q, pub y: Q, pub z: Q }
 pub struct QAabb { pub min: QVec3, pub max: QVec3 } // half-open on every axis, min < max
+pub struct QRect { pub u0: Q, pub v0: Q, pub u1: Q, pub v1: Q } // face-plane rect (ports.md), half-open
 ```
 
 Why integers rather than `f32` metres:
@@ -29,7 +30,7 @@ All primitives are **axis-aligned**. Ramps and stairs rise along one of four hor
 
 ```rust
 pub enum Dir4 { PosX, NegX, PosZ, NegZ }   // direction of ascent
-pub enum Axis3 { X, Y, Z }
+pub enum Axis { X, Y, Z }                // shared with cell faces (worldgen::cell)
 ```
 
 The megastructure's language is orthogonal: slabs, shafts, pillars, ducts. Axis-alignment keeps collision analytic and exact, and keeps the SDF horizon cheap. Arbitrary rotation (diagonal bridges, for example) would be a later addition and a `GEN_VERSION` bump. **The user confirmed axis-aligned only on 2026-10-17**, over yaw rotation and 45° steps.
@@ -47,7 +48,7 @@ pub struct Primitive {
 pub enum Shape {
     Box      { aabb: QAabb },
     Ramp     { aabb: QAabb, rise: Dir4 },
-    Cylinder { axis: Axis3, base: QVec3, length: Q, radius: Q },
+    Cylinder { axis: Axis, base: QVec3, length: Q, radius: Q },
     StairRun { aabb: QAabb, rise: Dir4, steps: u16 },
     LiftShaft{ aabb: QAabb },
 }
@@ -142,9 +143,12 @@ pub enum ChildConstraint {
     Zone { aabb: QAabb, kind: ZoneKind },
 }
 
+pub enum ZoneKind { Sanctuary, Vista, GiantCavity } // append-only
+
 pub struct CellMeta {
-    // Level-specific summary defined in levels.md: the regime id and style at L0, feature
-    // counts, sanctuary/rare-event flags, and a content hash for golden tests (P0.11.1).
+    pub flags: MetaFlags, // SANCTUARY, VISTA
+    // Further level-specific fields from levels.md (the regime id and style at L0, feature
+    // counts, a content hash for golden tests in P0.11.1) are added by the items that produce them.
 }
 ```
 
