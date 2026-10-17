@@ -394,11 +394,19 @@ pub fn core_stops(decks: &[Deck], bridges: &[Primitive]) -> Vec<Q> {
 /// The lift core of one cell: the `LiftShaft` volume and its four `METAL` walls, open for
 /// `PORT_CLEARANCE` above each stop.
 pub fn core_pieces(core: Rect, stops: &[Q]) -> Vec<Primitive> {
+    lift_pieces(core, 0, CELL, stops)
+}
+
+/// A lift shaft over `rect` from `y_lo` to `y_hi`: the `LiftShaft` volume and `METAL` walls on
+/// four sides, open for `PORT_CLEARANCE` above each of the sorted `stops`. Stops may lie outside
+/// the range; only the part of an opening inside it matters.
+pub fn lift_pieces(rect: Rect, y_lo: Q, y_hi: Q, stops: &[Q]) -> Vec<Primitive> {
+    let core = rect;
     let mut prims = vec![Primitive {
         shape: Shape::LiftShaft {
             aabb: QAabb::new(
-                QVec3::new(core.x0, 0, core.z0),
-                QVec3::new(core.x1, CELL, core.z1),
+                QVec3::new(core.x0, y_lo, core.z0),
+                QVec3::new(core.x1, y_hi, core.z1),
             ),
         },
         material: MaterialId::METAL,
@@ -406,16 +414,16 @@ pub fn core_pieces(core: Rect, stops: &[Q]) -> Vec<Primitive> {
         flags: PrimFlags::NONE,
     }];
     // Solid wall spans are the gaps between openings.
-    let mut y = 0;
+    let mut y = y_lo;
     let mut spans: Vec<(Q, Q)> = Vec::new();
     for &s in stops {
         if s > y {
-            spans.push((y, s.min(CELL)));
+            spans.push((y, s.min(y_hi)));
         }
         y = y.max(s + PORT_CLEARANCE);
     }
-    if y < CELL {
-        spans.push((y, CELL));
+    if y < y_hi {
+        spans.push((y, y_hi));
     }
     let t = CORE_WALL;
     let walls = [
@@ -424,7 +432,7 @@ pub fn core_pieces(core: Rect, stops: &[Q]) -> Vec<Primitive> {
         (core.x0 + t, core.z0, core.x1 - t, core.z0 + t),
         (core.x0 + t, core.z1 - t, core.x1 - t, core.z1),
     ];
-    for (y0, y1) in spans {
+    for (y0, y1) in spans.into_iter().filter(|&(a, b)| a < b) {
         for (x0, z0, x1, z1) in walls {
             prims.push(Primitive {
                 shape: Shape::Box {

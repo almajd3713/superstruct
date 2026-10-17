@@ -1,10 +1,11 @@
 //! L2 districts (512 m). Spec: `docs/spec/levels.md` §5.
 //!
-//! So far: face ports, the skywalk halves at walkway ports, and building masses.
+//! So far: face ports, the skywalk halves at walkway ports, lift shafts and building masses.
 
 use crate::cell::{CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::key::LayerKey;
 use crate::l1::{DECK_REGION_LOG2, decks};
+use crate::l2_column::{lift_column, span_of};
 use crate::l2_mass::masses_in;
 use crate::l2_port::{L1Cache, cell_ports_in};
 use crate::l2_walk::Skywalk;
@@ -66,6 +67,18 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
             .iter()
             .map(|&aabb| ChildConstraint::KeepOut { aabb }),
     );
+
+    let origin = [c.x, c.y, c.z].map(|v| Q::try_from(floor_mod_pow2(v, 3)).unwrap_or(0) * CELL);
+    if let Some(col) = lift_column(seed, span_of(cell), &parent) {
+        let (prims, keepouts) = col.slice(origin);
+        out.primitives.extend(prims);
+        out.child_constraints.extend(
+            keepouts
+                .iter()
+                .map(|&aabb| ChildConstraint::KeepOut { aabb }),
+        );
+        corridors.extend(keepouts);
+    }
 
     let first_mass = out.primitives.len();
     out.primitives

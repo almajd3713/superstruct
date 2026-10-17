@@ -215,6 +215,7 @@ The span is the parent L1 cell's 8 L2 cells. A tower connects the walkable level
 
 - **Stair tower:** exists with `chance(lerp(0.15, 0.40, d))`. Footprint 16–32 m. Built from stacked `StairRun`s inside `Box` walls, with a landing at every level it crosses. Those landings are internal lift-stop or landing ports.
 - **Lift shaft:** exists with `chance(lerp(0.10, 0.30, v))`. Footprint 8–16 m, emitted as a `LiftShaft`. It has a stop at every walkable level it crosses.
+- **As implemented** (`worldgen::l2_column`, P0.8.5, lift shafts only): a shaft's side lengths are `4 m × range(2, 5)` (8–16 m), its min corner is on a 4 m step inside a 72 m margin of the L2 column (clear of the 64 m port corridors), and its rise is `4 m × range(4, 17)`. It stands on **every** deck of the parent L1 cell, with the 12 m ring around it (4 m platform plus 8 m gap) fully on deck and clear of all L1 content (`Parent::fits`), or the shaft is absent. Above each deck it rises to a 4 m wide `GRATING` platform ring at the stop height, with stops at the deck top and the platform, and `lift_pieces` walls open 4 m above each stop. Every L2 cell of the span emits its slice. The shaft and its platform ring are a `KeepOut` for children and for masses.
 - The walkway solver (§5.3) also creates towers and shafts when it needs a vertical link. Those are cell-local features, not keyed.
 
 ### 5.3 Walkways, ramps and stairs `[WALKWAY]`, `[RAMP]`

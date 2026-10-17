@@ -235,8 +235,8 @@ fn trim_slope(piece: Plate, whole: &Rect) -> Plate {
 
 /// One flat platform per stop of each `LiftShaft`. A stop is the top of a collidable box lying
 /// inside the shaft footprint (the sill of a wall opening), or the height of a flat plate that
-/// meets the footprint where every wall is open for the capsule's height. Stops lie inside the
-/// shaft's height.
+/// meets the footprint where every wall is open for the capsule's height. Stops lie in the shaft's
+/// height, from its floor up.
 fn lift_platforms(prims: &[Primitive], plates: &[Plate]) -> Vec<Plate> {
     let mut out = Vec::new();
     for (i, p) in prims.iter().enumerate() {
@@ -273,7 +273,7 @@ fn lift_platforms(prims: &[Primitive], plates: &[Plate]) -> Vec<Plate> {
             .iter()
             .map(|b| b.max.y)
             .chain(touching.map(|q| q.y0).filter(|&y| open(y)))
-            .filter(|&y| y > aabb.min.y && y < aabb.max.y)
+            .filter(|&y| y >= aabb.min.y && y < aabb.max.y)
             .collect();
         stops.sort_unstable();
         stops.dedup();

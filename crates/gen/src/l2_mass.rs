@@ -109,7 +109,7 @@ pub(crate) struct Parent {
     decks: Vec<(Q, [Q; 4])>,
 }
 
-fn inflate(a: &QAabb, by: Q) -> QAabb {
+pub(crate) fn inflate(a: &QAabb, by: Q) -> QAabb {
     QAabb::new(
         QVec3::new(a.min.x - by, a.min.y - by, a.min.z - by),
         QVec3::new(a.max.x + by, a.max.y + by, a.max.z + by),
@@ -155,6 +155,14 @@ impl Parent {
             }
         }
         p
+    }
+
+    /// Every deck top of the parent, sorted, unique.
+    pub(crate) fn all_deck_tops(&self) -> Vec<Q> {
+        let mut tops: Vec<Q> = self.decks.iter().map(|d| d.0).collect();
+        tops.sort_unstable();
+        tops.dedup();
+        tops
     }
 
     /// Deck tops with room above them for the smallest mass and the margin.
