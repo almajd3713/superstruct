@@ -1,0 +1,10 @@
+[package]
+name = "gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# `gen` is a reserved keyword in edition 2024, so the library is imported as `worldgen`.
+[lib]
+name = "worldgen"

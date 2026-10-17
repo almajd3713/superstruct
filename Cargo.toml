@@ -1,0 +1,9 @@
+[workspace]
+resolver = "3"
+members = ["crates/gen", "crates/engine", "crates/game", "tools/slice", "tools/bots"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
