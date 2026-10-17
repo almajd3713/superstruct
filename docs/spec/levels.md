@@ -23,7 +23,7 @@ What each hierarchy level decides, from what inputs, and with which salts. Coord
 |---|---|---|---|
 | Cell | `level, (x, y, z)` | `hash(seed, level, (x, y, z), salt)` | Anything confined to one cell |
 | `FaceKey` | `level`, owner cell, `axis`. The owner is the lower cell on that axis | `hash(seed, level, owner, salt_for_axis)`, with one salt per axis | Ports, and anything shared by exactly two cells |
-| `ColumnKey` | `level, x, z` | `hash(seed, level, (x, 0, z), salt)` | Vertical features that run the whole infinite column (none yet) |
+| `ColumnKey` | `level, x, z` | `hash(seed, level, (x, 0, z), salt)` | Vertical features that run the whole infinite column: the L1 lift core |
 | `ColumnSpanKey` | `level, x, z`, span `sy = y div 8` (the parent cell's y) | `hash(seed, level, (x, sy, z), salt)` | Vertical features bounded to one parent-cell height: trunks (L1), shafts (L1), stair towers and lift shafts (L2) |
 | `LayerKey` | `level, y`, region `(rx, rz)` with `rx = x div W`, `rz = z div W` | `hash(seed, level, (rx, y, rz), salt)` | Horizontal features: deck heights and thickness over a W×W block of cells |
 
@@ -58,7 +58,7 @@ What each hierarchy level decides, from what inputs, and with which salts. Coord
 | **Geometry** | none. L0 only shapes atmosphere and the parameters of the levels below |
 
 - Regime fields are drawn from an RNG seeded with `hash(cell, [REGIME])`. Rare events use `[RARE_EVENT]` (which event, if any) and `[RARE_EVENT_PLACE]` (where in the cell). The events and their probabilities are listed in `regimes.md`.
-- **Giant cavity** (the rare event that affects geometry): an axis-aligned box from 8 to 24 km per axis (step 512 m), placed inside the L0 cell with a 1024 m margin. L1 places no solid inside it (§4.6). Its rim is wherever the surrounding decks are cut off.
+- **Giant cavity** (the rare event that affects geometry): a box of 2–6 **whole L1 cells** per axis (8–24 km), aligned to the L1 grid and placed with at least one L1 cell of margin inside the L0 cell, so two cavities never touch. The cells inside are *cavity cells*: L1 emits nothing in them, not even ports (§4.6). Its rim is the deck edges of the surrounding cells. Grid alignment is what keeps the connectivity argument simple (`ports.md` §6).
 - Regime **values** never blend across L0 faces. Only atmosphere does, in `atmosphere_at` (`regimes.md`). Generation inside a cell uses its own regime only, so L1 cells never need a neighbouring regime.
 
 ## 4. L1: Megaforms (4096 m)
@@ -66,8 +66,25 @@ What each hierarchy level decides, from what inputs, and with which salts. Coord
 | | |
 |---|---|
 | **Inputs** | the parent regime, the cavity `KeepOut` (if any), column-span, layer and face keys |
-| **Outputs** | structural `FAR_VISIBLE` primitives: trunks, deck pieces and half-bridges. Also L1 face ports (`ports.md`) |
+| **Outputs** | structural `FAR_VISIBLE` primitives: lift core, trunks, deck pieces and half-bridges. Also L1 face ports (`ports.md`) |
 | **Children receive** | `KeepOut` for shafts, chasms, the cavity and bridge clearances. `ForcedPort` for L1 ports that cross L2 faces. A `Zone` for the sanctuary. Connection requirements are given in `ports.md` |
+
+### 4.0 Keyed features and the lift core
+
+L1 is computed in two stages:
+
+1. **Keyed features** are pure functions of keys (and the regime and cavity from L0): the lift core (§4.0.1), trunks (§4.1), decks (§4.2), shafts (§4.3) and chasms (§4.4). They are cheap to evaluate, and port derivation evaluates them for **both** cells next to a face (`ports.md` §3).
+2. **Dependent content** reads the keyed features and the cell's ports: deck pieces, bridges, the sanctuary.
+
+**Separation rule.** Within a cell, all hole and obstacle footprints keep **at least 64 m** from each other and from the cell faces. That covers shafts, chasms, the core footprint and the trunk footprint. Placement draws are made in the order core → trunk → shaft → chasm, and each later feature is rejected if it would break the separation from the earlier ones. A rejected feature is absent, and the remaining draw counts stay fixed. Rejection is what guarantees each deck stays connected (`ports.md` Lemma A).
+
+#### 4.0.1 Lift core: `ColumnKey(L1, x, z)` `[CORE]`
+
+- **Every** L1 column has one lift core at the same (x, z) in every cell, so the core is an endless vertical spine.
+- Footprint 16–32 m per side, step 4 m, centre placed with the 64 m margin.
+- It is emitted as a `LiftShaft` with `METAL` box walls. The walls have openings at every stop, and the footprint is a hole in every deck.
+- **Stops:** one on every deck top in the cell, and one at every bridge height in the cell (§4.5).
+- It passes through every Y face as that face's `LiftStop` port. In cavity cells it is absent.
 
 ### 4.1 Trunks: `ColumnSpanKey(L1, x, z, sy)` `[TRUNK]`
 
@@ -77,7 +94,7 @@ A span is 8 L1 cells (32 km, one L0 cell tall). Every L1 cell in the span comput
 |---|---|
 | Exists | `chance(lerp(0.30, 0.80, v))` |
 | Radius r | 96–400 m, step 16 m |
-| Centre (x, z) | uniform in `[r + 64, 4096 − r − 64]`, step 16 m. The 64 m margin applies §1.1 rule 4 |
+| Centre (x, z) | uniform in `[r + 64, 4096 − r − 64]`, step 16 m. The 64 m margin applies §1.1 rule 4. If the footprint comes within 64 m of the core, r is reduced in 16 m steps down to 96 m; if it still conflicts, there is no trunk in this span |
 | Vertical extent | bottom cell `a` and top cell `b` within the span, with `0 ≤ a ≤ b ≤ 7`. With probability 0.5 the trunk fills the whole span (a = 0, b = 7). Otherwise a = `range(0, 8)` and b = `range(a, 8)`. The ends lie on L1 cell boundaries |
 | Material | `CONCRETE` |
 
@@ -90,7 +107,7 @@ Each cell in `[a, b]` emits the trunk as a vertical `Cylinder` clipped to its ow
 | Deck count n per layer cell | `pick_weighted([lerp(4, 1, d), 4, lerp(1, 3, d), lerp(0, 2, d)])`, giving 0–3 decks |
 | Height of deck i | slot centre `(i + 0.5) · 4096 / n`, jittered by ± a quarter of the slot, step 4 m. Decks are always at least 600 m apart |
 | Thickness | 8–48 m, step 4 m |
-| Coverage | the whole cell footprint, minus holes (§4.3–4.4) and the cavity (§4.6) |
+| Coverage | the whole cell footprint, minus holes (§4.3–4.4) and the core footprint (§4.0.1). Decks are absent in cavity cells |
 
 - All cells in a region and layer agree on heights and thicknesses. Decks therefore continue across every face inside the region, and these crossings are deck-continuation ports.
 - At a region face, the deck heights on either side differ in general. The decks end at the face, leaving cliff edges, and are joined only through ports (`ports.md`).
@@ -99,26 +116,32 @@ Each cell in `[a, b]` emits the trunk as a vertical `Cylinder` clipped to its ow
 ### 4.3 Shafts: `ColumnSpanKey(L1, x, z, sy)` `[SHAFT]`
 
 - Exists with `chance(lerp(0.40, 0.10, d))`, so hollow regimes have more shafts.
-- Footprint 64–512 m per side, step 16 m. It is placed with a 64 m margin and rejected if it overlaps the trunk footprint.
+- Footprint 64–512 m per side, step 16 m. Placed under the separation rule (§4.0).
 - A shaft cuts every deck in the span (32 km of vertical void). It is emitted as `KeepOut` for children.
 
 ### 4.4 Chasms: cell `[CHASM]`
 
 - Exists with `chance(lerp(0.30, 0.05, d))`.
-- Footprint 256–2048 m per side, step 64 m, with a 64 m margin. It cuts the decks of this cell only.
+- Footprint 256–2048 m per side, step 64 m, placed under the separation rule (§4.0). It cuts the decks of this cell only.
 - Emitted as `KeepOut` over the full cell height.
 
 ### 4.5 Bridges `[BRIDGE]`
 
-- Half-bridges run from each L1 bridge-end port (`ports.md`) to the nearest trunk surface or deck edge inside the cell, along a single axis.
+- Each half-bridge runs from its BridgeEnd port (`ports.md` §4.1) to a **core stop at the port's floor height**, so bridges are horizontal.
+- The route is axis-aligned:
+  1. Try going in along the face normal and then turning towards the core.
+  2. Otherwise go along the face first and then in.
+  3. Otherwise take a 3-segment route through the 64 m band along the faces, which never contains a trunk.
+- A route must stay clear of the trunk footprint. If none does, the trunk segment is omitted in this cell (`ports.md` Lemma A.3). Routes may pass over holes, since bridging voids is their point.
+- **Trunk landing.** In a cell where the trunk crosses no deck, the first bridge, by port id, gets a landing that touches the trunk. That keeps every trunk reachable.
 - Width 8–32 m, step 4 m. Thickness 4 m. Kind `Bridge`, material `METAL`.
-- A bridge that cannot reach a trunk or a deck along its axis gets a support pylon: a `Box` down to the deck below, or a cylinder hanging from the deck above. The ports spec guarantees that one of those exists.
+- Bridges hang from nothing. At megastructure scale an 8–32 m beam is self-supporting by convention. Supports are dressing, added later.
 
 ### 4.6 Giant cavity
 
-- Trunks whose footprint and extent intersect the cavity box are dropped in the affected cells.
-- Deck pieces are cut by the cavity box like any other hole.
-- Children receive the cavity as `KeepOut`.
+- Cavity cells emit no geometry and no ports, and the core is absent there. Faces between a cavity cell and a normal cell carry no ports.
+- The trunk segments of a column end at the cavity.
+- Children of cavity cells generate nothing.
 
 ### 4.7 Sanctuary selection `[SANCTUARY]`
 
@@ -145,7 +168,7 @@ Each cell in `[a, b]` emits the trunk as a vertical `Cylinder` clipped to its ow
 | Attempts | n = `pick_weighted` over 0–6 with weights `[lerp(3, 0, d), 2, 2, 2, lerp(1, 3, d), lerp(0, 3, d), lerp(0, 2, d)]` |
 | Footprint | 16–128 m per side, step 4 m |
 | Height | 16 m to `lerp(64, 256, v)`, step 4 m (4 m floors) |
-| Support | on a deck top surface in the cell (bottom = deck top), or attached to a trunk face if a trunk passes through the cell (half the attempts when both exist) |
+| Support | on a deck top surface in the cell (bottom = deck top). Trunk-attached masses are deferred (P0.8.9), because they need routing to the network N (`ports.md` Lemma D) |
 | Placement | up to 8 tries per mass. The mass must lie inside the cell with an 8 m margin, keep an 8 m gap from other masses and port corridors, not intersect any `KeepOut`, trunk or deck, and be fully supported. If all tries fail, the attempt is dropped |
 
 Masses carry `kind = Mass`, the `ENVELOPE` flag and material `CONCRETE`.
@@ -213,8 +236,9 @@ Values follow the blocks in `hashing.md` §4. Port salts are defined in `ports.m
 | `DECK` | `0x0202` | LayerKey (L1, W = 4) | deck count, heights, thickness |
 | `SHAFT` | `0x0203` | ColumnSpanKey (L1) | shaft existence and footprint |
 | `CHASM` | `0x0204` | cell (L1) | chasm existence and footprint |
-| `BRIDGE` | `0x0205` | cell (L1) | bridge width and pylon choices |
+| `BRIDGE` | `0x0205` | cell (L1) | bridge width and route choice |
 | `SANCTUARY` | `0x0206` | cell (L1) | sanctuary existence and child choice |
+| `CORE` | `0x0207` | ColumnKey (L1) | lift core footprint and position |
 | `MASS` | `0x0301` | cell (L2) | mass count, sizes, placement |
 | `STAIR_TOWER` | `0x0302` | ColumnSpanKey (L2) | keyed stair towers |
 | `LIFT_SHAFT` | `0x0303` | ColumnSpanKey (L2) | keyed lift shafts |

@@ -118,16 +118,18 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P0.7.4** L1 face ports, including the backbone lattice. *Done when:* backbone faces always carry at least one walkable port (proptest).
 - [ ] **P0.7.5** Bridges joining trunks and decks along L1 ports. *Done when:* every L1 port has a bridge or deck reaching it inside the cell (test).
 - [ ] **P0.7.6** `l1_far_primitives(cell)`: the reduced set used by the far LOD band. *Done when:* it is a strict subset of the full L1 output (test).
+- [ ] **P0.7.7** Lift core per L1 column (`levels.md` §4.0.1): footprint from `ColumnKey`, stops at every deck top and bridge height, absent in cavity cells. *Done when:* the core is identical from every cell in a column (test), and every deck and bridge in a cell has a stop (test).
 
 ### P0.8 L2 districts
 - [ ] **P0.8.1** An L1 context query for an L2 cell: which volume is structure, void, deck surface or trunk interior. *Done when:* the query agrees with the L1 primitives at 10⁴ random points (test).
-- [ ] **P0.8.2** Building masses on deck surfaces and trunk faces. *Done when:* no mass intersects L1 voids, and every mass sits on a supporting surface (test).
+- [ ] **P0.8.2** Building masses on deck surfaces (trunk-face masses deferred to P0.8.9 per `levels.md` §5.1). *Done when:* no mass intersects L1 voids, and every mass sits on a supporting surface (test).
 - [ ] **P0.8.3** L2 ports: those inherited by cascade from L1, plus the cell's own face-hash ports. *Done when:* every L1 port that crosses an L2 face appears as an L2 port (test).
 - [ ] **P0.8.4** Internal connectivity: build a port graph and generate walkways, stairs and ramps that connect all ports while respecting the slope and step limits. *Done when:* the walkability validator (P0.9) reports every port reachable in 10⁴ random cells.
 - [ ] **P0.8.5** Stair towers and lift shafts as column features, with lift stops emitted as ports. *Done when:* a shaft is identical from every L2 cell it passes through (test).
 - [ ] **P0.8.6** Sanctuary placement: chosen at the L1 level so they sit a few km apart along walkable routes, and marked in L2 metadata. *Done when:* the spacing distribution over 10⁴ L1 cells matches the spec.
 - [ ] **P0.8.7** Vista rule: occasionally guarantee an opening that frames a view (an opening facing an L1 void). *Done when:* the vista frequency matches the spec, and the openings face a void (test).
 - [ ] **P0.8.8** Railing and edge flags: mark walkable edges with a drop greater than the fall threshold as guarded or deliberately unguarded. *Done when:* the unguarded fraction matches the spec.
+- [ ] **P0.8.9** Trunk-attached masses, with walkway routing to the L1 network so they stay reachable (`ports.md` Lemma D). *Done when:* the validator reports every trunk-attached mass reachable in 10⁴ random cells.
 
 ### P0.9 Walkability validator
 - [ ] **P0.9.1** Extract walkable surfaces from primitives: top faces with clearance of at least the capsule height. *Done when:* tests on hand-built cells pass.
