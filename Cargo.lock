@@ -616,6 +616,7 @@ dependencies = [
  "bytemuck",
  "gen",
  "glam",
+ "image",
  "pollster",
  "serde",
  "thiserror 2.0.21",

@@ -5,8 +5,12 @@
 
 pub mod app;
 pub mod camera;
+pub mod demo;
 pub mod gpu;
 pub mod input;
+pub mod mesh;
+pub mod readback;
+pub mod renderer;
 pub mod settings;
-pub mod testobj;
+pub mod vertex;
 pub mod window;

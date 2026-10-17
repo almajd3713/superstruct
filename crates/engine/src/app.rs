@@ -13,13 +13,16 @@ use winit::keyboard::PhysicalKey;
 use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 
 use glam::{I64Vec3, Vec3};
+use worldgen::cell::{CellKey, Level};
 use worldgen::coord::WorldPos;
 
 use crate::camera::Camera;
+use crate::demo::demo_scene;
 use crate::gpu::{Gpu, GpuError};
 use crate::input::{Action, Bindings, InputState};
+use crate::readback;
+use crate::renderer::{DebugBox, FrameParams, Renderer};
 use crate::settings::Settings;
-use crate::testobj::{TestObject, TestPass};
 use crate::window::toggle_fullscreen;
 
 /// Simulation rate (PLAN.md §11).
@@ -39,7 +42,7 @@ pub enum AppError {
 struct Running {
     window: Arc<Window>,
     gpu: Gpu,
-    test_pass: TestPass,
+    renderer: Renderer,
 }
 
 struct App {
@@ -47,7 +50,8 @@ struct App {
     settings: Settings,
     running: Option<Running>,
     failure: Option<AppError>,
-    test_object: TestObject,
+    debug_boxes: bool,
+    box_scratch: Vec<DebugBox>,
     input: InputState,
     camera: Camera,
     /// Camera position one sim step ago, for interpolation.
@@ -57,6 +61,10 @@ struct App {
     accumulator: f64,
     fps_window_start: Instant,
     fps_frames: u32,
+    frame_count: u64,
+    quit: bool,
+    /// `SUPERSTRUCT_AUTOSHOT=<n>`: screenshot after n frames, then exit. For remote runs.
+    autoshot_after: Option<u64>,
 }
 
 impl App {
@@ -74,11 +82,12 @@ impl App {
                 .map_err(winit::error::EventLoopError::from)?,
         );
         let gpu = Gpu::new(&window, s.vsync)?;
-        let test_pass = TestPass::new(&gpu);
+        let mut renderer = Renderer::new(&gpu);
+        renderer.set_scene(&gpu, &demo_scene());
         Ok(Running {
             window,
             gpu,
-            test_pass,
+            renderer,
         })
     }
 
@@ -132,6 +141,9 @@ impl App {
         if self.input.pressed(Action::ToggleFullscreen) {
             toggle_fullscreen(&running.window);
         }
+        if self.input.pressed(Action::ToggleDebugLines) {
+            self.debug_boxes = !self.debug_boxes;
+        }
         if self.input.pressed(Action::CycleVsync) {
             let next = running.gpu.vsync().next();
             running.gpu.set_vsync(next);
@@ -157,18 +169,29 @@ impl App {
 
         self.accumulator += frame_time;
         while self.accumulator >= SIM_DT {
-            self.test_object.step(SIM_DT as f32);
             self.prev_cam_pos = self.camera.pos;
             self.fly(SIM_DT as f32);
             self.accumulator -= SIM_DT;
         }
         let alpha = (self.accumulator / SIM_DT) as f32;
+        self.frame_count += 1;
+        let autoshot = self.autoshot_after.is_some_and(|n| self.frame_count == n);
+        let want_screenshot = autoshot || self.input.pressed(Action::Screenshot);
         self.handle_actions();
         self.input.end_frame();
 
         let Some(running) = &mut self.running else {
             return;
         };
+        let mut render_camera = self.camera;
+        let step = self.camera.pos.delta(&self.prev_cam_pos).as_vec3();
+        if let Ok(p) = self.prev_cam_pos.offset(step * alpha) {
+            render_camera.pos = p;
+        }
+        self.box_scratch.clear();
+        if self.debug_boxes {
+            cell_boxes(&render_camera.pos, &mut self.box_scratch);
+        }
         if let Some(frame) = running.gpu.acquire() {
             let view = frame
                 .texture
@@ -180,34 +203,21 @@ impl App {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("frame"),
                     });
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("main"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.02,
-                                g: 0.025,
-                                b: 0.03,
-                                a: 1.0,
-                            }),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    ..Default::default()
-                });
-                running.test_pass.draw(
-                    &running.gpu,
-                    &mut pass,
-                    self.test_object.interpolated(alpha),
-                );
-            }
+            running.renderer.render(
+                &running.gpu,
+                &mut encoder,
+                &view,
+                &render_camera,
+                FrameParams::default(),
+                &self.box_scratch,
+            );
             running.gpu.queue.submit([encoder.finish()]);
+            if want_screenshot {
+                save_screenshot(&running.gpu, &frame.texture);
+            }
             running.window.pre_present_notify();
             running.gpu.queue.present(frame);
+            self.quit |= autoshot;
         }
 
         self.fps_frames += 1;
@@ -247,7 +257,10 @@ impl ApplicationHandler for App {
         };
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => running.gpu.resize(size.width, size.height),
+            WindowEvent::Resized(size) => {
+                running.gpu.resize(size.width, size.height);
+                running.renderer.resize(&running.gpu);
+            }
             WindowEvent::RedrawRequested => self.frame(),
             WindowEvent::KeyboardInput {
                 event:
@@ -285,7 +298,10 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.quit {
+            event_loop.exit();
+        }
         if let Some(running) = &self.running {
             running.window.request_redraw();
         }
@@ -299,21 +315,30 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
     event_loop.set_control_flow(ControlFlow::Poll);
     let now = Instant::now();
     let start =
-        WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0)).unwrap_or(WorldPos::ORIGIN);
+        WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 513.65, 458.0)).unwrap_or(WorldPos::ORIGIN);
     let mut app = App {
         title: title.to_owned(),
         settings,
         running: None,
         failure: None,
-        test_object: TestObject::default(),
+        debug_boxes: std::env::var_os("SUPERSTRUCT_DEBUG_BOXES").is_some(),
+        box_scratch: Vec::new(),
         input: InputState::new(Bindings::default()),
-        camera: Camera::new(start, settings_fov),
+        camera: Camera {
+            yaw: std::f32::consts::PI,
+            ..Camera::new(start, settings_fov)
+        },
         prev_cam_pos: start,
         cursor_grabbed: false,
         last_frame: now,
         accumulator: 0.0,
         fps_window_start: now,
         fps_frames: 0,
+        frame_count: 0,
+        quit: false,
+        autoshot_after: std::env::var("SUPERSTRUCT_AUTOSHOT")
+            .ok()
+            .and_then(|v| v.parse().ok()),
     };
     event_loop.run_app(&mut app)?;
     app.failure.map_or(Ok(()), Err)
@@ -323,4 +348,41 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
 pub fn settings_path() -> PathBuf {
     std::env::var_os("SUPERSTRUCT_SETTINGS")
         .map_or_else(|| PathBuf::from("settings.toml"), PathBuf::from)
+}
+
+/// L2 and L1 cell outlines around `pos`, for the debug-line toggle.
+fn cell_boxes(pos: &WorldPos, out: &mut Vec<DebugBox>) {
+    for (level, colour) in [
+        (Level::L2, [0.2, 0.6, 1.0, 1.0]),
+        (Level::L1, [1.0, 0.55, 0.1, 1.0]),
+    ] {
+        let centre = CellKey::containing(level, pos);
+        for d in neighbourhood() {
+            let key = CellKey::new(level, centre.coords + d);
+            if let Ok(b) = key.aabb_world() {
+                out.push(DebugBox {
+                    min: b.min,
+                    size_m: b.size_m as f32,
+                    colour,
+                });
+            }
+        }
+    }
+}
+
+fn neighbourhood() -> impl Iterator<Item = I64Vec3> {
+    (-1..=1).flat_map(|x| (-1..=1).flat_map(move |y| (-1..=1).map(move |z| I64Vec3::new(x, y, z))))
+}
+
+fn save_screenshot(gpu: &Gpu, texture: &wgpu::Texture) {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let path = PathBuf::from(format!("out/screenshot-{stamp}.png"));
+    let result = readback::read_texture_rgba8(&gpu.device, &gpu.queue, texture)
+        .and_then(|px| readback::save_png(&path, texture.width(), texture.height(), &px));
+    match result {
+        Ok(()) => info!(path = %path.display(), "screenshot saved"),
+        Err(err) => error!("screenshot failed: {err}"),
+    }
 }

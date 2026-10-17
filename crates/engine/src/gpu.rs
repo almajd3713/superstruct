@@ -81,7 +81,11 @@ impl Gpu {
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .ok_or(GpuError::UnsupportedSurface)?;
-        let present_modes = surface.get_capabilities(&adapter).present_modes;
+        let caps = surface.get_capabilities(&adapter);
+        let present_modes = caps.present_modes;
+        if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
+            config.usage |= wgpu::TextureUsages::COPY_SRC;
+        }
         config.present_mode = pick_present_mode(vsync, &present_modes);
         surface.configure(&device, &config);
         info!(format = ?config.format, mode = ?config.present_mode, "surface");

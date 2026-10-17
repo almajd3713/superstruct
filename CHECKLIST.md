@@ -180,12 +180,12 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P1.2.6** Camera-relative transform: `chunk WorldPos − camera WorldPos → Vec3`, computed in f64 or i64 then narrowed. *Done when:* the test shows sub-millimetre error at sector 2⁴⁰. (2026-10-17, `camera_relative` via `WorldPos::delta`; test at sector 2^40)
 
 ### P1.3 Rendering basics
-- [ ] **P1.3.1** Depth32Float buffer with compare `GreaterEqual`, cleared to 0. *Done when:* a test scene sorts correctly at 1 m and 10 km.
-- [ ] **P1.3.2** Vertex format: position f32×3, octahedral-encoded normal, material id u16. *Done when:* the size and alignment are documented and tested.
-- [ ] **P1.3.3** Basic forward pipeline with a camera uniform and a per-draw transform storage buffer. *Done when:* a grid of boxes renders.
-- [ ] **P1.3.4** Greybox shader: Lambert lighting plus a world-aligned 1 m / 8 m grid so scale is readable, computed from camera-relative position plus a sector offset uniform. *Done when:* the grid does not swim at large coordinates.
-- [ ] **P1.3.5** Debug-line renderer for AABBs, cell grids and ports. *Done when:* toggles show L1 and L2 cell bounds.
-- [ ] **P1.3.6** Screenshot key F12, saving a PNG to `out/`. *Done when:* the file is written.
+- [ ] **P1.3.1** Depth32Float buffer with compare `GreaterEqual`, cleared to 0. *Done when:* a test scene sorts correctly at 1 m and 10 km. (Depth buffer is in; the sorting test needs the P1.4.6 harness.)
+- [x] **P1.3.2** Vertex format: position f32×3, octahedral-encoded normal, material id u16. *Done when:* the size and alignment are documented and tested. (2026-10-17, 20-byte vertex documented in `vertex.rs`, size/offset and oct round-trip tested)
+- [x] **P1.3.3** Basic forward pipeline with a camera uniform and a per-draw transform storage buffer. *Done when:* a grid of boxes renders. (2026-10-17, box grid scene via per-draw camera-relative origin storage buffer; `demo.rs` is temporary)
+- [x] **P1.3.4** Greybox shader: Lambert lighting plus a world-aligned 1 m / 8 m grid so scale is readable, computed from camera-relative position plus a sector offset uniform. *Done when:* the grid does not swim at large coordinates. (2026-10-17, checked in a Windows screenshot; grid phase is sector-independent because 1024 is a multiple of 8, so the uniform carries the in-sector camera offset only; swim test at large coordinates comes with P1.4.6)
+- [x] **P1.3.5** Debug-line renderer for AABBs, cell grids and ports. *Done when:* toggles show L1 and L2 cell bounds. (2026-10-17, F3 toggles L2 (blue) and L1 (orange) outlines, depth-tested, verified in a screenshot)
+- [x] **P1.3.6** Screenshot key F12, saving a PNG to `out/`. *Done when:* the file is written. (2026-10-17, F12 writes `out/screenshot-<unix>.png`; `SUPERSTRUCT_AUTOSHOT=<n>` takes one after n frames and exits, for remote runs)
 
 ### P1.4 Shaders and tooling
 - [ ] **P1.4.1** Load shaders from files with hot reload via `notify` in debug builds, and embed them with `include_str!` in release builds. *Done when:* an edit appears live.
