@@ -56,7 +56,7 @@ At a calm walking speed of 1.4 m/s, 4 km takes about 48 minutes, and a structure
 
 - **Giant freight lifts and long spiral ramps.** Riding them can itself be a zen set piece.
 - **Maglev trams along L1 decks.** At 50–100 m/s, 20 km takes about 4–7 minutes.
-- **Falling is a design decision still to make:** death, a slow glide, or a soft respawn. The current lean for a zen game is no death, with a controlled slow descent.
+- **Falling** was decided in §10.3: falls over 15 m are fatal, and you respawn at the last safe ground. Numbers are in `docs/spec/traversal.md`. There is no jump.
 
 ---
 

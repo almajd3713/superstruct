@@ -74,7 +74,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 
   *Done when:* the connectivity argument is written and the user has reviewed it. (2026-10-17)
 - [x] **P0.2.7** `docs/spec/regimes.md` covers L0 fields (density, verticality, style id, fog colour and density, light level, palette), boundary blending of atmosphere only, and the rare-events table (giant cavity, infinite staircase, gravity region, …) with probabilities. *Done when:* the doc is complete. (2026-10-17)
-- [ ] **P0.2.8** 🧭 `docs/spec/traversal.md` covers:
+- [x] **P0.2.8** 🧭 `docs/spec/traversal.md` covers:
   - player capsule dimensions and speeds (defaults in CLAUDE.md §4)
   - step-up and max slope
   - **jump or no jump**
@@ -83,7 +83,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
   - lift and tram speeds
   - port widths and clearances derived from the capsule
 
-  *Done when:* the user has approved the numbers.
+  *Done when:* the user has approved the numbers. (2026-10-17)
 
 ### P0.3 `gen` core types
 - [ ] **P0.3.1** `WorldPos { sector: I64Vec3, local: Vec3 }` with `normalize()`, `offset(Vec3)` and `delta(&WorldPos) -> DVec3`. *Done when:* unit tests cover crossing sector boundaries in both directions on every axis.
@@ -220,7 +220,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P2.4.1** Broadphase: collect `gen` primitives overlapping the capsule's swept AABB, cached per resident chunk. *Done when:* the query is under 0.1 ms in a typical scene.
 - [ ] **P2.4.2** Capsule against Box, Ramp, Cylinder and StairRun using the SDFs from P0.5.3: depenetration plus sliding. *Done when:* unit tests pass for corners, edges and ramps.
 - [ ] **P2.4.3** Grounded detection, step-up and slope limit per `traversal.md`. *Done when:* the controller climbs stairs, slides down slopes that are too steep, and doesn't jitter on edges (headless tests).
-- [ ] **P2.4.4** Walk and run with acceleration and deceleration curves, plus jump if approved in P0.2.8. 🎮 *Done when:* the user signs off on how movement feels.
+- [ ] **P2.4.4** Walk and run with acceleration and deceleration curves (no jump, per P0.2.8). 🎮 *Done when:* the user signs off on how movement feels.
 - [ ] **P2.4.5** Noclip/fly debug mode with adjustable speed up to 1 km/s. *Done when:* the toggle works.
 - [ ] **P2.4.6** Debug commands: teleport to a coordinate, to the nearest port, or to a random sanctuary. *Done when:* each works.
 

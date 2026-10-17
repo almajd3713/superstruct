@@ -1,6 +1,6 @@
 # Spec: traversal
 
-**Status: draft, awaiting user approval of the numbers (P0.2.8).**
+**Status: numbers approved by the user on 2026-10-17 (P0.2.8): no jump, 15 m fall-death height, 30 m/s lifts, everything else as drafted.**
 
 How the player moves, and the dimensions the generator must respect so that every port and walkway is usable. Every number here is tunable, but player-feel numbers change only with the user's agreement (CLAUDE.md §8). Generator-facing numbers (§6) change output, so they also need a `GEN_VERSION` bump.
 
@@ -25,9 +25,9 @@ How the player moves, and the dimensions the generator must respect so that ever
 | Step-up | 0.45 m | vertical ledge climbed without input |
 | Step-down snap | 0.45 m | stays glued to stairs and ramps going down |
 | Max walkable slope | 40° | steeper slopes slide the player down |
-| Jump | **none** (proposed, §2.1) | |
+| Jump | **none** (§2.1) | |
 
-### 2.1 Why no jump (proposal)
+### 2.1 Why no jump
 
 - **Zen means no friction** (CLAUDE.md §9). Without a jump there is no platforming and no failed jumps.
 - **The connectivity spec assumes it.** Ports, step-up and stairs define what is reachable. A jump would make places reachable that the generator never connected, and would invite falls.
