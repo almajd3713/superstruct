@@ -107,7 +107,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.5.3** Point-in-solid and signed-distance functions for each primitive type, used later by collision, the SDF port and validation. *Done when:* tests at known points pass. (2026-10-17)
 
 ### P0.6 L0 regimes
-- [ ] **P0.6.1** `regime(seed, L0 cell) -> Regime` with all fields from `regimes.md`. *Done when:* the output is stable (golden test), and a 64×64 histogram of fields matches the specified distributions.
+- [x] **P0.6.1** `regime(seed, L0 cell) -> Regime` with all fields from `regimes.md`. *Done when:* the output is stable (golden test), and a 64×64 histogram of fields matches the specified distributions. (2026-10-17)
 - [ ] **P0.6.2** Rare-event assignment per L0 cell. *Done when:* event frequencies over 10⁵ cells are within ±10% of the spec.
 - [ ] **P0.6.3** `atmosphere_at(WorldPos)`, which blends fog and palette across L0 boundaries. *Done when:* the output is continuous across a boundary (tested along a line).
 

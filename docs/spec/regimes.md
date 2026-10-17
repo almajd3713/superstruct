@@ -104,6 +104,8 @@ The event is drawn with `pick_weighted` from an RNG seeded with `hash(seed, 0, c
 | `Blackout` | 30 | `light = 0`, emissive suppressed, visibility forced to 1–3 km. Total darkness except the player's surroundings. Mind-breaking through absence |
 | `GravityRegion` | 20 | **Flag only** until P5.2.4 decides whether gravity can change direction. It has no effect on generation or play until then |
 
+**Blackout overrides.** After the pick, the same `RARE_EVENT` RNG draws the forced visibility as 250 × `range(4, 12)` inclusive (1–3 km), and `light` becomes 0. These replace the values drawn in §1, so the `REGIME` draw sequence is the same in every cell.
+
 Over 10⁵ cells, each frequency must fall within ±10% of its weight / 1000 (P0.6.2).
 
 ### 5.2 Per-column event: infinite staircase `[RARE_STAIR]`
