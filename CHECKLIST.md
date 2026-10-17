@@ -164,7 +164,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 *Phase exit:* a static greybox scene built from `gen` primitives renders on Windows, with GPU timings visible.
 
 ### P1.1 Window, device and loop
-- [ ] **P1.1.1** Window with `winit`: resize, borderless-fullscreen toggle (F11), close. *Done when:* it runs on Windows.
+- [x] **P1.1.1** Window with `winit`: resize, borderless-fullscreen toggle (F11), close. *Done when:* it runs on Windows. (2026-10-17, builds and launches on Windows GNU toolchain; F11 and resize by hand are for the user to eyeball)
 - [ ] **P1.1.2** wgpu instance, adapter and device. Request `MULTI_DRAW_INDIRECT`, `INDIRECT_FIRST_INSTANCE` and `TIMESTAMP_QUERY` (and `MULTI_DRAW_INDIRECT_COUNT` if available). Log what was granted and give a clear error message if a required feature is missing. *Done when:* the log shows the expected adapter (RTX 4070) and features on Windows.
 - [ ] **P1.1.3** Surface configuration with a vsync toggle (Fifo / Mailbox / Immediate). *Done when:* the toggle works at runtime.
 - [ ] **P1.1.4** Main loop: fixed-step simulation at 120 Hz with variable rendering and interpolation. *Done when:* a moving test object is smooth at both 60 Hz and uncapped.
