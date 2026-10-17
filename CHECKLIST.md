@@ -23,7 +23,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.1.1** Initialize git and add `.gitignore` (`target/`, `out/`, editor files). *Done when:* `git status` shows only intended files. (2026-10-17)
 - [x] **P0.1.2** Add `rust-toolchain.toml` pinning a current stable version, with `rustfmt` and `clippy` components. *Done when:* `rustup show` resolves the pinned toolchain in the repo. (2026-10-17)
 - [x] **P0.1.3** Create the Cargo workspace with empty crates `gen` (lib), `engine` (lib), `game` (bin), `tools/slice` (bin) and `tools/bots` (bin), all on edition 2024. *Done when:* `cargo build --workspace` succeeds. (2026-10-17)
-- [ ] **P0.1.4** Add workspace lints (`[workspace.lints]`: `unsafe_code = "deny"` in `gen`, clippy pedantic subset) and `rustfmt.toml`. *Done when:* `cargo clippy --workspace --all-targets -- -D warnings` passes.
+- [x] **P0.1.4** Add workspace lints (`[workspace.lints]`: `unsafe_code = "deny"` in `gen`, clippy pedantic subset) and `rustfmt.toml`. *Done when:* `cargo clippy --workspace --all-targets -- -D warnings` passes. (2026-10-17)
 - [ ] **P0.1.5** Add release and dev profiles: release with `lto = "thin"` and `codegen-units = 1`, dev with `opt-level = 1` for `gen` and deps. *Done when:* both profiles build.
 - [ ] **P0.1.6** Write `scripts/check.sh` (fmt check, clippy `-D warnings`, `cargo test --workspace`). *Done when:* the script exits 0 on the empty workspace and non-zero on a deliberate fmt violation.
 - [ ] **P0.1.7** Create the `docs/spec/`, `docs/playtests/` and `out/` directories, each with a `.gitkeep` where needed. *Done when:* the directories exist and `out/` is ignored.
