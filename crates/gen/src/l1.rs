@@ -309,8 +309,8 @@ pub fn chasm(seed: WorldSeed, cell: CellKey) -> Option<Rect> {
     clear.then_some(r)
 }
 
-/// Everything L1 emits for one cell so far: trunk piece, deck pieces, and `KeepOut` for the
-/// shaft and chasm. Cavity cells emit nothing. Core, bridges and ports join in later items.
+/// Everything L1 emits for one cell so far: face ports, trunk piece, deck pieces, and `KeepOut`
+/// for the shaft and chasm. Cavity cells emit nothing. Core and bridges join in later items.
 pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     let mut out = CellOutput {
         key: cell,
@@ -322,6 +322,7 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     if is_cavity(seed, cell) {
         return out;
     }
+    out.ports = crate::l1_port::cell_ports(seed, cell);
     let span = ColumnSpanKey::of(cell);
     if let Some(t) = trunk(seed, span) {
         out.primitives.extend(trunk_piece(&t, cell));

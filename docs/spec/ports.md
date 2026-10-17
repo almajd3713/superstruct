@@ -68,6 +68,17 @@ Ports are produced in a fixed order and numbered `id = 0, 1, …`. A port whose 
 | Y | **LiftStop**: the passage of the column's lift core (`levels.md` §4.0) |
 | any face touching a cavity cell | none |
 
+**Details as implemented (`worldgen::l1_port`, P0.7.4)**
+- Every L1 X/Z opening is 4 m tall: `v1 = v0 + 4 m`. That clears the 2.4 m minimum, and because bridge floors keep 8 m from every slab, no opening meets a slab.
+- **DeckContinuation** `u` spans `[64 m, 4032 m)`, the whole face within the margins.
+- **BridgeEnd**, per bridge, draws in this order:
+  1. the width, 4 m × `range(2, 8)`;
+  2. `u0` on a 4 m step, so the port fits inside the margins;
+  3. 8 floor-height tries on a 4 m step in `[4 m, 4092 m]`. All 8 are always drawn, and the first clear one wins.
+- **Fallback height:** the midpoint, on the 4 m grid, of the largest vertical gap between the slabs of **both** sides and the cell's floor and ceiling. Decks are 600 m apart only within one side.
+- **Overlap:** a bridge port whose rect, extended 4 m down for the bridge slab, overlaps an earlier port is dropped. Its draws still count. Ids number only the ports that are kept.
+- **Y faces:** LiftStop `rect` is the core footprint, with `(u, v) = (x, z)`.
+
 The result is that **every face between two non-cavity L1 cells carries at least one port.** At L1, the backbone lattice is the whole grid (§6).
 
 ### 4.2 L2 faces
