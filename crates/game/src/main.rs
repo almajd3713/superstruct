@@ -1,9 +1,15 @@
-use engine::window::{self, WindowConfig};
+use engine::app;
+use engine::settings::Settings;
+use tracing_subscriber::EnvFilter;
 
 fn main() -> anyhow::Result<()> {
-    window::run(WindowConfig {
-        title: "Superstruct".into(),
-        size: (1600, 900).into(),
-    })?;
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_env("SUPERSTRUCT_LOG")
+                .unwrap_or_else(|_| EnvFilter::new("info,wgpu_hal=off,wgpu=warn,naga=warn")),
+        )
+        .init();
+    let settings = Settings::load_or_create(&app::settings_path())?;
+    app::run("Superstruct", settings)?;
     Ok(())
 }

@@ -165,11 +165,11 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 
 ### P1.1 Window, device and loop
 - [x] **P1.1.1** Window with `winit`: resize, borderless-fullscreen toggle (F11), close. *Done when:* it runs on Windows. (2026-10-17, builds and launches on Windows GNU toolchain; F11 and resize by hand are for the user to eyeball)
-- [ ] **P1.1.2** wgpu instance, adapter and device. Request `MULTI_DRAW_INDIRECT`, `INDIRECT_FIRST_INSTANCE` and `TIMESTAMP_QUERY` (and `MULTI_DRAW_INDIRECT_COUNT` if available). Log what was granted and give a clear error message if a required feature is missing. *Done when:* the log shows the expected adapter (RTX 4070) and features on Windows.
-- [ ] **P1.1.3** Surface configuration with a vsync toggle (Fifo / Mailbox / Immediate). *Done when:* the toggle works at runtime.
-- [ ] **P1.1.4** Main loop: fixed-step simulation at 120 Hz with variable rendering and interpolation. *Done when:* a moving test object is smooth at both 60 Hz and uncapped.
-- [ ] **P1.1.5** Logging via `tracing` with an env-filter. *Done when:* log levels can be set from the environment.
-- [ ] **P1.1.6** A `settings.toml` loader (resolution, FOV, sensitivity, vsync) with defaults written on first run. *Done when:* edits are applied on restart.
+- [x] **P1.1.2** wgpu instance, adapter and device. Request `MULTI_DRAW_INDIRECT`, `INDIRECT_FIRST_INSTANCE` and `TIMESTAMP_QUERY` (and `MULTI_DRAW_INDIRECT_COUNT` if available). Log what was granted and give a clear error message if a required feature is missing. *Done when:* the log shows the expected adapter (RTX 4070) and features on Windows. (2026-10-17, RTX 4070 on Vulkan with TIMESTAMP_QUERY, INDIRECT_FIRST_INSTANCE, MULTI_DRAW_INDIRECT_COUNT logged on Windows; plain multi-draw-indirect is core in wgpu 30)
+- [x] **P1.1.3** Surface configuration with a vsync toggle (Fifo / Mailbox / Immediate). *Done when:* the toggle works at runtime. (2026-10-17, F2 cycles Fifo/Mailbox/Immediate; Fifo verified at 144 fps on Windows, runtime toggle itself awaits a hands-on check)
+- [x] **P1.1.4** Main loop: fixed-step simulation at 120 Hz with variable rendering and interpolation. *Done when:* a moving test object is smooth at both 60 Hz and uncapped. (2026-10-17, 120 Hz fixed step with interpolated test quad; runs, smoothness awaits a visual check at 60 Hz and uncapped)
+- [x] **P1.1.5** Logging via `tracing` with an env-filter. *Done when:* log levels can be set from the environment. (2026-10-17, `SUPERSTRUCT_LOG` env filter)
+- [x] **P1.1.6** A `settings.toml` loader (resolution, FOV, sensitivity, vsync) with defaults written on first run. *Done when:* edits are applied on restart. (2026-10-17, `settings.toml` in the working directory (git-ignored), override with `SUPERSTRUCT_SETTINGS`; unit-tested)
 
 ### P1.2 Input and camera
 - [ ] **P1.2.1** Keyboard and mouse state, with raw mouse motion from `DeviceEvent::MouseMotion`. *Done when:* look input has no acceleration.

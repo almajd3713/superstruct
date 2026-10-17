@@ -9,5 +9,12 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+bytemuck = "1.25.2"
+glam = "0.34.1"
+pollster = "1.0.1"
+serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
+toml = "1.1.8"
+tracing = "0.1.44"
+wgpu = "30.0.1"
 winit = "0.30.13"
