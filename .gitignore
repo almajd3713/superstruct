@@ -1,0 +1,11 @@
+/target/
+/out/*
+!/out/.gitkeep
+
+# editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

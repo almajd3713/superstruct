@@ -20,7 +20,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 *Phase exit:* port connectivity is verified on 10⁶ random cells, and generation is deterministic across runs and threads.
 
 ### P0.1 Repository and tooling
-- [ ] **P0.1.1** Initialize git and add `.gitignore` (`target/`, `out/`, editor files). *Done when:* `git status` shows only intended files.
+- [x] **P0.1.1** Initialize git and add `.gitignore` (`target/`, `out/`, editor files). *Done when:* `git status` shows only intended files. (2026-10-17)
 - [ ] **P0.1.2** Add `rust-toolchain.toml` pinning a current stable version, with `rustfmt` and `clippy` components. *Done when:* `rustup show` resolves the pinned toolchain in the repo.
 - [ ] **P0.1.3** Create the Cargo workspace with empty crates `gen` (lib), `engine` (lib), `game` (bin), `tools/slice` (bin) and `tools/bots` (bin), all on edition 2024. *Done when:* `cargo build --workspace` succeeds.
 - [ ] **P0.1.4** Add workspace lints (`[workspace.lints]`: `unsafe_code = "deny"` in `gen`, clippy pedantic subset) and `rustfmt.toml`. *Done when:* `cargo clippy --workspace --all-targets -- -D warnings` passes.
