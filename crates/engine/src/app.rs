@@ -15,9 +15,10 @@ use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 use glam::{I64Vec3, Vec3};
 use worldgen::cell::{CellKey, Level};
 use worldgen::coord::WorldPos;
+use worldgen::seed::WorldSeed;
 
 use crate::camera::Camera;
-use crate::demo::demo_scene;
+use crate::cellscene::{CellScene, busiest_l2_cell};
 use crate::gpu::{Gpu, GpuError};
 use crate::gpu_timer::GpuTimer;
 use crate::input::{Action, Bindings, InputState};
@@ -56,6 +57,7 @@ struct App {
     settings: Settings,
     running: Option<Running>,
     failure: Option<AppError>,
+    scene_note: String,
     debug_boxes: bool,
     box_scratch: Vec<DebugBox>,
     input: InputState,
@@ -89,7 +91,26 @@ impl App {
         );
         let gpu = Gpu::new(&window, s.vsync)?;
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
-        renderer.set_scene(&gpu.device, &demo_scene());
+        let key = std::env::var("SUPERSTRUCT_CELL")
+            .ok()
+            .and_then(|v| parse_cell(&v))
+            .unwrap_or_else(|| busiest_l2_cell(WorldSeed(self.settings.seed), 4));
+        match CellScene::build(WorldSeed(self.settings.seed), key) {
+            Ok(mut scene) => {
+                self.scene_note = scene.summary();
+                info!("{}", self.scene_note);
+                let mesh = std::mem::take(&mut scene.mesh);
+                renderer.set_scene(&gpu.device, &[(scene.origin, mesh)]);
+                // Start outside the cell's low corner, high up, looking at its centre.
+                if let Ok(p) = scene.origin.offset(Vec3::new(-120.0, 420.0, -120.0)) {
+                    self.camera.pos = p;
+                    self.prev_cam_pos = p;
+                    self.camera.yaw = 5.0 * std::f32::consts::FRAC_PI_4;
+                    self.camera.pitch = -0.4;
+                }
+            }
+            Err(err) => error!("cannot build cell {key:?}: {err}"),
+        }
         if cfg!(debug_assertions) {
             // Errors are logged and kept for the overlay; the embedded pipelines stay in use.
             let _ = renderer.reload_shaders(&gpu.device, &ShaderSources::load());
@@ -229,6 +250,7 @@ impl App {
                     VsyncMode::Mailbox => "mailbox",
                     VsyncMode::Off => "off",
                 },
+                scene_note: &self.scene_note,
                 shader_error: running.renderer.shader_error(),
                 timer: &running.timer,
             };
@@ -408,6 +430,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         settings,
         running: None,
         failure: None,
+        scene_note: String::new(),
         debug_boxes: std::env::var_os("SUPERSTRUCT_DEBUG_BOXES").is_some(),
         box_scratch: Vec::new(),
         input: InputState::new(Bindings::default()),
@@ -472,4 +495,13 @@ fn save_screenshot(gpu: &Gpu, texture: &wgpu::Texture) {
         Ok(()) => info!(path = %path.display(), "screenshot saved"),
         Err(err) => error!("screenshot failed: {err}"),
     }
+}
+
+/// `x,y,z` L2 cell coordinates.
+fn parse_cell(text: &str) -> Option<CellKey> {
+    let mut it = text.split(',').map(|v| v.trim().parse::<i64>());
+    let (x, y, z) = (it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?);
+    it.next()
+        .is_none()
+        .then(|| CellKey::new(Level::L2, I64Vec3::new(x, y, z)))
 }

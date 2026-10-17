@@ -197,7 +197,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 
 ### P1.5 Windows workflow and phase exit
 - [x] **P1.5.1** Document and verify the Windows build: a native `cargo` on Windows, or cross-compilation from WSL. *Done when:* the steps are in CLAUDE.md §7 and the binary runs. (2026-10-17, `scripts/win.sh build|test|run` (GNU toolchain via `cargo.exe`), documented in CLAUDE.md §7; the game and the render tests run natively)
-- [ ] **P1.5.2** **Phase exit:** mesh one generated L2 cell (temporary simple box mesher) and render it with timings. 🎮 *Done when:* there's a screenshot and the user confirms it on Windows.
+- [ ] **P1.5.2** **Phase exit:** mesh one generated L2 cell (temporary simple box mesher) and render it with timings. 🎮 *Done when:* there's a screenshot and the user confirms it on Windows. (Built 2026-10-17: `cellscene.rs` meshes the busiest L2 cell near the origin, `primmesh.rs` is the temporary mesher, the overlay shows gen/mesh/GPU timings; cell 4 -4 4 at seed 0 is 95 prims, 9480 tris, gen 11 ms and mesh 10 ms in a debug build, scene pass 0.014 ms on the GPU. Screenshot checked on the RTX 4070; waiting for the user's confirmation, so left unticked.)
 
 ---
 

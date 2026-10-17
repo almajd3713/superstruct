@@ -17,6 +17,7 @@ pub struct OverlayInfo<'a> {
     pub seed: u64,
     pub adapter: &'a str,
     pub vsync: &'a str,
+    pub scene_note: &'a str,
     pub shader_error: Option<&'a str>,
     pub timer: &'a GpuTimer,
 }
@@ -168,6 +169,7 @@ fn draw(ui: &mut egui::Ui, frame_ms: &VecDeque<f32>, info: &OverlayInfo<'_>) {
             frame_graph(ui, frame_ms);
             ui.monospace(format!("{} | vsync {}", info.adapter, info.vsync));
             ui.monospace(format!("seed {}", info.seed));
+            ui.monospace(info.scene_note);
             ui.monospace(format!(
                 "sector {} {} {}",
                 info.sector.x, info.sector.y, info.sector.z

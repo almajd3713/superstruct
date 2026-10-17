@@ -48,11 +48,15 @@ fn grid_line(x: f32, spacing: f32, half_px: f32) -> f32 {
     return line * fade;
 }
 
+// Ids follow `worldgen::prim::MaterialId`: concrete, metal, grating, emissive, pipe, warm.
 fn material_albedo(id: u32) -> vec3<f32> {
     switch id {
-        case 1u: { return vec3<f32>(0.34, 0.35, 0.37); }
-        case 2u: { return vec3<f32>(0.22, 0.23, 0.25); }
-        case 3u: { return vec3<f32>(0.55, 0.5, 0.42); }
+        case 0u: { return vec3<f32>(0.36, 0.37, 0.39); }
+        case 1u: { return vec3<f32>(0.2, 0.21, 0.24); }
+        case 2u: { return vec3<f32>(0.14, 0.15, 0.17); }
+        case 3u: { return vec3<f32>(0.9, 0.88, 0.8); }
+        case 4u: { return vec3<f32>(0.27, 0.29, 0.29); }
+        case 5u: { return vec3<f32>(0.62, 0.46, 0.3); }
         default: { return vec3<f32>(0.4, 0.4, 0.4); }
     }
 }
