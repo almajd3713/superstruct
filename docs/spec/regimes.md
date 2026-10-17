@@ -116,7 +116,7 @@ Over 10⁵ cells, each frequency must fall within ±10% of its weight / 1000 (P0
 - Present with probability 4/1000 per L0 column: the first draw is `below(1000) < 4`, an exact integer test. A random L0 cell therefore lies in a staircase column with probability 0.004.
 - Placement uses an RNG seeded with the same hash:
   - one L1 column within the L0 column, chosen uniformly from the 8 × 8 (`l1_x = below(8)`, then `l1_z = below(8)`), and
-  - a 64 × 64 m footprint under the L1 separation rule (`levels.md` §4.0).
+  - a 64 × 64 m footprint under the L1 separation rule (`levels.md` §4.0): the min corner is drawn on a 16 m step, x then z, with the 64 m margin. If the footprint comes within 64 m of the L1 core, the staircase is absent from that L1 column.
 - Placement is drawn **before** the trunk, shaft and chasm, so those avoid it.
 - A switchback of `StairRun`s ascends without end, with landings joined to every deck it crosses. It is an L1 keyed feature.
 - Geometry details are in P5.2.3. Until then, the generator reserves the footprint as a `KeepOut`.

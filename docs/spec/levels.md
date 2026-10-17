@@ -88,7 +88,7 @@ L1 is computed in two stages:
 #### 4.0.1 Lift core: `ColumnKey(L1, x, z)` `[CORE]`
 
 - **Every** L1 column has one lift core at the same (x, z) in every cell, so the core is an endless vertical spine.
-- Footprint 16–32 m per side, step 4 m, centre placed with the 64 m margin.
+- Footprint: a square, 16–32 m per side, step 4 m (`side = 4 m × range(4, 8)` inclusive). Its min corner is drawn uniformly on a 4 m step, x then z, so that the footprint keeps the 64 m margin.
 - It is emitted as a `LiftShaft` with `METAL` box walls. The walls have openings at every stop, and the footprint is a hole in every deck.
 - **Stops:** one on every deck top in the cell, and one at every bridge height in the cell (§4.5).
 - It passes through every Y face as that face's `LiftStop` port. In cavity cells it is absent.
@@ -99,9 +99,9 @@ A span is 8 L1 cells (32 km, one L0 cell tall). Every L1 cell in the span comput
 
 | Parameter | Value |
 |---|---|
-| Exists | `chance(lerp(0.30, 0.80, v))` |
+| Exists | `chance(lerp(0.30, 0.80, v))`, with `v` from the span's L0 cell `(x div 8, sy, z div 8)`. Draw order: exists, radius, centre x, centre z, extent |
 | Radius r | 96–400 m, step 16 m |
-| Centre (x, z) | uniform in `[r + 64, 4096 − r − 64]`, step 16 m. The 64 m margin applies §1.1 rule 4. If the footprint comes within 64 m of the core, r is reduced in 16 m steps down to 96 m; if it still conflicts, there is no trunk in this span |
+| Centre (x, z) | uniform in `[r + 64, 4096 − r − 64]`, step 16 m. The 64 m margin applies §1.1 rule 4. If the footprint comes within 64 m of the core or the infinite-staircase footprint, r is reduced in 16 m steps down to 96 m, keeping the centre. If it still conflicts, there is no trunk in this span |
 | Vertical extent | bottom cell `a` and top cell `b` within the span, with `0 ≤ a ≤ b ≤ 7`. With probability 0.5 the trunk fills the whole span (a = 0, b = 7). Otherwise a = `range(0, 8)` and b = `range(a, 8)`. The ends lie on L1 cell boundaries |
 | Material | `CONCRETE` |
 
