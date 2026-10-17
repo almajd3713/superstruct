@@ -50,12 +50,12 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
   - the cell output struct (primitives, ports, child constraints, metadata)
 
   *Done when:* the doc is complete. (2026-10-17)
-- [ ] **P0.2.4** 🧭 Choose the **feature ownership rule**:
+- [x] **P0.2.4** 🧭 Choose the **feature ownership rule**:
   - option (a): features are clipped to the owning cell and continue across faces only through ports
   - option (b): bounded overflow, where features may extend up to radius R into neighbours, so evaluation queries neighbours within R
   - plus **column and layer keys** for vertical features (trunks, lift shafts) and horizontal ones (decks)
 
-  Record the choice in `docs/spec/levels.md`. *Done when:* the decision is recorded with its rationale.
+  Record the choice in `docs/spec/levels.md`. *Done when:* the decision is recorded with its rationale. (2026-10-17)
 - [ ] **P0.2.5** `docs/spec/levels.md` covers the content, parameters, probabilities and parent-constraint inputs and outputs of each level:
   - L0 regimes
   - L1 megaforms: trunks, decks, shafts, chasms, giant cavities
