@@ -140,13 +140,16 @@ L3 has the same obligation toward L2 surfaces. Deliberately sealed rooms and dea
 
 The level is part of the hash, so one salt per axis serves every level without collision.
 
-## 8. Review questions
+## 8. Review decisions and open questions
 
-1. **Backbone at L1 is the whole grid.** PLAN.md §2 suggested a sparse lattice ("every 4th face"). I made every L1 face carry a port instead, because:
+**Decided (2026-10-17)**
+- **Local rule at L2 and finer:** each port connects to the L1 network N inside the cell (Lemma D). CLAUDE.md §3.5 has been reworded to match.
+- **Lift core:** one in every L1 column (`levels.md` §4.0.1). Approved.
+
+**Open**
+1. **Backbone at L1 is the whole grid.** PLAN.md §2 suggested a sparse lattice ("every 4th face"). This draft makes every L1 face carry a port instead, because:
    - at 4 km scale, islands would break the horizon promise in spirit,
    - the argument becomes a simple grid argument,
    - dead ends and sealed rooms still exist at L2 and L3.
 
-   OK?
-2. **The local rule is relaxed at L2 and finer.** CLAUDE.md §3.5 says every cell connects all of its ports internally. That holds literally at L1. At L2 and finer, a cell's ports must each connect to the L1 network N inside the cell (Lemma D), not necessarily to each other. Two ports can be connected only through N elsewhere, for example a deck and a bridge passing 300 m above it. Contracting N to a single node gives back the original rule. OK, or should the invariant's wording change?
-3. **One lift core per L1 column**, at a position from `ColumnKey`. It is an endless vertical spine every 4 km that ties every deck together. It reads as a BLAME!-style elevator spine, but it is also a regular feature. OK, or should cores be optional, with a sparser vertical backbone?
+   Awaiting the user's decision.
