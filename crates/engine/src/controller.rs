@@ -291,7 +291,7 @@ fn probe_down(solids: &[Solid], p: Vec3, max: f32) -> Option<(f32, Vec3)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::collision::tests::floor_box;
     use worldgen::prim::{
@@ -299,7 +299,7 @@ mod tests {
     };
 
     /// Primitives in sector-0 coordinates, served relative to whatever centre is asked for.
-    struct Flat(Vec<Primitive>);
+    pub(crate) struct Flat(pub(crate) Vec<Primitive>);
 
     impl SolidSource for Flat {
         fn gather(&self, centre: &WorldPos, _half: f32, out: &mut Vec<Solid>) {
@@ -330,11 +330,11 @@ mod tests {
 
     /// A 160 m square floor whose top is y = 0, from -80 to +80 m on x and z... in sector 0
     /// coordinates, so offset by 100 m to stay non-negative: x, z in 20..180, top at y = 10.
-    fn floor() -> Primitive {
+    pub(crate) fn floor() -> Primitive {
         floor_box([320, 0, 320], [2880, 160, 2880])
     }
 
-    fn at(x: f32, y: f32, z: f32) -> Controller {
+    pub(crate) fn at(x: f32, y: f32, z: f32) -> Controller {
         Controller::new(WorldPos::new(glam::I64Vec3::ZERO, Vec3::new(x, y, z)).unwrap())
     }
 
@@ -345,7 +345,7 @@ mod tests {
         }
     }
 
-    fn local(c: &Controller) -> Vec3 {
+    pub(crate) fn local(c: &Controller) -> Vec3 {
         c.pos.local()
     }
 

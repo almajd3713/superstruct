@@ -22,6 +22,7 @@ pub mod primmesh;
 pub mod profile;
 pub mod readback;
 pub mod renderer;
+pub mod respawn;
 pub mod settings;
 pub mod shaders;
 pub mod stream;

@@ -40,6 +40,22 @@ pub fn gradient(solids: &[Solid], p: Vec3) -> Vec3 {
     .unwrap_or(Vec3::Y)
 }
 
+/// Distance from `start` straight down to the first solid, if within `max`. Point trace, no radius.
+pub fn ray_down(solids: &[Solid], start: Vec3, max: f32) -> Option<f32> {
+    let mut t = 0.0;
+    for _ in 0..64 {
+        let d = sdf(solids, start - Vec3::Y * t);
+        if d <= 0.002 {
+            return Some(t);
+        }
+        t += d;
+        if t > max {
+            return None;
+        }
+    }
+    None
+}
+
 /// Where the controller reads solids from.
 pub trait SolidSource {
     /// Appends every solid within `half` metres (per axis) of `centre`, in the frame of `centre`.

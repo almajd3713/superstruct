@@ -15,6 +15,7 @@ const SIZE: (u32, u32) = (64, 64);
 const PLAIN: FrameParams = FrameParams {
     fog_density: 0.0,
     grid: false,
+    fade: 0.0,
 };
 
 fn headless() -> Option<Headless> {

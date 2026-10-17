@@ -19,7 +19,7 @@ use worldgen::seed::WorldSeed;
 
 use crate::camera::Camera;
 use crate::cellscene::busiest_l2_cell;
-use crate::controller::{Controller, MoveInput};
+use crate::controller::{Controller, EYE_HEIGHT, MoveInput};
 use crate::debugcmd::Command;
 use crate::gpu::{Gpu, GpuError};
 use crate::gpu_timer::GpuTimer;
@@ -28,6 +28,7 @@ use crate::meshpool::MeshPool;
 use crate::overlay::{Overlay, OverlayInfo};
 use crate::readback;
 use crate::renderer::{DebugBox, FrameInput, FrameParams, Renderer};
+use crate::respawn::{Event, SafeSpot, Survival};
 use crate::settings::{Settings, VsyncMode};
 use crate::shaders::{ShaderSources, ShaderWatcher};
 use crate::streamer::{RendererSink, Streamer, StreamerConfig};
@@ -64,6 +65,7 @@ struct App {
     failure: Option<AppError>,
     streamer: Streamer,
     walker: Controller,
+    survival: Survival,
     debug_tx: crossbeam_channel::Sender<crate::debugcmd::Outcome>,
     debug_rx: crossbeam_channel::Receiver<crate::debugcmd::Outcome>,
     sanctuary_pick: u64,
@@ -105,7 +107,7 @@ impl App {
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
         self.place_camera();
         if !self.fly_mode {
-            self.walker.set_eye(self.camera.pos);
+            self.enter_walk_mode();
         }
         if cfg!(debug_assertions) {
             // Errors are logged and kept for the overlay; the embedded pipelines stay in use.
@@ -129,6 +131,16 @@ impl App {
         })
     }
 
+    /// Starts walking from the camera: respawn falls back to here until safe ground is found.
+    fn enter_walk_mode(&mut self) {
+        self.walker.set_eye(self.camera.pos);
+        self.survival = Survival::new(self.walker.pos);
+        self.survival.set_fallback(SafeSpot {
+            pos: self.walker.pos,
+            yaw: self.camera.yaw,
+        });
+    }
+
     /// Moves the player by one fixed step: noclip fly, or the walking controller.
     fn move_player(&mut self, dt: f32) {
         // Without the cursor grabbed there is no input, but gravity still applies when walking.
@@ -150,11 +162,27 @@ impl App {
                 self.camera.pos = p;
             }
         } else {
+            let steer = self.survival.controllable();
             let input = MoveInput {
-                wish: flat.normalize_or_zero(),
-                run: grabbed && self.input.held(Action::Sprint),
+                wish: if steer {
+                    flat.normalize_or_zero()
+                } else {
+                    Vec3::ZERO
+                },
+                run: steer && grabbed && self.input.held(Action::Sprint),
             };
-            self.walker.step(dt, input, self.streamer.collision());
+            let world = self.streamer.collision();
+            self.walker.step(dt, input, world);
+            if let Event::Respawn(spot) =
+                self.survival
+                    .update(dt, &self.walker, self.camera.yaw, world)
+                && let Ok(eye) = spot.pos.offset(Vec3::Y * (EYE_HEIGHT + 0.05))
+            {
+                self.walker.set_eye(eye);
+                self.camera.yaw = spot.yaw;
+                self.camera.pitch = 0.0;
+                self.prev_cam_pos = eye;
+            }
             self.camera.pos = self.walker.eye();
         }
     }
@@ -234,7 +262,7 @@ impl App {
         if self.input.pressed(Action::ToggleFly) {
             self.fly_mode = !self.fly_mode;
             if !self.fly_mode {
-                self.walker.set_eye(self.camera.pos);
+                self.enter_walk_mode();
             }
         }
         if self.input.pressed(Action::FlyFaster) {
@@ -303,6 +331,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::too_many_lines)] // the frame's orchestration reads best in one place
     fn draw(&mut self, alpha: f32, frame_time: f64, want_screenshot: bool) -> bool {
         let Some(running) = &mut self.running else {
             return false;
@@ -351,12 +380,20 @@ impl App {
                 &FrameInput {
                     camera: &render_camera,
                     size: running.gpu.size(),
-                    params: FrameParams::default(),
+                    params: FrameParams {
+                        fade: self.survival.fade(),
+                        ..FrameParams::default()
+                    },
                     boxes: &self.box_scratch,
                     timer: Some(&running.timer),
                 },
             );
-            let mode = mode_line(self.fly_mode, self.fly_speed, &self.walker);
+            let mode = mode_line(
+                self.fly_mode,
+                self.fly_speed,
+                &self.walker,
+                self.survival.fade(),
+            );
             let info = OverlayInfo {
                 sector: render_camera.pos.sector(),
                 local: render_camera.pos.local(),
@@ -553,6 +590,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         running: None,
         failure: None,
         walker: Controller::new(start),
+        survival: Survival::new(start),
         debug_tx,
         debug_rx,
         sanctuary_pick: 0,
@@ -635,7 +673,7 @@ fn parse_triple(text: &str) -> Option<[i64; 3]> {
     it.next().is_none().then_some(v)
 }
 
-fn mode_line(fly: bool, fly_speed: f32, walker: &Controller) -> String {
+fn mode_line(fly: bool, fly_speed: f32, walker: &Controller, fade: f32) -> String {
     if fly {
         format!("fly {fly_speed:.0} m/s (F4 walk, +/- speed)")
     } else {
@@ -644,7 +682,10 @@ fn mode_line(fly: bool, fly_speed: f32, walker: &Controller) -> String {
         } else {
             "airborne"
         };
-        format!("walk, {state} (F4 fly) vel {:.2} m/s", walker.vel.length())
+        format!(
+            "walk, {state} (F4 fly) vel {:.2} m/s fade {fade:.2}",
+            walker.vel.length()
+        )
     }
 }
 

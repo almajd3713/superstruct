@@ -68,6 +68,8 @@ pub struct FrameInput<'a> {
 pub struct FrameParams {
     pub fog_density: f32,
     pub grid: bool,
+    /// 0 clear to 1 black, for the death sequence.
+    pub fade: f32,
 }
 
 impl Default for FrameParams {
@@ -75,6 +77,7 @@ impl Default for FrameParams {
         Self {
             fog_density: 0.0008,
             grid: true,
+            fade: 0.0,
         }
     }
 }
@@ -389,7 +392,7 @@ impl Renderer {
         let globals = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             cam_local: [local.x, local.y, local.z, 0.0],
-            params: [params.fog_density, f32::from(params.grid), 0.0, 0.0],
+            params: [params.fog_density, f32::from(params.grid), params.fade, 0.0],
         };
         queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
@@ -421,9 +424,9 @@ impl Renderer {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.02,
-                        g: 0.025,
-                        b: 0.03,
+                        r: 0.02 * f64::from(1.0 - params.fade),
+                        g: 0.025 * f64::from(1.0 - params.fade),
+                        b: 0.03 * f64::from(1.0 - params.fade),
                         a: 1.0,
                     }),
                     store: wgpu::StoreOp::Store,

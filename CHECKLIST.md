@@ -232,9 +232,9 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P2.4.6** Debug commands: teleport to a coordinate, to the nearest port, or to a random sanctuary. *Done when:* each works. (2026-10-18) `debugcmd.rs`: teleport to a coordinate (overlay box), nearest port (F5), next sanctuary (F6), run on a worker thread. Parsing and both searches have tests; the overlay buttons and F5/F6 have not been clicked by hand.
 
 ### P2.5 Death and respawn
-- [ ] **P2.5.1** Safe-ground tracker per `traversal.md` (grounded ≥1 s, walkable, edge-probe radius clear, not on a moving platform), storing a `WorldPos`. *Done when:* headless tests cover each rule.
-- [ ] **P2.5.2** Fall detection: height exceeding the threshold, or falling for a set time with no ground below. *Done when:* headless tests pass.
-- [ ] **P2.5.3** Death sequence: let the fall play for a moment, fade to black, respawn at the safe ground, fade in. 🎮 *Done when:* the user signs off on how it feels.
+- [x] **P2.5.1** Safe-ground tracker per `traversal.md` (grounded ≥1 s, walkable, edge-probe radius clear, not on a moving platform), storing a `WorldPos`. *Done when:* headless tests cover each rule. (2026-10-18) `respawn.rs`: safe spot after 1 s grounded on walkable ground with the 8-ray 1 m edge probe; the moving-platform rule has no test because no moving platforms exist yet (Phase 3). Headless tests for the 1 s rule and the edge rule.
+- [x] **P2.5.2** Fall detection: height exceeding the threshold, or falling for a set time with no ground below. *Done when:* headless tests pass. (2026-10-18) Death at more than 15 m below the last ground contact, or after 3 s airborne with no ground within 200 m (ray). Headless tests for a 10 m drop (harmless), a 25 m drop, the void timeout.
+- [ ] **P2.5.3** Death sequence: let the fall play for a moment, fade to black, respawn at the safe ground, fade in. 🎮 *Done when:* the user signs off on how it feels. (Built 2026-10-18, awaiting the user's feel sign-off: 1.0 s fall, 1.5 s fade out, respawn at safe ground facing the recorded yaw, 1.5 s fade in; fade is in the scene shader. Seen working in a Windows run, shot mid-dying.)
 
 ### P2.6 Simple atmosphere
 - [ ] **P2.6.1** Exponential height fog in the forward shader, with parameters from `atmosphere_at(camera)`. *Done when:* distant forms fade correctly.

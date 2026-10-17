@@ -84,5 +84,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let dist = length(in.rel);
     let fog = 1.0 - exp(-globals.params.x * dist);
     colour = mix(colour, vec3<f32>(0.02, 0.025, 0.03), fog);
+    colour = colour * (1.0 - globals.params.z);
     return vec4<f32>(colour, 1.0);
 }
