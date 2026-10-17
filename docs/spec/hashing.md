@@ -1,6 +1,6 @@
 # Spec: hashing and randomness
 
-**Status: draft, awaiting user review (P0.2.2).**
+**Status: approved by the user on 2026-10-17 (P0.2.2).**
 
 Every random decision in `worldgen` comes from the hash and RNG defined here. Both are pinned bit for bit: changing either changes every world, which requires a `GEN_VERSION` bump (CLAUDE.md §3.8). The executable reference is `docs/spec/hashing_reference.py` (standard-library Python), which generated every vector below.
 
@@ -200,10 +200,8 @@ WGSL has no 64-bit integers unless `wgpu::Features::SHADER_INT64` is enabled. Th
 - **Fallback:** if the feature is missing, emulate `u64` as `vec2<u32>`. `wrapping_mul` then needs a 32×32→64 multiply built from 16-bit halves. This is slower but exact.
 - **Testing:** the P3.3.2 CPU-vs-GPU test compares hash outputs bit for bit and float occupancy with a tolerance. GPU float math may contract to FMA and flush denormals, so float results are not expected to match exactly.
 
-## 8. Review questions
+## 8. Review decisions (2026-10-17)
 
-Points I'd like a decision on when reviewing:
-
-1. Is the hash design (chained SplitMix64 finalizer) acceptable? The main alternative is a 32-bit-lane design that ports to WGSL without `SHADER_INT64`, at some cost in CPU speed and simplicity.
-2. Should `"0042"` and `"42"` give the same world, or should only canonical numbers be treated as numeric?
-3. Is the block-of-0x100 salt layout fine?
+1. **Hash design:** approved as drafted, a chained SplitMix64 finalizer. The GPU port relies on `SHADER_INT64`, with a `vec2<u32>` emulation as fallback (§7).
+2. **Seed text:** any all-digit string that fits in `u64` is numeric, and leading zeros are ignored, so `"0042"` and `"42"` give the same world.
+3. **Salt layout:** blocks of 0x100 per level, append-only, with a retired list (§4).

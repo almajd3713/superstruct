@@ -41,7 +41,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
   - overflow policy at extreme coordinates
 
   *Done when:* each formula has a worked numeric example that includes negative coordinates. (2026-10-17)
-- [ ] **P0.2.2** `docs/spec/hashing.md` covers the hash algorithm choice (a 64-bit mix of `seed, level, x, y, z, salt`), the RNG choice (for example PCG32 or SplitMix64), the salt registry rules and **pinned test vectors**. *Done when:* the vectors are listed and the user has reviewed the doc.
+- [x] **P0.2.2** `docs/spec/hashing.md` covers the hash algorithm choice (a 64-bit mix of `seed, level, x, y, z, salt`), the RNG choice (for example PCG32 or SplitMix64), the salt registry rules and **pinned test vectors**. *Done when:* the vectors are listed and the user has reviewed the doc. (2026-10-17)
 - [x] **P0.2.3** `docs/spec/primitives.md` covers:
   - primitive types (Box, Ramp, Cylinder, StairRun, LiftShaft placeholder)
   - their fields, in cell-local space
