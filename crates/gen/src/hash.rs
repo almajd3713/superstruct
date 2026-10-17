@@ -31,6 +31,7 @@ pub const fn hash(seed: u64, level: Level, cell: I64Vec3, salt: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rng::Rng;
 
     #[test]
     fn pinned_vectors() {
@@ -74,5 +75,78 @@ mod tests {
                 "seed {seed:#x} level {level:?} cell {cell:?} salt {salt:#x}"
             );
         }
+    }
+
+    const SAMPLES: u32 = 2000;
+    /// About 5σ for a flip-rate estimate from `SAMPLES` trials (σ = 0.5 / √2000 ≈ 0.011).
+    const TOLERANCE: f64 = 0.06;
+
+    /// Per-output-bit flip rates when `flip` changes one input bit of a random key.
+    fn flip_rates(rng: &mut Rng, setup: impl Fn(&mut Key), flip: impl Fn(&mut Key)) -> [f64; 64] {
+        let mut flips = [0u32; 64];
+        for _ in 0..SAMPLES {
+            let mut key = Key::random(rng);
+            setup(&mut key);
+            let before = key.hash();
+            flip(&mut key);
+            let diff = before ^ key.hash();
+            for (bit, count) in flips.iter_mut().enumerate() {
+                *count += u32::from((diff >> bit) & 1 == 1);
+            }
+        }
+        flips.map(|c| f64::from(c) / f64::from(SAMPLES))
+    }
+
+    #[derive(Clone, Copy)]
+    struct Key {
+        seed: u64,
+        level: Level,
+        cell: [i64; 3],
+        salt: u64,
+    }
+
+    impl Key {
+        #[allow(clippy::cast_possible_wrap)]
+        fn random(rng: &mut Rng) -> Self {
+            Self {
+                seed: rng.next_u64(),
+                level: Level::L0,
+                cell: [(); 3].map(|()| rng.next_u64() as i64),
+                salt: rng.next_u64(),
+            }
+        }
+
+        fn hash(&self) -> u64 {
+            hash(
+                self.seed,
+                self.level,
+                I64Vec3::from_array(self.cell),
+                self.salt,
+            )
+        }
+    }
+
+    /// P0.4.5: flipping any single input bit flips every output bit with p ≈ 0.5.
+    #[test]
+    fn avalanche() {
+        let mut rng = Rng::new(0xA5A5_A5A5);
+        let mut rates = Vec::new();
+        for bit in 0..64 {
+            rates.push(flip_rates(&mut rng, |_| (), |k| k.seed ^= 1 << bit));
+            rates.push(flip_rates(&mut rng, |_| (), |k| k.salt ^= 1 << bit));
+            for axis in 0..3 {
+                rates.push(flip_rates(&mut rng, |_| (), |k| k.cell[axis] ^= 1 << bit));
+            }
+        }
+        // Level is an enum: compare valid levels that differ in exactly one bit.
+        for (a, b) in [(0, 1), (2, 3), (0, 2), (1, 3), (0, 4)] {
+            let (a, b) = (Level::ALL[a], Level::ALL[b]);
+            rates.push(flip_rates(&mut rng, |k| k.level = a, |k| k.level = b));
+        }
+        let all: Vec<f64> = rates.iter().flatten().copied().collect();
+        let worst = all.iter().map(|p| (p - 0.5).abs()).fold(0.0, f64::max);
+        let mean = all.iter().sum::<f64>() / all.len() as f64;
+        assert!(worst < TOLERANCE, "worst flip-rate deviation {worst:.4}");
+        assert!((mean - 0.5).abs() < 0.002, "mean flip rate {mean:.4}");
     }
 }
