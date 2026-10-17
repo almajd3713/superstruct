@@ -196,7 +196,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P1.4.6** Headless offscreen render harness: render to a texture, read it back and compare against a reference with a tolerance. It runs under lavapipe in WSL. *Done when:* one reference test passes in WSL. (2026-10-17, `engine::headless` + `tests/render.rs` with a committed reference PNG; passes natively on Windows. WSL has only Mesa GL-on-D3D12, which segfaults, so GL is excluded and the tests skip there; install `mesa-vulkan-drivers` for lavapipe to run them in WSL)
 
 ### P1.5 Windows workflow and phase exit
-- [ ] **P1.5.1** Document and verify the Windows build: a native `cargo` on Windows, or cross-compilation from WSL. *Done when:* the steps are in CLAUDE.md §7 and the binary runs.
+- [x] **P1.5.1** Document and verify the Windows build: a native `cargo` on Windows, or cross-compilation from WSL. *Done when:* the steps are in CLAUDE.md §7 and the binary runs. (2026-10-17, `scripts/win.sh build|test|run` (GNU toolchain via `cargo.exe`), documented in CLAUDE.md §7; the game and the render tests run natively)
 - [ ] **P1.5.2** **Phase exit:** mesh one generated L2 cell (temporary simple box mesher) and render it with timings. 🎮 *Done when:* there's a screenshot and the user confirms it on Windows.
 
 ---
