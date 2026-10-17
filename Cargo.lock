@@ -614,6 +614,7 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "gen",
  "glam",
  "pollster",
  "serde",

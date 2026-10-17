@@ -172,12 +172,12 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P1.1.6** A `settings.toml` loader (resolution, FOV, sensitivity, vsync) with defaults written on first run. *Done when:* edits are applied on restart. (2026-10-17, `settings.toml` in the working directory (git-ignored), override with `SUPERSTRUCT_SETTINGS`; unit-tested)
 
 ### P1.2 Input and camera
-- [ ] **P1.2.1** Keyboard and mouse state, with raw mouse motion from `DeviceEvent::MouseMotion`. *Done when:* look input has no acceleration.
-- [ ] **P1.2.2** Cursor grab and lock, released on Esc and on focus loss. *Done when:* it behaves correctly on Windows.
-- [ ] **P1.2.3** An action-binding table (keys mapped to actions), so later rebinding is possible. *Done when:* game code reads actions, not raw keys.
-- [ ] **P1.2.4** First-person camera: yaw, clamped pitch, FOV. *Done when:* look works.
-- [ ] **P1.2.5** Reversed-Z infinite perspective matrix. *Done when:* a unit test confirms the near plane maps to depth 1 and depth approaches 0 at very large distances.
-- [ ] **P1.2.6** Camera-relative transform: `chunk WorldPos − camera WorldPos → Vec3`, computed in f64 or i64 then narrowed. *Done when:* the test shows sub-millimetre error at sector 2⁴⁰.
+- [x] **P1.2.1** Keyboard and mouse state, with raw mouse motion from `DeviceEvent::MouseMotion`. *Done when:* look input has no acceleration. (2026-10-17, raw `DeviceEvent::MouseMotion`, no smoothing; unit-tested accumulation)
+- [x] **P1.2.2** Cursor grab and lock, released on Esc and on focus loss. *Done when:* it behaves correctly on Windows. (2026-10-17, left click grabs (Locked, falling back to Confined), Esc and focus loss release; builds, awaits a hands-on check on Windows)
+- [x] **P1.2.3** An action-binding table (keys mapped to actions), so later rebinding is possible. *Done when:* game code reads actions, not raw keys. (2026-10-17, `Action` enum and `Bindings` table with `rebind`; app reads actions only)
+- [x] **P1.2.4** First-person camera: yaw, clamped pitch, FOV. *Done when:* look works. (2026-10-17, yaw/pitch camera with ±89° clamp; debug free-fly on WASD/Space/Ctrl/Shift until the controller exists; not visible until P1.3)
+- [x] **P1.2.5** Reversed-Z infinite perspective matrix. *Done when:* a unit test confirms the near plane maps to depth 1 and depth approaches 0 at very large distances. (2026-10-17, tested via glam rh directx `perspective_infinite_reverse`)
+- [x] **P1.2.6** Camera-relative transform: `chunk WorldPos − camera WorldPos → Vec3`, computed in f64 or i64 then narrowed. *Done when:* the test shows sub-millimetre error at sector 2⁴⁰. (2026-10-17, `camera_relative` via `WorldPos::delta`; test at sector 2^40)
 
 ### P1.3 Rendering basics
 - [ ] **P1.3.1** Depth32Float buffer with compare `GreaterEqual`, cleared to 0. *Done when:* a test scene sorts correctly at 1 m and 10 km.

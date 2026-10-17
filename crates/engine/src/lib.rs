@@ -4,7 +4,9 @@
 #![allow(clippy::cast_possible_truncation)]
 
 pub mod app;
+pub mod camera;
 pub mod gpu;
+pub mod input;
 pub mod settings;
 pub mod testobj;
 pub mod window;

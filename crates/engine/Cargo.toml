@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 bytemuck = "1.25.2"
+gen = { version = "0.1.0", path = "../gen" }
 glam = "0.34.1"
 pollster = "1.0.1"
 serde = { version = "1.0.229", features = ["derive"] }

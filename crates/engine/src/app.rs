@@ -7,12 +7,17 @@ use std::time::{Duration, Instant};
 use tracing::{error, info};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Fullscreen, Window, WindowId};
+use winit::keyboard::PhysicalKey;
+use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 
+use glam::{I64Vec3, Vec3};
+use worldgen::coord::WorldPos;
+
+use crate::camera::Camera;
 use crate::gpu::{Gpu, GpuError};
+use crate::input::{Action, Bindings, InputState};
 use crate::settings::Settings;
 use crate::testobj::{TestObject, TestPass};
 use crate::window::toggle_fullscreen;
@@ -43,6 +48,11 @@ struct App {
     running: Option<Running>,
     failure: Option<AppError>,
     test_object: TestObject,
+    input: InputState,
+    camera: Camera,
+    /// Camera position one sim step ago, for interpolation.
+    prev_cam_pos: WorldPos,
+    cursor_grabbed: bool,
     last_frame: Instant,
     accumulator: f64,
     fps_window_start: Instant,
@@ -72,10 +82,66 @@ impl App {
         })
     }
 
-    fn frame(&mut self) {
+    /// Debug free-fly until the walking controller exists in `game`.
+    fn fly(&mut self, dt: f32) {
+        if !self.cursor_grabbed {
+            return;
+        }
+        let axis = |pos: Action, neg: Action| {
+            f32::from(self.input.held(pos)) - f32::from(self.input.held(neg))
+        };
+        let dir = self.camera.forward_flat() * axis(Action::MoveForward, Action::MoveBack)
+            + self.camera.right_flat() * axis(Action::MoveRight, Action::MoveLeft)
+            + Vec3::Y * axis(Action::MoveUp, Action::MoveDown);
+        let speed = if self.input.held(Action::Sprint) {
+            20.0
+        } else {
+            5.0
+        };
+        if let Ok(p) = self.camera.pos.offset(dir.normalize_or_zero() * speed * dt) {
+            self.camera.pos = p;
+        }
+    }
+
+    fn set_cursor_grab(&mut self, grab: bool) {
+        let Some(running) = &self.running else { return };
+        let window = &running.window;
+        let result = if grab {
+            window
+                .set_cursor_grab(CursorGrabMode::Locked)
+                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+        } else {
+            window.set_cursor_grab(CursorGrabMode::None)
+        };
+        match result {
+            Ok(()) => {
+                window.set_cursor_visible(!grab);
+                self.cursor_grabbed = grab;
+            }
+            Err(err) => error!("cursor grab: {err}"),
+        }
+    }
+
+    fn handle_actions(&mut self) {
+        if self.input.pressed(Action::ReleaseCursor) && self.cursor_grabbed {
+            self.set_cursor_grab(false);
+        }
         let Some(running) = &mut self.running else {
             return;
         };
+        if self.input.pressed(Action::ToggleFullscreen) {
+            toggle_fullscreen(&running.window);
+        }
+        if self.input.pressed(Action::CycleVsync) {
+            let next = running.gpu.vsync().next();
+            running.gpu.set_vsync(next);
+        }
+    }
+
+    fn frame(&mut self) {
+        if self.running.is_none() {
+            return;
+        }
         let now = Instant::now();
         let frame_time = now
             .duration_since(self.last_frame)
@@ -83,13 +149,26 @@ impl App {
             .min(MAX_FRAME_TIME);
         self.last_frame = now;
 
+        if self.cursor_grabbed {
+            let (dx, dy) = self.input.mouse_delta();
+            let k = self.settings.mouse_sensitivity;
+            self.camera.look(-(dx as f32) * k, -(dy as f32) * k);
+        }
+
         self.accumulator += frame_time;
         while self.accumulator >= SIM_DT {
             self.test_object.step(SIM_DT as f32);
+            self.prev_cam_pos = self.camera.pos;
+            self.fly(SIM_DT as f32);
             self.accumulator -= SIM_DT;
         }
         let alpha = (self.accumulator / SIM_DT) as f32;
+        self.handle_actions();
+        self.input.end_frame();
 
+        let Some(running) = &mut self.running else {
+            return;
+        };
         if let Some(frame) = running.gpu.acquire() {
             let view = frame
                 .texture
@@ -174,20 +253,35 @@ impl ApplicationHandler for App {
                 event:
                     KeyEvent {
                         physical_key: PhysicalKey::Code(code),
-                        state: ElementState::Pressed,
-                        repeat: false,
+                        state,
+                        repeat,
                         ..
                     },
                 ..
-            } => match code {
-                KeyCode::F11 => toggle_fullscreen(&running.window),
-                KeyCode::F2 => {
-                    let next = running.gpu.vsync().next();
-                    running.gpu.set_vsync(next);
+            } => self.input.on_key(code, state, repeat),
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } if !self.cursor_grabbed => {
+                self.set_cursor_grab(true);
+            }
+            WindowEvent::MouseInput { button, state, .. } => {
+                self.input.on_mouse_button(button, state);
+            }
+            WindowEvent::Focused(false) => {
+                self.input.release_all();
+                if self.cursor_grabbed {
+                    self.set_cursor_grab(false);
                 }
-                _ => {}
-            },
+            }
             _ => {}
+        }
+    }
+
+    fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+            self.input.on_mouse_motion(dx, dy);
         }
     }
 
@@ -200,15 +294,22 @@ impl ApplicationHandler for App {
 
 /// Opens the window and blocks until it is closed.
 pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
+    let settings_fov = settings.fov_deg;
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let now = Instant::now();
+    let start =
+        WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0)).unwrap_or(WorldPos::ORIGIN);
     let mut app = App {
         title: title.to_owned(),
         settings,
         running: None,
         failure: None,
         test_object: TestObject::default(),
+        input: InputState::new(Bindings::default()),
+        camera: Camera::new(start, settings_fov),
+        prev_cam_pos: start,
+        cursor_grabbed: false,
         last_frame: now,
         accumulator: 0.0,
         fps_window_start: now,
