@@ -7,3 +7,9 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+gen = { version = "0.1.0", path = "../../crates/gen" }
+glam = "0.34.1"
+image = { version = "0.25.10", default-features = false, features = ["png"] }

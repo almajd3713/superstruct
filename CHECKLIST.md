@@ -144,9 +144,9 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.9.4** Connectivity check over N random cells, multithreaded, with a report of failures and their seeds and cells. *Done when:* it runs on 10⁴ cells in CI time (< 60 s). (2026-10-17)
 
 ### P0.10 Slice tool
-- [ ] **P0.10.1** CLI arguments: `--seed --level --axis --at --center --extent --res --out` and overlay toggles. *Done when:* `--help` documents everything.
-- [ ] **P0.10.2** Render primitive occupancy as a PNG coloured by type, with overlays for the cell grid, ports and walkable surfaces. *Done when:* the PNG has been inspected visually and matches expectations for a known cell.
-- [ ] **P0.10.3** `--report` mode that runs the P0.9.4 check and writes JSON stats. *Done when:* the JSON includes counts, failures and timing.
+- [x] **P0.10.1** CLI arguments: `--seed --level --axis --at --center --extent --res --out` and overlay toggles. *Done when:* `--help` documents everything. (2026-10-17)
+- [x] **P0.10.2** Render primitive occupancy as a PNG coloured by type, with overlays for the cell grid, ports and walkable surfaces. *Done when:* the PNG has been inspected visually and matches expectations for a known cell. (2026-10-17)
+- [x] **P0.10.3** `--report` mode that runs the P0.9.4 check and writes JSON stats. *Done when:* the JSON includes counts, failures and timing. (2026-10-17)
 - [ ] **P0.10.4** Tune the L1 and L2 parameters using slice images: density, variety and void ratio. 🧭 Review a set of slices with the user. *Done when:* the user approves the look of the cross-sections.
 
 ### P0.11 Determinism, performance and phase exit
