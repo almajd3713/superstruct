@@ -27,5 +27,6 @@ pub mod settings;
 pub mod shaders;
 pub mod stream;
 pub mod streamer;
+pub mod suballoc;
 pub mod vertex;
 pub mod window;

@@ -353,6 +353,7 @@ impl App {
             &mut RendererSink {
                 renderer: &mut running.renderer,
                 device: &running.gpu.device,
+                queue: &running.gpu.queue,
             },
         );
         self.box_scratch.clear();

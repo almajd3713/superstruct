@@ -8,6 +8,7 @@ use crate::camera::{Camera, camera_relative};
 use crate::gpu_timer::{GpuTimer, Zone};
 use crate::mesh::Mesh;
 use crate::shaders::ShaderSources;
+use crate::suballoc::{Range, SubAllocator};
 use crate::vertex::Vertex;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -46,12 +47,63 @@ pub struct DebugBox {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkHandle(pub u32);
 
+/// Vertices and indices per shared buffer page. A chunk bigger than a page gets a page of its
+/// own size.
+const PAGE_VERTICES: u32 = 1 << 21;
+const PAGE_INDICES: u32 = 1 << 22;
+
+/// One pair of shared vertex and index buffers with a sub-allocator for each.
+struct MeshPage {
+    vertex_buf: wgpu::Buffer,
+    index_buf: wgpu::Buffer,
+    vertices: SubAllocator,
+    indices: SubAllocator,
+}
+
+impl MeshPage {
+    fn new(device: &wgpu::Device, vertices: u32, indices: u32) -> Self {
+        let make = |label, usage, len: u32, stride: usize| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: u64::from(len) * stride as u64,
+                usage: usage | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        Self {
+            vertex_buf: make(
+                "page vertices",
+                wgpu::BufferUsages::VERTEX,
+                vertices,
+                std::mem::size_of::<Vertex>(),
+            ),
+            index_buf: make("page indices", wgpu::BufferUsages::INDEX, indices, 4),
+            vertices: SubAllocator::new(vertices),
+            indices: SubAllocator::new(indices),
+        }
+    }
+
+    /// Both ranges or neither.
+    fn alloc(&mut self, nv: u32, ni: u32) -> Option<(Range, Range)> {
+        let v = self.vertices.alloc(nv)?;
+        let Some(x) = self.indices.alloc(ni) else {
+            self.vertices.free(v);
+            return None;
+        };
+        Some((v, x))
+    }
+
+    fn bytes(&self) -> u64 {
+        self.vertex_buf.size() + self.index_buf.size()
+    }
+}
+
 struct GpuChunk {
     handle: ChunkHandle,
     origin: WorldPos,
-    vertex_buf: wgpu::Buffer,
-    index_buf: wgpu::Buffer,
-    index_count: u32,
+    page: usize,
+    vertices: Range,
+    indices: Range,
     bytes: u64,
     visible: bool,
 }
@@ -110,8 +162,10 @@ pub struct Renderer {
     scene_pipeline: wgpu::RenderPipeline,
     lines_pipeline: wgpu::RenderPipeline,
     chunks: Vec<GpuChunk>,
+    pages: Vec<MeshPage>,
     next_handle: u32,
     gpu_bytes: u64,
+    page_bytes: u64,
     origins_scratch: Vec<[f32; 4]>,
     lines_buf: wgpu::Buffer,
     lines_scratch: Vec<LineVertex>,
@@ -233,8 +287,10 @@ impl Renderer {
             scene_pipeline,
             lines_pipeline,
             chunks: Vec::new(),
+            pages: Vec::new(),
             next_handle: 0,
             gpu_bytes: 0,
+            page_bytes: 0,
             origins_scratch: Vec::with_capacity(MAX_DRAWS),
             lines_buf,
             lines_scratch: Vec::with_capacity(4096),
@@ -243,49 +299,53 @@ impl Renderer {
 
     /// Replaces every chunk with `meshes`, each placed at a world-space origin. Vertices are
     /// origin-local.
-    pub fn set_scene(&mut self, device: &wgpu::Device, meshes: &[(WorldPos, Mesh)]) {
+    pub fn set_scene(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        meshes: &[(WorldPos, Mesh)],
+    ) {
         let old: Vec<ChunkHandle> = self.chunks.iter().map(|c| c.handle).collect();
         for h in old {
             self.remove_chunk(h);
         }
         for (origin, mesh) in meshes.iter().take(MAX_DRAWS) {
-            self.upload_chunk(device, *origin, mesh);
+            self.upload_chunk(device, queue, *origin, mesh);
         }
     }
 
-    /// Uploads `mesh` as its own chunk and returns its handle and size in bytes. Empty meshes
-    /// get a handle and no draw.
+    /// Uploads `mesh` into the shared buffers and returns its handle and size in bytes. Empty
+    /// meshes get a handle and no draw.
     pub fn upload_chunk(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         origin: WorldPos,
         mesh: &Mesh,
     ) -> (ChunkHandle, u64) {
-        use wgpu::util::DeviceExt;
         crate::zone!("upload chunk");
         let handle = ChunkHandle(self.next_handle);
         self.next_handle += 1;
         if mesh.indices.is_empty() {
             return (handle, 0);
         }
-        let make = |label, usage, data: &[u8]| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: data,
-                usage,
-            })
+        let (nv, ni) = (mesh.vertices.len() as u32, mesh.indices.len() as u32);
+        let Some((page, vertices, indices)) = self.allocate(device, nv, ni) else {
+            tracing::error!("no room for a chunk of {nv} vertices and {ni} indices; not drawn");
+            return (handle, 0);
         };
-        let vertex_buf = make(
-            "chunk vertices",
-            wgpu::BufferUsages::VERTEX,
+        let p = &self.pages[page];
+        queue.write_buffer(
+            &p.vertex_buf,
+            u64::from(vertices.offset) * std::mem::size_of::<Vertex>() as u64,
             bytemuck::cast_slice(&mesh.vertices),
         );
-        let index_buf = make(
-            "chunk indices",
-            wgpu::BufferUsages::INDEX,
+        queue.write_buffer(
+            &p.index_buf,
+            u64::from(indices.offset) * 4,
             bytemuck::cast_slice(&mesh.indices),
         );
-        let bytes = vertex_buf.size() + index_buf.size();
+        let bytes = u64::from(nv) * std::mem::size_of::<Vertex>() as u64 + u64::from(ni) * 4;
         self.gpu_bytes += bytes;
         if self.chunks.len() >= MAX_DRAWS {
             tracing::warn!("more than {MAX_DRAWS} chunks resident, the extra ones are not drawn");
@@ -293,18 +353,44 @@ impl Renderer {
         self.chunks.push(GpuChunk {
             handle,
             origin,
-            vertex_buf,
-            index_buf,
-            index_count: mesh.indices.len() as u32,
+            page,
+            vertices,
+            indices,
             bytes,
             visible: true,
         });
         (handle, bytes)
     }
 
+    /// Finds room in an existing page, or adds one sized for at least this request.
+    fn allocate(
+        &mut self,
+        device: &wgpu::Device,
+        nv: u32,
+        ni: u32,
+    ) -> Option<(usize, Range, Range)> {
+        if let Some(found) = self
+            .pages
+            .iter_mut()
+            .enumerate()
+            .find_map(|(i, p)| p.alloc(nv, ni).map(|(v, x)| (i, v, x)))
+        {
+            return Some(found);
+        }
+        let mut page = MeshPage::new(device, PAGE_VERTICES.max(nv), PAGE_INDICES.max(ni));
+        let (v, x) = page.alloc(nv, ni)?;
+        self.page_bytes += page.bytes();
+        self.pages.push(page);
+        Some((self.pages.len() - 1, v, x))
+    }
+
     pub fn remove_chunk(&mut self, handle: ChunkHandle) {
         if let Some(i) = self.chunks.iter().position(|c| c.handle == handle) {
-            self.gpu_bytes -= self.chunks.swap_remove(i).bytes;
+            let c = self.chunks.swap_remove(i);
+            self.gpu_bytes -= c.bytes;
+            let p = &mut self.pages[c.page];
+            p.vertices.free(c.vertices);
+            p.indices.free(c.indices);
         }
     }
 
@@ -315,7 +401,12 @@ impl Renderer {
         }
     }
 
-    /// Bytes of vertex and index buffers currently resident.
+    /// Bytes of shared buffer pages allocated, used or not.
+    pub fn page_bytes(&self) -> u64 {
+        self.page_bytes
+    }
+
+    /// Bytes of vertex and index data currently resident.
     pub fn gpu_bytes(&self) -> u64 {
         self.gpu_bytes
     }
@@ -386,6 +477,7 @@ impl Renderer {
     }
 
     /// Records the frame's passes into `encoder`.
+    #[allow(clippy::too_many_lines)]
     pub fn render(
         &mut self,
         queue: &wgpu::Queue,
@@ -481,9 +573,15 @@ impl Renderer {
                 .enumerate()
             {
                 let i = i as u32;
-                pass.set_vertex_buffer(0, c.vertex_buf.slice(..));
-                pass.set_index_buffer(c.index_buf.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..c.index_count, 0, i..i + 1);
+                let page = &self.pages[c.page];
+                pass.set_vertex_buffer(0, page.vertex_buf.slice(..));
+                pass.set_index_buffer(page.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+                let first = c.indices.offset;
+                pass.draw_indexed(
+                    first..first + c.indices.len,
+                    c.vertices.offset.cast_signed(),
+                    i..i + 1,
+                );
             }
         }
         if !self.lines_scratch.is_empty() {

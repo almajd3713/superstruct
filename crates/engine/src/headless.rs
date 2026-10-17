@@ -57,7 +57,7 @@ impl Headless {
         boxes: &[DebugBox],
     ) -> Result<Vec<u8>, ReadbackError> {
         let mut renderer = Renderer::new(&self.device, FORMAT, size);
-        renderer.set_scene(&self.device, meshes);
+        renderer.set_scene(&self.device, &self.queue, meshes);
         self.render_with(&mut renderer, camera, size, params, boxes)
     }
 

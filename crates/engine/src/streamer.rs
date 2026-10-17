@@ -26,12 +26,13 @@ pub trait ChunkSink {
 pub struct RendererSink<'a> {
     pub renderer: &'a mut Renderer,
     pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
 }
 
 impl ChunkSink for RendererSink<'_> {
     fn upload(&mut self, chunk: &ChunkMesh) -> (ChunkHandle, u64) {
         self.renderer
-            .upload_chunk(self.device, chunk.origin, &chunk.mesh)
+            .upload_chunk(self.device, self.queue, chunk.origin, &chunk.mesh)
     }
 
     fn remove(&mut self, handle: ChunkHandle) {

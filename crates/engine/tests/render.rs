@@ -153,7 +153,7 @@ fn broken_shader_keeps_the_old_pipeline() {
     let cam = camera_at(I64Vec3::ZERO);
     let scene = [wall(&cam, 2.0, 1.0, 1)];
     let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, SIZE);
-    renderer.set_scene(&h.device, &scene);
+    renderer.set_scene(&h.device, &h.queue, &scene);
     let before = h
         .render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
         .unwrap();
