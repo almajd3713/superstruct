@@ -21,5 +21,7 @@ pub mod readback;
 pub mod renderer;
 pub mod settings;
 pub mod shaders;
+pub mod stream;
+pub mod streamer;
 pub mod vertex;
 pub mod window;

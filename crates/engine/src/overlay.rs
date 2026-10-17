@@ -7,6 +7,7 @@ use winit::event::WindowEvent;
 use winit::window::Window;
 
 use crate::gpu_timer::{GpuTimer, Zone};
+use crate::streamer::StreamStats;
 
 const HISTORY: usize = 240;
 
@@ -17,7 +18,8 @@ pub struct OverlayInfo<'a> {
     pub seed: u64,
     pub adapter: &'a str,
     pub vsync: &'a str,
-    pub scene_note: &'a str,
+    pub stream: StreamStats,
+    pub gpu_bytes: u64,
     pub shader_error: Option<&'a str>,
     pub timer: &'a GpuTimer,
 }
@@ -169,7 +171,7 @@ fn draw(ui: &mut egui::Ui, frame_ms: &VecDeque<f32>, info: &OverlayInfo<'_>) {
             frame_graph(ui, frame_ms);
             ui.monospace(format!("{} | vsync {}", info.adapter, info.vsync));
             ui.monospace(format!("seed {}", info.seed));
-            ui.monospace(info.scene_note);
+            stream_lines(ui, &info.stream, info.gpu_bytes);
             ui.monospace(format!(
                 "sector {} {} {}",
                 info.sector.x, info.sector.y, info.sector.z
@@ -226,4 +228,26 @@ fn frame_graph(ui: &mut egui::Ui, frame_ms: &VecDeque<f32>) {
             egui::Stroke::new(1.0, colour),
         );
     }
+}
+
+fn stream_lines(ui: &mut egui::Ui, s: &StreamStats, gpu_bytes: u64) {
+    let mib = |b: u64| b as f64 / f64::from(1u32 << 20);
+    ui.monospace(format!(
+        "chunks {} resident ({} drawn) / {} wanted",
+        s.resident, s.visible, s.wanted
+    ));
+    ui.monospace(format!(
+        "queue {} + {} running, {} ready, {} cancelled",
+        s.pool.queued, s.pool.running, s.ready, s.pool.cancelled
+    ));
+    ui.monospace(format!(
+        "gpu mem {:.1} MiB | uploads {} ({:.2} MiB) this frame",
+        mib(gpu_bytes),
+        s.uploads_this_frame,
+        mib(s.upload_bytes_this_frame)
+    ));
+    ui.monospace(format!(
+        "evicted {} | rejected {} | over budget {}",
+        s.evictions, s.rejected, s.over_budget_frames
+    ));
 }

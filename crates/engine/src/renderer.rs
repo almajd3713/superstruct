@@ -40,12 +40,18 @@ pub struct DebugBox {
     pub colour: [f32; 4],
 }
 
-#[derive(Clone, Copy)]
-struct Draw {
+/// Identifies an uploaded chunk until it is removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChunkHandle(pub u32);
+
+struct GpuChunk {
+    handle: ChunkHandle,
     origin: WorldPos,
-    first_index: u32,
+    vertex_buf: wgpu::Buffer,
+    index_buf: wgpu::Buffer,
     index_count: u32,
-    base_vertex: i32,
+    bytes: u64,
+    visible: bool,
 }
 
 /// Everything that varies per frame.
@@ -86,9 +92,9 @@ pub struct Renderer {
     shader_error: Option<String>,
     scene_pipeline: wgpu::RenderPipeline,
     lines_pipeline: wgpu::RenderPipeline,
-    vertex_buf: Option<wgpu::Buffer>,
-    index_buf: Option<wgpu::Buffer>,
-    draws: Vec<Draw>,
+    chunks: Vec<GpuChunk>,
+    next_handle: u32,
+    gpu_bytes: u64,
     origins_scratch: Vec<[f32; 4]>,
     lines_buf: wgpu::Buffer,
     lines_scratch: Vec<LineVertex>,
@@ -209,50 +215,96 @@ impl Renderer {
             shader_error: None,
             scene_pipeline,
             lines_pipeline,
-            vertex_buf: None,
-            index_buf: None,
-            draws: Vec::new(),
+            chunks: Vec::new(),
+            next_handle: 0,
+            gpu_bytes: 0,
             origins_scratch: Vec::with_capacity(MAX_DRAWS),
             lines_buf,
             lines_scratch: Vec::with_capacity(4096),
         }
     }
 
-    /// Replaces the scene with `meshes`, each placed at a world-space origin. Vertices are origin-local.
+    /// Replaces every chunk with `meshes`, each placed at a world-space origin. Vertices are
+    /// origin-local.
     pub fn set_scene(&mut self, device: &wgpu::Device, meshes: &[(WorldPos, Mesh)]) {
-        use wgpu::util::DeviceExt;
-        let mut vertices: Vec<Vertex> = Vec::new();
-        let mut indices: Vec<u32> = Vec::new();
-        self.draws.clear();
+        let old: Vec<ChunkHandle> = self.chunks.iter().map(|c| c.handle).collect();
+        for h in old {
+            self.remove_chunk(h);
+        }
         for (origin, mesh) in meshes.iter().take(MAX_DRAWS) {
-            self.draws.push(Draw {
-                origin: *origin,
-                first_index: indices.len() as u32,
-                index_count: mesh.indices.len() as u32,
-                base_vertex: i32::try_from(vertices.len()).unwrap_or(i32::MAX),
-            });
-            vertices.extend_from_slice(&mesh.vertices);
-            indices.extend_from_slice(&mesh.indices);
+            self.upload_chunk(device, *origin, mesh);
+        }
+    }
+
+    /// Uploads `mesh` as its own chunk and returns its handle and size in bytes. Empty meshes
+    /// get a handle and no draw.
+    pub fn upload_chunk(
+        &mut self,
+        device: &wgpu::Device,
+        origin: WorldPos,
+        mesh: &Mesh,
+    ) -> (ChunkHandle, u64) {
+        use wgpu::util::DeviceExt;
+        crate::zone!("upload chunk");
+        let handle = ChunkHandle(self.next_handle);
+        self.next_handle += 1;
+        if mesh.indices.is_empty() {
+            return (handle, 0);
         }
         let make = |label, usage, data: &[u8]| {
-            (!data.is_empty()).then(|| {
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(label),
-                    contents: data,
-                    usage,
-                })
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: data,
+                usage,
             })
         };
-        self.vertex_buf = make(
-            "scene vertices",
+        let vertex_buf = make(
+            "chunk vertices",
             wgpu::BufferUsages::VERTEX,
-            bytemuck::cast_slice(&vertices),
+            bytemuck::cast_slice(&mesh.vertices),
         );
-        self.index_buf = make(
-            "scene indices",
+        let index_buf = make(
+            "chunk indices",
             wgpu::BufferUsages::INDEX,
-            bytemuck::cast_slice(&indices),
+            bytemuck::cast_slice(&mesh.indices),
         );
+        let bytes = vertex_buf.size() + index_buf.size();
+        self.gpu_bytes += bytes;
+        if self.chunks.len() >= MAX_DRAWS {
+            tracing::warn!("more than {MAX_DRAWS} chunks resident, the extra ones are not drawn");
+        }
+        self.chunks.push(GpuChunk {
+            handle,
+            origin,
+            vertex_buf,
+            index_buf,
+            index_count: mesh.indices.len() as u32,
+            bytes,
+            visible: true,
+        });
+        (handle, bytes)
+    }
+
+    pub fn remove_chunk(&mut self, handle: ChunkHandle) {
+        if let Some(i) = self.chunks.iter().position(|c| c.handle == handle) {
+            self.gpu_bytes -= self.chunks.swap_remove(i).bytes;
+        }
+    }
+
+    /// Hidden chunks stay resident but are not drawn.
+    pub fn set_chunk_visible(&mut self, handle: ChunkHandle, visible: bool) {
+        if let Some(c) = self.chunks.iter_mut().find(|c| c.handle == handle) {
+            c.visible = visible;
+        }
+    }
+
+    /// Bytes of vertex and index buffers currently resident.
+    pub fn gpu_bytes(&self) -> u64 {
+        self.gpu_bytes
+    }
+
+    pub fn chunk_count(&self) -> usize {
+        self.chunks.len()
     }
 
     /// The last shader compile error, cleared by the next successful reload.
@@ -294,6 +346,28 @@ impl Renderer {
         }
     }
 
+    /// Camera-relative origin of every drawn chunk, in draw order.
+    fn write_draw_origins(&mut self, queue: &wgpu::Queue, cam: &WorldPos) {
+        self.origins_scratch.clear();
+        self.origins_scratch.extend(
+            self.chunks
+                .iter()
+                .filter(|c| c.visible)
+                .take(MAX_DRAWS)
+                .map(|d| {
+                    let r = camera_relative(&d.origin, cam);
+                    [r.x, r.y, r.z, 0.0]
+                }),
+        );
+        if !self.origins_scratch.is_empty() {
+            queue.write_buffer(
+                &self.draws_buf,
+                0,
+                bytemuck::cast_slice(&self.origins_scratch),
+            );
+        }
+    }
+
     /// Records the frame's passes into `encoder`.
     pub fn render(
         &mut self,
@@ -319,18 +393,7 @@ impl Renderer {
         };
         queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
-        self.origins_scratch.clear();
-        self.origins_scratch.extend(self.draws.iter().map(|d| {
-            let r = camera_relative(&d.origin, &camera.pos);
-            [r.x, r.y, r.z, 0.0]
-        }));
-        if !self.origins_scratch.is_empty() {
-            queue.write_buffer(
-                &self.draws_buf,
-                0,
-                bytemuck::cast_slice(&self.origins_scratch),
-            );
-        }
+        self.write_draw_origins(queue, &camera.pos);
 
         self.lines_scratch.clear();
         for b in boxes {
@@ -377,19 +440,21 @@ impl Renderer {
             timestamp_writes: timer.and_then(|t| t.pass_writes(Zone::Scene)),
             ..Default::default()
         });
-        if let (Some(vb), Some(ib)) = (&self.vertex_buf, &self.index_buf) {
+        if self.chunks.iter().any(|c| c.visible) {
             pass.set_pipeline(&self.scene_pipeline);
             pass.set_bind_group(0, &self.globals_bg, &[]);
             pass.set_bind_group(1, &self.draws_bg, &[]);
-            pass.set_vertex_buffer(0, vb.slice(..));
-            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
-            for (i, d) in self.draws.iter().enumerate() {
+            for (i, c) in self
+                .chunks
+                .iter()
+                .filter(|c| c.visible)
+                .take(MAX_DRAWS)
+                .enumerate()
+            {
                 let i = i as u32;
-                pass.draw_indexed(
-                    d.first_index..d.first_index + d.index_count,
-                    d.base_vertex,
-                    i..i + 1,
-                );
+                pass.set_vertex_buffer(0, c.vertex_buf.slice(..));
+                pass.set_index_buffer(c.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..c.index_count, 0, i..i + 1);
             }
         }
         if !self.lines_scratch.is_empty() {

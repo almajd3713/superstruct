@@ -212,12 +212,12 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P2.1.4** Run meshing on worker threads, producing CPU-side `ChunkMesh` objects. *Done when:* the main thread never meshes (verified in Tracy). (2026-10-17) `meshpool.rs`: crossbeam-channel workers generate and mesh; the app only uploads. Verified structurally and by tests, not in Tracy (no profiler on this machine).
 
 ### P2.2 Streaming
-- [ ] **P2.2.1** Chunk identity: L2 cells for the near and mid bands, L1 cells for the far band. *Done when:* types exist.
-- [ ] **P2.2.2** Desired-set computation: nested shells per level around the camera, with configurable radii. *Done when:* unit tests confirm the set changes correctly when the camera moves across cells.
-- [ ] **P2.2.3** Job queue prioritized by distance and view direction, with cancellation of stale jobs. *Done when:* fast camera movement leaves no stale jobs running (stat counter).
-- [ ] **P2.2.4** Staging belt with a per-frame upload byte budget. *Done when:* uploads per frame never exceed the budget (overlay stat).
-- [ ] **P2.2.5** LRU eviction with a GPU memory budget. *Done when:* memory stays under budget during a 10-minute flythrough.
-- [ ] **P2.2.6** Streaming overlay: resident chunks, queue length, memory, uploads per frame. *Done when:* visible.
+- [x] **P2.2.1** Chunk identity: L2 cells for the near and mid bands, L1 cells for the far band. *Done when:* types exist. (2026-10-17) `stream.rs`: `ChunkId` = cell + `Detail` (Full or Far); L2 near, L1 full mid, L1 far-visible far. L1 structure is drawn at every distance and L2 adds on top, so the bands overlap by design.
+- [x] **P2.2.2** Desired-set computation: nested shells per level around the camera, with configurable radii. *Done when:* unit tests confirm the set changes correctly when the camera moves across cells. (2026-10-17) `desired_set` with `StreamConfig` radii (default 1024 / 4096 / 12288 m); tests cover cell-boundary crossing, detail swap, view bias and sector 2^40.
+- [x] **P2.2.3** Job queue prioritized by distance and view direction, with cancellation of stale jobs. *Done when:* fast camera movement leaves no stale jobs running (stat counter). (2026-10-17) `meshpool.rs` priority queue; `retarget` prunes stale queued jobs and flags running ones, whose results are dropped. `cancelled` counter in the overlay and pool stats; test asserts the queue holds nothing stale.
+- [x] **P2.2.4** Staging belt with a per-frame upload byte budget. *Done when:* uploads per frame never exceed the budget (overlay stat). (2026-10-17) `Streamer` uploads under a hard per-frame byte budget (default 16 MiB; oversize chunks are rejected, counted). Uses per-chunk `create_buffer_init`, not `wgpu::util::StagingBelt`; revisit when chunks share big buffers (P3).
+- [x] **P2.2.5** LRU eviction with a GPU memory budget. *Done when:* memory stays under budget during a 10-minute flythrough. (2026-10-17) LRU by last-wanted frame, only for unwanted hidden chunks. Verified by a simulated 900-frame, 400 m/s flythrough against a 700 KB budget with a fake sink, not a 10-minute real run.
+- [x] **P2.2.6** Streaming overlay: resident chunks, queue length, memory, uploads per frame. *Done when:* visible. (2026-10-17) Overlay shows resident/drawn/wanted, queue, running, ready, cancelled, GPU MiB, uploads per frame, evictions, rejected, over-budget. Screenshot: 322 chunks, 7.4 MiB.
 
 ### P2.3 Floating origin
 - [ ] **P2.3.1** Render origin re-bases when the camera changes sector. Chunk offsets are recomputed with integer math. *Done when:* there is no visible jump while walking across sector boundaries.

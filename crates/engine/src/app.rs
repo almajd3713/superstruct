@@ -28,6 +28,7 @@ use crate::readback;
 use crate::renderer::{DebugBox, FrameInput, FrameParams, Renderer};
 use crate::settings::{Settings, VsyncMode};
 use crate::shaders::{ShaderSources, ShaderWatcher};
+use crate::streamer::{RendererSink, Streamer, StreamerConfig};
 use crate::window::toggle_fullscreen;
 
 /// Simulation rate (PLAN.md §11).
@@ -58,8 +59,7 @@ struct App {
     settings: Settings,
     running: Option<Running>,
     failure: Option<AppError>,
-    scene_note: String,
-    pool: MeshPool,
+    streamer: Streamer,
     debug_boxes: bool,
     box_scratch: Vec<DebugBox>,
     input: InputState,
@@ -97,7 +97,6 @@ impl App {
             .ok()
             .and_then(|v| parse_cell(&v))
             .unwrap_or_else(|| busiest_l2_cell(WorldSeed(self.settings.seed), 4));
-        self.pool.submit(WorldSeed(self.settings.seed), key);
         // Start outside the cell's low corner, high up, looking at its centre.
         match key
             .aabb_world()
@@ -195,37 +194,7 @@ impl App {
         }
     }
 
-    /// Hands meshes the workers finished to the renderer.
-    fn upload_finished_meshes(&mut self) {
-        let Some(running) = &mut self.running else {
-            return;
-        };
-        while let Some(done) = self.pool.try_recv() {
-            match done {
-                Ok(chunk) => {
-                    let c = chunk.key.coords;
-                    self.scene_note = format!(
-                        "L2 cell {} {} {}: {} prims, {} tris | gen {:.2} ms, mesh {:.2} ms (worker)",
-                        c.x,
-                        c.y,
-                        c.z,
-                        chunk.primitives,
-                        chunk.mesh.indices.len() / 3,
-                        chunk.gen_ms,
-                        chunk.mesh_ms
-                    );
-                    info!("{}", self.scene_note);
-                    running
-                        .renderer
-                        .set_scene(&running.gpu.device, &[(chunk.origin, chunk.mesh)]);
-                }
-                Err((key, err)) => error!("cannot build cell {key:?}: {err}"),
-            }
-        }
-    }
-
     fn draw(&mut self, alpha: f32, frame_time: f64, want_screenshot: bool) -> bool {
-        self.upload_finished_meshes();
         let Some(running) = &mut self.running else {
             return false;
         };
@@ -240,6 +209,14 @@ impl App {
         if let Ok(p) = self.prev_cam_pos.offset(step * alpha) {
             render_camera.pos = p;
         }
+        self.streamer.update(
+            &render_camera.pos,
+            render_camera.forward(),
+            &mut RendererSink {
+                renderer: &mut running.renderer,
+                device: &running.gpu.device,
+            },
+        );
         self.box_scratch.clear();
         if self.debug_boxes {
             cell_boxes(&render_camera.pos, &mut self.box_scratch);
@@ -280,7 +257,8 @@ impl App {
                     VsyncMode::Mailbox => "mailbox",
                     VsyncMode::Off => "off",
                 },
-                scene_note: &self.scene_note,
+                stream: self.streamer.stats(),
+                gpu_bytes: running.renderer.gpu_bytes(),
                 shader_error: running.renderer.shader_error(),
                 timer: &running.timer,
             };
@@ -450,6 +428,7 @@ impl ApplicationHandler for App {
 /// Opens the window and blocks until it is closed.
 pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
     let settings_fov = settings.fov_deg;
+    let settings_seed = settings.seed;
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let now = Instant::now();
@@ -460,8 +439,10 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         settings,
         running: None,
         failure: None,
-        scene_note: String::new(),
-        pool: MeshPool::with_default_threads(),
+        streamer: Streamer::new(
+            StreamerConfig::default(),
+            MeshPool::with_default_threads(WorldSeed(settings_seed)),
+        ),
         debug_boxes: std::env::var_os("SUPERSTRUCT_DEBUG_BOXES").is_some(),
         box_scratch: Vec::new(),
         input: InputState::new(Bindings::default()),
