@@ -7,3 +7,4 @@ pub mod coord;
 pub mod hash;
 pub mod key;
 pub mod rng;
+pub mod salt;
