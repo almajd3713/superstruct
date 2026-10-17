@@ -23,3 +23,13 @@ many_single_char_names = "allow"
 cast_precision_loss = "allow"
 unwrap_used = "warn"
 expect_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev.package.gen]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 1
