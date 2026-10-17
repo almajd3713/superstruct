@@ -220,8 +220,8 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P2.2.6** Streaming overlay: resident chunks, queue length, memory, uploads per frame. *Done when:* visible. (2026-10-17) Overlay shows resident/drawn/wanted, queue, running, ready, cancelled, GPU MiB, uploads per frame, evictions, rejected, over-budget. Screenshot: 322 chunks, 7.4 MiB.
 
 ### P2.3 Floating origin
-- [ ] **P2.3.1** Render origin re-bases when the camera changes sector. Chunk offsets are recomputed with integer math. *Done when:* there is no visible jump while walking across sector boundaries.
-- [ ] **P2.3.2** Debug teleport to arbitrary sector coordinates. *Done when:* teleporting to sector 2⁴⁰ shows no jitter (screenshot comparison with the origin).
+- [x] **P2.3.1** Render origin re-bases when the camera changes sector. Chunk offsets are recomputed with integer math. *Done when:* there is no visible jump while walking across sector boundaries. (2026-10-17) No re-base step is needed: every chunk origin is an exact `WorldPos` delta against the camera, computed in f64 from integer sector differences, so values sent to the GPU are always camera-relative. Test `walking_across_a_sector_boundary_moves_the_view_smoothly` steps 1 cm over a sector face at sector 2^40 and stays within 0.2 mm. Not walked by hand.
+- [x] **P2.3.2** Debug teleport to arbitrary sector coordinates. *Done when:* teleporting to sector 2⁴⁰ shows no jitter (screenshot comparison with the origin). (2026-10-17) `SUPERSTRUCT_SECTOR=x,y,z` teleports at start. The headless `grid_does_not_swim_at_large_coordinates` test already compares sector 0 with 2^40 (max diff <= 2); a streamed screenshot at sector 2^40 renders cleanly.
 
 ### P2.4 Collision and controller
 - [ ] **P2.4.1** Broadphase: collect `gen` primitives overlapping the capsule's swept AABB, cached per resident chunk. *Done when:* the query is under 0.1 ms in a typical scene.

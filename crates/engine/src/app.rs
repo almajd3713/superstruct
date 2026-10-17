@@ -93,23 +93,7 @@ impl App {
         );
         let gpu = Gpu::new(&window, s.vsync)?;
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
-        let key = std::env::var("SUPERSTRUCT_CELL")
-            .ok()
-            .and_then(|v| parse_cell(&v))
-            .unwrap_or_else(|| busiest_l2_cell(WorldSeed(self.settings.seed), 4));
-        // Start outside the cell's low corner, high up, looking at its centre.
-        match key
-            .aabb_world()
-            .and_then(|b| b.min.offset(Vec3::new(-120.0, 420.0, -120.0)))
-        {
-            Ok(p) => {
-                self.camera.pos = p;
-                self.prev_cam_pos = p;
-                self.camera.yaw = 5.0 * std::f32::consts::FRAC_PI_4;
-                self.camera.pitch = -0.4;
-            }
-            Err(err) => error!("cannot place the camera at cell {key:?}: {err}"),
-        }
+        self.place_camera();
         if cfg!(debug_assertions) {
             // Errors are logged and kept for the overlay; the embedded pipelines stay in use.
             let _ = renderer.reload_shaders(&gpu.device, &ShaderSources::load());
@@ -191,6 +175,42 @@ impl App {
         if self.input.pressed(Action::CycleVsync) {
             let next = running.gpu.vsync().next();
             running.gpu.set_vsync(next);
+        }
+    }
+
+    /// Start position: `SUPERSTRUCT_SECTOR=x,y,z` teleports to that sector's middle; otherwise
+    /// outside the low corner of `SUPERSTRUCT_CELL` (default: the busiest L2 cell near the origin),
+    /// high up and looking at its centre.
+    fn place_camera(&mut self) {
+        if let Some([x, y, z]) = std::env::var("SUPERSTRUCT_SECTOR")
+            .ok()
+            .and_then(|v| parse_triple(&v))
+        {
+            match WorldPos::new(I64Vec3::new(x, y, z), Vec3::splat(512.0)) {
+                Ok(p) => {
+                    self.camera.pos = p;
+                    self.prev_cam_pos = p;
+                }
+                Err(err) => error!("cannot teleport to sector {x} {y} {z}: {err}"),
+            }
+            return;
+        }
+        let key = std::env::var("SUPERSTRUCT_CELL")
+            .ok()
+            .and_then(|v| parse_triple(&v))
+            .map(|[x, y, z]| CellKey::new(Level::L2, I64Vec3::new(x, y, z)))
+            .unwrap_or_else(|| busiest_l2_cell(WorldSeed(self.settings.seed), 4));
+        match key
+            .aabb_world()
+            .and_then(|b| b.min.offset(Vec3::new(-120.0, 420.0, -120.0)))
+        {
+            Ok(p) => {
+                self.camera.pos = p;
+                self.prev_cam_pos = p;
+                self.camera.yaw = 5.0 * std::f32::consts::FRAC_PI_4;
+                self.camera.pitch = -0.4;
+            }
+            Err(err) => error!("cannot place the camera at cell {key:?}: {err}"),
         }
     }
 
@@ -509,11 +529,9 @@ fn save_screenshot(gpu: &Gpu, texture: &wgpu::Texture) {
     }
 }
 
-/// `x,y,z` L2 cell coordinates.
-fn parse_cell(text: &str) -> Option<CellKey> {
+/// `x,y,z` as integers.
+fn parse_triple(text: &str) -> Option<[i64; 3]> {
     let mut it = text.split(',').map(|v| v.trim().parse::<i64>());
-    let (x, y, z) = (it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?);
-    it.next()
-        .is_none()
-        .then(|| CellKey::new(Level::L2, I64Vec3::new(x, y, z)))
+    let v = [it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?];
+    it.next().is_none().then_some(v)
 }

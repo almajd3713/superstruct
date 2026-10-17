@@ -109,6 +109,26 @@ mod tests {
     }
 
     #[test]
+    fn walking_across_a_sector_boundary_moves_the_view_smoothly() {
+        // A fixed world point seen from a camera that steps 1 cm at a time over the +x sector face.
+        let s = I64Vec3::new(1 << 40, 3, -(1 << 40));
+        let point = WorldPos::new(s + I64Vec3::X, Vec3::new(40.0, 10.0, 500.0)).unwrap();
+        let mut cam = WorldPos::new(s, Vec3::new(1023.9, 10.0, 500.0)).unwrap();
+        let mut prev = camera_relative(&point, &cam);
+        for _ in 0..40 {
+            cam = cam.offset(Vec3::new(0.01, 0.0, 0.0)).unwrap();
+            let rel = camera_relative(&point, &cam);
+            let step = prev - rel;
+            assert!(
+                (step - Vec3::new(0.01, 0.0, 0.0)).abs().max_element() < 2e-4,
+                "{step}"
+            );
+            prev = rel;
+        }
+        assert_ne!(cam.sector(), s);
+    }
+
+    #[test]
     fn pitch_is_clamped_and_yaw_wraps() {
         let mut c = Camera::new(WorldPos::ORIGIN, 90.0);
         c.look(0.0, 10.0);
