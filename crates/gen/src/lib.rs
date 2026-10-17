@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod atmosphere;
 pub mod cell;
 pub mod coord;
 pub mod hash;

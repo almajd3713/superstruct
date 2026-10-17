@@ -109,7 +109,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 ### P0.6 L0 regimes
 - [x] **P0.6.1** `regime(seed, L0 cell) -> Regime` with all fields from `regimes.md`. *Done when:* the output is stable (golden test), and a 64×64 histogram of fields matches the specified distributions. (2026-10-17)
 - [x] **P0.6.2** Rare-event assignment per L0 cell. *Done when:* event frequencies over 10⁵ cells are within ±10% of the spec. (2026-10-17)
-- [ ] **P0.6.3** `atmosphere_at(WorldPos)`, which blends fog and palette across L0 boundaries. *Done when:* the output is continuous across a boundary (tested along a line).
+- [x] **P0.6.3** `atmosphere_at(WorldPos)`, which blends fog and palette across L0 boundaries. *Done when:* the output is continuous across a boundary (tested along a line). (2026-10-17)
 
 ### P0.7 L1 megaforms
 - [ ] **P0.7.1** Trunks: vertical pillars from column keys, with radius, vertical extent and style. *Done when:* a trunk spanning several L1 cells vertically is identical when generated from each of them (test).

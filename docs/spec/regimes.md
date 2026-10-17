@@ -89,7 +89,9 @@ At a face, both sides evaluate to a 50/50 mix, so the field is **continuous** ev
 
 Example (x only): at 1024 m inside cell X from its lower face, `w_lower = 0.5 · s(0.75) = 0.5 · 0.84375 = 0.421875` and `w_self = 0.578125`. At the face itself, `a = 0` gives 0.5 / 0.5.
 
-Blackout cells (§5) blend like any other cell, so darkness falls gradually as you approach one.
+Blackout cells (§5) blend like any other cell, so darkness falls gradually as you approach one. A Blackout cell's own atmosphere has `light = 0` and `emissive = 0` ("emissive suppressed").
+
+**Linear colours** are pinned as constants in `worldgen::atmosphere`, because the sRGB curve needs `powf`, which `hashing.md` §6 bans. A test re-derives them from this table's hex values.
 
 ## 5. Rare events
 
