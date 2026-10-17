@@ -102,7 +102,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P0.4.5** Hash quality test: single-bit avalanche over every input field (each output bit flips with p ≈ 0.5 within a stated tolerance), per `hashing.md` §2. *Done when:* the test passes. (2026-10-17)
 
 ### P0.5 Primitives and cell output
-- [ ] **P0.5.1** Primitive structs per `primitives.md`, with an AABB per primitive. *Done when:* AABB tests pass for each type.
+- [x] **P0.5.1** Primitive structs per `primitives.md`, with an AABB per primitive. *Done when:* AABB tests pass for each type. (2026-10-17)
 - [ ] **P0.5.2** `CellOutput { primitives, ports, child_constraints, meta }`, with optional `serde` behind a feature flag. *Done when:* a round-trip serialization test passes.
 - [ ] **P0.5.3** Point-in-solid and signed-distance functions for each primitive type, used later by collision, the SDF port and validation. *Done when:* tests at known points pass.
 

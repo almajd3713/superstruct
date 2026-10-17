@@ -6,6 +6,7 @@ pub mod cell;
 pub mod coord;
 pub mod hash;
 pub mod key;
+pub mod prim;
 pub mod rng;
 pub mod salt;
 pub mod seed;
