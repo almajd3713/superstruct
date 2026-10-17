@@ -168,7 +168,7 @@ All salts live in `worldgen::salt` as named `pub const NAME: u64` values.
 
 `WorldSeed(u64)`. `WorldSeed::parse(text)`:
 
-1. Trim ASCII whitespace. If the result is empty, return `Err(SeedError::Empty)`. The start-flow UI picks a random seed instead.
+1. Trim ASCII whitespace (space, `\t`, `\n`, `\x0C`, `\r`, as in Rust's `is_ascii_whitespace`). If the result is empty, return `Err(SeedError::Empty)`. The start-flow UI picks a random seed instead.
 2. If it is 1–20 ASCII digits whose value fits in `u64`, the seed is that number. Leading zeros are allowed, so `"0042"` equals `"42"`.
 3. Otherwise the seed is **FNV-1a 64** of the trimmed UTF-8 bytes (offset basis `0xCBF29CE484222325`, prime `0x100000001B3`).
 

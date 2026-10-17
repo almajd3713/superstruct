@@ -44,7 +44,7 @@ def fnv(b):
     for c in b: h=((h^c)*0x100000001b3)&M
     return h
 def seed_from_str(t):
-    t=t.strip(" \t\n\r\x0b\x0c")
+    t=t.strip(" \t\n\r\x0c")  # Rust is_ascii_whitespace: no vertical tab
     if t=="": return "Err(Empty)"
     if t.isascii() and t.isdigit() and len(t)<=20 and int(t)<=M: return int(t)
     return fnv(t.encode())
