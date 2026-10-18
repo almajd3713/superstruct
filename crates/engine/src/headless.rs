@@ -1,6 +1,7 @@
 //! Offscreen rendering without a window, for tests and tools.
 
 use crate::camera::Camera;
+use crate::gpu_timer::{GpuTimer, Zone};
 use crate::mesh::Mesh;
 use crate::readback::{self, ReadbackError};
 use crate::renderer::{DebugBox, FrameInput, FrameParams, Renderer};
@@ -12,6 +13,7 @@ pub struct Headless {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub adapter_name: String,
+    pub timestamps: bool,
 }
 
 impl Headless {
@@ -29,18 +31,18 @@ impl Headless {
             ..Default::default()
         }))
         .ok()?;
-        let (device, queue) = pollster::block_on(
-            adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("headless"),
-                required_features: adapter
-                    .features()
-                    .intersection(wgpu::Features::INDIRECT_FIRST_INSTANCE),
-                required_limits: adapter.limits(),
-                ..Default::default()
-            }),
-        )
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("headless"),
+            required_features: adapter.features().intersection(
+                wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::TIMESTAMP_QUERY,
+            ),
+            required_limits: adapter.limits(),
+            ..Default::default()
+        }))
         .ok()?;
+        let timestamps = device.features().contains(wgpu::Features::TIMESTAMP_QUERY);
         Some(Self {
+            timestamps,
             device,
             queue,
             adapter_name: format!(
@@ -108,6 +110,77 @@ impl Headless {
         );
         self.queue.submit([encoder.finish()]);
         readback::read_texture_rgba8(&self.device, &self.queue, &target)
+    }
+
+    /// Mean GPU milliseconds per zone over `frames` frames after a short warm-up, or `None`
+    /// without timestamp queries.
+    pub fn gpu_times(
+        &self,
+        renderer: &mut Renderer,
+        camera: &Camera,
+        size: (u32, u32),
+        params: FrameParams,
+        frames: u32,
+    ) -> Option<Vec<(Zone, f32)>> {
+        if !self.timestamps {
+            return None;
+        }
+        let mut timer = GpuTimer::new(&self.device, &self.queue, true);
+        let target = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("headless timing target"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        let warmup = 4;
+        let mut sums = vec![0.0_f32; Zone::ALL.len()];
+        for frame in 0..warmup + frames {
+            timer.begin_frame(&self.device);
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("timed"),
+                });
+            renderer.render(
+                &self.queue,
+                &mut encoder,
+                &view,
+                &FrameInput {
+                    camera,
+                    size,
+                    params,
+                    boxes: &[],
+                    timer: Some(&timer),
+                },
+            );
+            timer.resolve(&mut encoder);
+            self.queue.submit([encoder.finish()]);
+            timer.after_submit();
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+            // The previous frame's readback lands in this frame's begin_frame, so the sums
+            // lag by one frame, which is irrelevant for a steady scene.
+            if frame >= warmup {
+                for (sum, (_, ms)) in sums.iter_mut().zip(timer.timings()) {
+                    *sum += ms;
+                }
+            }
+        }
+        Some(
+            Zone::ALL
+                .into_iter()
+                .zip(sums)
+                .map(|(z, s)| (z, s / frames as f32))
+                .collect(),
+        )
     }
 }
 

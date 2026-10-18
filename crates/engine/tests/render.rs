@@ -235,3 +235,54 @@ fn direct_and_indirect_draw_paths_render_identically() {
         .unwrap();
     assert_eq!(image_diff(&indirect, &direct), (0, 0.0));
 }
+
+#[test]
+fn prepass_does_not_change_the_image() {
+    let Some(h) = headless() else { return };
+    let size = (160, 90);
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = cam.pos.offset(Vec3::new(0.0, 1.65, -54.0)).unwrap();
+    cam.yaw = std::f32::consts::PI;
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_scene(&h.device, &h.queue, &demo_scene_at(I64Vec3::ZERO));
+    let params = FrameParams::default();
+    let with = h
+        .render_with(&mut renderer, &cam, size, params, &[])
+        .unwrap();
+    renderer.set_prepass(false);
+    let without = h
+        .render_with(&mut renderer, &cam, size, params, &[])
+        .unwrap();
+    assert_eq!(image_diff(&with, &without), (0, 0.0));
+}
+
+/// A dense scene: 40 large slabs stacked along the view axis, back to front in memory order,
+/// so every pixel is shaded many times without a prepass. Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "timing measurement, prints GPU milliseconds"]
+fn prepass_cuts_shading_cost_in_a_dense_scene() {
+    let Some(h) = headless() else { return };
+    let size = (2560, 1440);
+    let cam = camera_at(I64Vec3::ZERO);
+    let scene: Vec<_> = (0..40u16)
+        .map(|i| wall(&cam, 4.0 + f32::from(40 - i) * 0.5, 30.0, i % 6))
+        .collect();
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    let params = FrameParams {
+        grid: true,
+        ..PLAIN
+    };
+    for prepass in [false, true] {
+        renderer.set_prepass(prepass);
+        let Some(times) = h.gpu_times(&mut renderer, &cam, size, params, 30) else {
+            eprintln!("SKIPPED: no timestamp queries");
+            return;
+        };
+        let line: Vec<_> = times
+            .iter()
+            .map(|(z, ms)| format!("{} {ms:.3} ms", z.name()))
+            .collect();
+        eprintln!("prepass {prepass}: {}", line.join(", "));
+    }
+}

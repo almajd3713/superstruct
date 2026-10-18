@@ -215,8 +215,9 @@ pub struct Renderer {
     lines_layout: wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
     shader_error: Option<String>,
-    scene_pipeline: wgpu::RenderPipeline,
-    lines_pipeline: wgpu::RenderPipeline,
+    pipelines: Pipelines,
+    /// Draw depth first, then shade only the front-most fragment of each pixel.
+    prepass: bool,
     chunks: Vec<GpuChunk>,
     pages: Vec<MeshPage>,
     next_handle: u32,
@@ -324,8 +325,7 @@ impl Renderer {
             immediate_size: 0,
         });
         let sources = ShaderSources::embedded();
-        let (scene_pipeline, lines_pipeline) =
-            build_pipelines(device, &sources, &scene_layout, &lines_layout, format);
+        let pipelines = build_pipelines(device, &sources, &scene_layout, &lines_layout, format);
         let lines_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("debug lines"),
             size: (MAX_LINE_VERTICES * std::mem::size_of::<LineVertex>()) as u64,
@@ -356,8 +356,8 @@ impl Renderer {
             lines_layout,
             format,
             shader_error: None,
-            scene_pipeline,
-            lines_pipeline,
+            pipelines,
+            prepass: true,
             chunks: Vec::new(),
             pages: Vec::new(),
             next_handle: 0,
@@ -532,7 +532,7 @@ impl Renderer {
             self.shader_error = Some(msg.clone());
             return Err(msg);
         }
-        (self.scene_pipeline, self.lines_pipeline) = pipelines;
+        self.pipelines = pipelines;
         self.shader_error = None;
         tracing::info!("shaders reloaded");
         Ok(())
@@ -596,6 +596,39 @@ impl Renderer {
                 bytemuck::cast_slice(&self.indirect_scratch),
             );
         }
+    }
+
+    /// Issues the culled indirect draws (or the direct fallback) with `pipeline`.
+    fn draw_chunks(&self, pass: &mut wgpu::RenderPass<'_>, pipeline: &wgpu::RenderPipeline) {
+        if self.runs.is_empty() {
+            return;
+        }
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &self.globals_bg, &[]);
+        pass.set_bind_group(1, &self.instances_bg, &[]);
+        let stride = std::mem::size_of::<IndirectArgs>() as u64;
+        for run in &self.runs {
+            let page = &self.pages[run.page];
+            pass.set_vertex_buffer(0, page.vertex_buf.slice(..));
+            pass.set_index_buffer(page.index_buf.slice(..), wgpu::IndexFormat::Uint32);
+            if self.indirect_first_instance && !self.force_direct {
+                pass.multi_draw_indexed_indirect(
+                    &self.indirect_buf,
+                    u64::from(run.start) * stride,
+                    run.count,
+                );
+            } else {
+                let range = run.start as usize..(run.start + run.count) as usize;
+                for (a, i) in self.indirect_scratch[range].iter().zip(run.start..) {
+                    let first = a.first_index;
+                    pass.draw_indexed(first..first + a.index_count, a.base_vertex, i..i + 1);
+                }
+            }
+        }
+    }
+
+    pub fn set_prepass(&mut self, on: bool) {
+        self.prepass = on;
     }
 
     /// Records the frame's passes into `encoder`.
@@ -663,6 +696,26 @@ impl Renderer {
             );
         }
 
+        if self.prepass {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("depth prepass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(DEPTH_CLEAR),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: timer.and_then(|t| t.pass_writes(Zone::Prepass)),
+                ..Default::default()
+            });
+            self.draw_chunks(&mut pass, &self.pipelines.prepass);
+        }
+        // Without the prepass the colour pass clears and writes depth itself; with it the depth
+        // is already final and the colour pass only tests against it.
+        let prepassed = self.prepass;
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("main"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -682,7 +735,11 @@ impl Renderer {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth_view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(DEPTH_CLEAR),
+                    load: if prepassed {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(DEPTH_CLEAR)
+                    },
                     store: wgpu::StoreOp::Discard,
                 }),
                 stencil_ops: None,
@@ -690,37 +747,28 @@ impl Renderer {
             timestamp_writes: timer.and_then(|t| t.pass_writes(Zone::Scene)),
             ..Default::default()
         });
-        if !self.runs.is_empty() {
-            pass.set_pipeline(&self.scene_pipeline);
-            pass.set_bind_group(0, &self.globals_bg, &[]);
-            pass.set_bind_group(1, &self.instances_bg, &[]);
-            let stride = std::mem::size_of::<IndirectArgs>() as u64;
-            for run in &self.runs {
-                let page = &self.pages[run.page];
-                pass.set_vertex_buffer(0, page.vertex_buf.slice(..));
-                pass.set_index_buffer(page.index_buf.slice(..), wgpu::IndexFormat::Uint32);
-                if self.indirect_first_instance && !self.force_direct {
-                    pass.multi_draw_indexed_indirect(
-                        &self.indirect_buf,
-                        u64::from(run.start) * stride,
-                        run.count,
-                    );
-                } else {
-                    let range = run.start as usize..(run.start + run.count) as usize;
-                    for (a, i) in self.indirect_scratch[range].iter().zip(run.start..) {
-                        let first = a.first_index;
-                        pass.draw_indexed(first..first + a.index_count, a.base_vertex, i..i + 1);
-                    }
-                }
-            }
-        }
+        let scene = if prepassed {
+            &self.pipelines.scene_tested
+        } else {
+            &self.pipelines.scene
+        };
+        self.draw_chunks(&mut pass, scene);
         if !self.lines_scratch.is_empty() {
-            pass.set_pipeline(&self.lines_pipeline);
+            pass.set_pipeline(&self.pipelines.lines);
             pass.set_bind_group(0, &self.globals_bg, &[]);
             pass.set_vertex_buffer(0, self.lines_buf.slice(..));
             pass.draw(0..self.lines_scratch.len() as u32, 0..1);
         }
     }
+}
+
+/// How a pipeline treats the depth buffer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DepthUse {
+    Write,
+    Test,
+    /// Depth only: no fragment stage and no colour target.
+    PrepassOnly,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -732,7 +780,7 @@ fn build_pipeline(
     format: wgpu::TextureFormat,
     buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
     topology: wgpu::PrimitiveTopology,
-    depth_write: bool,
+    depth: DepthUse,
 ) -> wgpu::RenderPipeline {
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
@@ -747,7 +795,7 @@ fn build_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers,
         },
-        fragment: Some(wgpu::FragmentState {
+        fragment: (depth != DepthUse::PrepassOnly).then_some(wgpu::FragmentState {
             module: &module,
             entry_point: Some("fs_main"),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -761,7 +809,7 @@ fn build_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: Some(depth_write),
+            depth_write_enabled: Some(depth != DepthUse::Test),
             depth_compare: Some(DEPTH_COMPARE),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
@@ -798,23 +846,34 @@ pub fn depth_at(proj: Mat4, z: f32) -> f32 {
     c.z / c.w
 }
 
+struct Pipelines {
+    /// Colour pass that also writes depth, for frames without a prepass.
+    scene: wgpu::RenderPipeline,
+    /// Colour pass that only tests against a finished prepass depth.
+    scene_tested: wgpu::RenderPipeline,
+    prepass: wgpu::RenderPipeline,
+    lines: wgpu::RenderPipeline,
+}
+
 fn build_pipelines(
     device: &wgpu::Device,
     sources: &ShaderSources,
     scene_layout: &wgpu::PipelineLayout,
     lines_layout: &wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
-) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
-    let scene = build_pipeline(
-        device,
-        "scene",
-        &sources.scene,
-        scene_layout,
-        format,
-        &[Some(Vertex::LAYOUT)],
-        wgpu::PrimitiveTopology::TriangleList,
-        true,
-    );
+) -> Pipelines {
+    let scene = |label, depth| {
+        build_pipeline(
+            device,
+            label,
+            &sources.scene,
+            scene_layout,
+            format,
+            &[Some(Vertex::LAYOUT)],
+            wgpu::PrimitiveTopology::TriangleList,
+            depth,
+        )
+    };
     let line_vertex = wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<LineVertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
@@ -828,7 +887,12 @@ fn build_pipelines(
         format,
         &[Some(line_vertex)],
         wgpu::PrimitiveTopology::LineList,
-        false,
+        DepthUse::Test,
     );
-    (scene, lines)
+    Pipelines {
+        scene: scene("scene", DepthUse::Write),
+        scene_tested: scene("scene tested", DepthUse::Test),
+        prepass: scene("depth prepass", DepthUse::PrepassOnly),
+        lines,
+    }
 }

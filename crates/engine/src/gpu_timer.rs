@@ -10,16 +10,18 @@ pub enum Zone {
     Scene = 0,
     Ui = 1,
     Cull = 2,
+    Prepass = 3,
 }
 
 impl Zone {
-    pub const ALL: [Zone; 3] = [Zone::Scene, Zone::Ui, Zone::Cull];
+    pub const ALL: [Zone; 4] = [Zone::Scene, Zone::Ui, Zone::Cull, Zone::Prepass];
 
     pub fn name(self) -> &'static str {
         match self {
             Zone::Scene => "scene",
             Zone::Ui => "ui",
             Zone::Cull => "cull",
+            Zone::Prepass => "prepass",
         }
     }
 }
