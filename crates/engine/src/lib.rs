@@ -21,6 +21,7 @@ pub mod hiz;
 pub mod horizon;
 pub mod horizon_pass;
 pub mod input;
+pub mod kit;
 pub mod lift;
 pub mod liftdraw;
 pub mod liftplan;

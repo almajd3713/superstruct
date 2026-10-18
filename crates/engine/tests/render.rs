@@ -995,3 +995,63 @@ fn fully_fogged_horizon_pixels_are_skipped() {
     let without = h.render(&[], &cam, size, params, &[]).unwrap();
     assert_eq!(image_diff(&with, &without), (0, 0.0));
 }
+
+/// P4.2.1: the module kit laid out for inspection. Writes `out/kit-gallery.png`.
+#[test]
+fn kit_gallery_renders() {
+    let Some(h) = headless() else { return };
+    let (mesh, _) = engine::kit::gallery();
+    let params = FrameParams {
+        fog_density: 0.0,
+        fog_height_k: 0.0,
+        fog_color: [0.02, 0.025, 0.03],
+        ambient: [0.27, 0.27, 0.27],
+        light: 0.35,
+        grid: false,
+        fade: 0.0,
+    };
+    let size = (1600, 800);
+    let shots: [(&str, Vec3, f32, f32); 5] = [
+        ("kit-gallery.png", Vec3::new(0.0, 7.0, 24.0), 0.0, -0.22),
+        (
+            "kit-gallery-lamp.png",
+            Vec3::new(13.5, 1.8, 11.0),
+            0.0,
+            0.15,
+        ),
+        (
+            "kit-gallery-walls.png",
+            Vec3::new(-6.0, 2.2, 13.0),
+            0.0,
+            -0.1,
+        ),
+        (
+            "kit-gallery-left.png",
+            Vec3::new(-16.0, 3.0, 12.0),
+            0.0,
+            -0.3,
+        ),
+        (
+            "kit-gallery-right.png",
+            Vec3::new(19.0, 3.2, 15.0),
+            -0.5,
+            -0.3,
+        ),
+    ];
+    for (name, at, yaw, pitch) in shots {
+        let mut cam = camera_at(I64Vec3::ZERO);
+        cam.pos = cam.pos.offset(at).unwrap();
+        cam.yaw = yaw;
+        cam.pitch = pitch;
+        let origin = WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0)).unwrap();
+        let img = h
+            .render(&[(origin, mesh.clone())], &cam, size, params, &[])
+            .unwrap();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../out")
+            .join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        save_png(&path, size.0, size.1, &img).unwrap();
+        assert!(img.chunks(4).any(|p| p[0] > 40), "{name} is black");
+    }
+}
