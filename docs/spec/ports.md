@@ -126,7 +126,7 @@ L2 ports and envelope entrances become L3 boundary conditions (P4.1.1). The same
 - Where such a structure crosses an L2 face, both L2 cells see a **forced port** at the intersection. Both compute it from the same L1 keyed features. The same mechanism carries L2 ports into L3.
 - **Finer levels add collidable solid only** inside their parent's envelopes, on their own walkways and as railings along edges. Anything else they add on L1 walkable surfaces is `NO_COLLIDE`. This is what keeps the L1 network unobstructed.
 
-## 6. Connectivity argument
+## 6. Connectivity argument (versions 1–6; see §6W for version 7)
 
 **Definitions**
 - A *cavity cell* is an L1 cell inside a giant cavity.
@@ -167,6 +167,112 @@ L3 has the same obligation toward L2 surfaces, stated as Theorem L3 in `levels.m
 - a trunk segment passes through a deck in its cell, or, in cells with no deck, the bridge router gives one bridge a landing against the trunk (`levels.md` §4.5).
 
 **What this does not claim.** The argument does not cover the time it takes. A 20 km walk is reachable but slow, which is why transport (lifts, trams) exists. It assumes Lemma A's construction is implemented correctly; P0.9.4 and the phase-exit check over 10⁶ cells (P0.11.5) test exactly that. Gravity regions (P5.2.4) would need this argument revisited.
+
+## 6W. Connectivity argument for the Web (version 7)
+
+*PW.0.3. This replaces §6 from `GEN_VERSION` 7. §6 stays as the description of versions 1–6. The lift-core guarantee (a lift core in every L1 column, decks joined by it) is gone. Its place is taken by the **skeleton**: ports on every face and arteries inside every cell (`levels.md` §4W.5).*
+
+### 6W.1 Definitions
+
+- An L1 cell is **live** unless it is a cavity cell (`levels.md` §3). Betweens and voids are live.
+- An **L2 cell of a live L1 cell** is a cell of its 8×8×8 grid.
+- The **skeleton** `S` of a live L1 cell is its tree `T` of L2 cells (`levels.md` §4W.5.2): the knot, the cells of every port artery, loop and tie.
+- The **network N** is the union of the skeletons of all live cells, joined through the ports of the faces between them.
+
+### 6W.2 Port rule
+
+Every face between two live L1 cells carries **at least 2 ports** (`levels.md` §4W.5.1), each a distinct L2 cell of the face. They are derived from the face key (§3), and the face context is the keyed features of both cells. A face next to a cavity cell carries none.
+
+The old minimum sizes (§2) still apply to the opening of each port: clearance of at least 2.4 m, and for an artery that carries walkers a width of at least 2 m. The opening sits on the artery's floor in the L2 cells at both sides of the face, which both cells derive from the artery type.
+
+### 6W.3 Lemmas
+
+**Lemma A (skeleton connectivity inside a live L1 cell).** Every port cell, the knot, and every tie start cell of a live L1 cell is in `T`, and `T` is a connected set of L2 cells (6-connectivity of the supporting axis paths).
+
+*Proof.* `T` starts as `{K}`. A walk ends only when it enters a cell of `T`. Walks that are not finished after their step budget are completed by a BFS over the 6-neighbour grid. That grid is the whole 8×8×8 block: no cell is impassable, because voids, beams, tissue and fill only limit what is *built* and not what a *spanning artery* may cross (§4W.5.2, §4W.5.3). The grid is connected, so the BFS finds a path to `T` from every cell. Every walk therefore adds a path that is connected to `T`, and by induction `T` stays connected. A diagonal step is recorded with its supporting axis path, so the 6-connected path exists even where the geometry is oblique. A forced artery (a Road or Spine) is a straight axis path that is joined to `T` by such a walk before it is added. Hence `K` ∈ `T`, every port and tie start is in `T`, and `T` is connected. ∎
+
+**Lemma B (agreement).** Both cells compute each port identically (§3). On both sides the walkable floor meets the port rect flush at `v0` (§2), so a port joins the two cells' components.
+
+**Lemma C (grid connectivity).**
+- Every face between two non-cavity L1 cells carries at least one port (§4.1).
+- Cavity cells lie in the inner 6 × 6 × 6 L1 cells of their L0 cell, so the outer layer (the *shell*) of every L0 cell is free of cavity cells (`levels.md` §3).
+- Each shell is connected (a hollow cube of thickness one cell), and adjacent L0 cells' shells share faces. The union of all shells is therefore connected.
+- Pocket filling guarantees that every non-cavity cell inside an L0 cell reaches its shell through non-cavity cells.
+- So the graph of non-cavity L1 cells joined by ported faces is connected.
+
+**Theorem (global connectivity).** N is connected.
+*Proof:* by A, each non-cavity L1 cell's part of N, together with its ports, is one component. By B, adjacent cells' components merge through every shared port. By C, these merges connect all non-cavity cells. ∎
+
+**Lemma D (finer levels attach to N).** In every L2 cell, each port and each walkable surface the cell generates (masses' entrances, walkways, stairs, towers) connects **within the cell** to N. This is guaranteed by `levels.md` §5:
+- masses sit only on deck tops,
+- own skywalk ports exist only above a deck on both sides,
+- the walkway solver links everything to the deck or core it stands on,
+- the validator (P0.9) rejects any cell that fails, as a generator bug.
+
+L3 has the same obligation toward L2 surfaces, stated as Theorem L3 in `levels.md` §6.8. For L3, "within the cell" means within the parent L2 cell, because a block buried inside a mass contains no part of N. Deliberately sealed rooms and dead ends are marked as such and are exempt.
+
+**Corollary (horizon promise, reachability).** Every walkable surface that is not marked sealed is reachable from every other one. Every far-visible structure (deck, bridge, trunk) can be reached by walking:
+- decks and bridges are part of N,
+- a trunk segment passes through a deck in its cell, or, in cells with no deck, the bridge router gives one bridge a landing against the trunk (`levels.md` §4.5).
+
+**What this does not claim.** The argument does not cover the time it takes. A 20 km walk is reachable but slow, which is why transport (lifts, trams) exists. It assumes Lemma A's construction is implemented correctly; P0.9.4 and the phase-exit check over 10⁶ cells (P0.11.5) test exactly that. Gravity regions (P5.2.4) would need this argument revisited.
+
+## 6W. Connectivity argument for the Web (version 7)
+
+*PW.0.3. This replaces §6 from `GEN_VERSION` 7. §6 stays as the description of versions 1–6. The lift-core guarantee (a lift core in every L1 column, decks joined by it) is gone. Its place is taken by the **skeleton**: ports on every face and arteries inside every cell (`levels.md` §4W.5).*
+
+### 6W.1 Definitions
+
+- An L1 cell is **live** unless it is a cavity cell (`levels.md` §3). Betweens and voids are live.
+- An **L2 cell of a live L1 cell** is a cell of its 8×8×8 grid.
+- The **skeleton** `S` of a live L1 cell is its tree `T` of L2 cells (`levels.md` §4W.5.2): the knot, the cells of every port artery, loop and tie.
+- The **network N** is the union of the skeletons of all live cells, joined through the ports of the faces between them.
+
+### 6W.2 Port rule
+
+Every face between two live L1 cells carries **at least 2 ports** (`levels.md` §4W.5.1), each a distinct L2 cell of the face. They are derived from the face key (§3), and the face context is the keyed features of both cells. A face next to a cavity cell carries none.
+
+The old minimum sizes (§2) still apply to the opening of each port: clearance of at least 2.4 m, and for an artery that carries walkers a width of at least 2 m. The opening sits on the artery's floor in the L2 cells at both sides of the face, which both cells derive from the artery type.
+
+### 6W.3 Lemmas
+
+**Lemma A (skeleton connectivity inside a live L1 cell).** Every port cell, the knot, and every tie start cell of a live L1 cell is in `T`, and `T` is a connected set of L2 cells (6-connectivity of the supporting axis paths).
+
+*Proof.* `T` starts as `{K}` (or with the forced arteries of §4W.5.5, which are straight axis paths, and `K` is added to them by the first port walk, see below). A walk ends only when it enters a cell of `T`. Walks that are not finished after their step budget are completed by a BFS over the 6-neighbour grid. That grid is the whole 8×8×8 block: no cell is impassable, because voids, beams, tissue and fill only limit what is *built* and not what a *spanning artery* may cross (§4W.5.2, §4W.5.3). The grid is connected, so the BFS finds a path to `T` from every cell. Every walk therefore adds a path that is connected to `T`, and by induction `T` stays connected. A diagonal step is recorded with its supporting axis path, so the 6-connected path exists even where the geometry is oblique. Forced arteries of Roads and Spines are straight axis paths; if `T` does not yet contain `K` when the first port walk begins, the target is the nearest cell of `T` (a forced path), and `K` is joined by a final walk from `K` to `T` that is run before step 1 (it is the first draw of the artery RNG). Hence `K` ∈ `T` and `T` is connected. ∎
+
+**Lemma B (agreement).** Both cells next to a face compute the same ports and the same artery types, so they are joined.
+
+*Proof.* Ports, their cells and their types are a function of the face key and the keyed features of the two cells only: line features (beams are lattice lines, voids are keyed), the stack of the L0 cell (or cells: the owner is the lower cell, whose regime is used), and the Roads and Spines of the L0 lines (§3W.2). None reads either cell's generated output. The L2 cell on each side of the face is the same `(i, j)` position, and the artery's floor height at the face is a function of the type and the stack. So both L1 cells emit `ForcedPort`s for the same L2 faces, and each L2 cell reads one `ForcedPort` for each. ∎
+
+**Lemma C (grid connectivity).**
+- Every face between two live L1 cells carries ≥ 2 ports (§6W.2).
+- Cavity cells lie in the inner 6×6×6 cells of their L0 cell, so the outer layer of every L0 cell (the *shell*) holds no cavity cell. No void touches an L0 face, and a Wonder or any other feature that excludes whole L1 cells must satisfy the same rule and the pocket-filling rule (`levels.md` §3).
+- Each shell is connected (a hollow cube of thickness one cell), adjacent L0 cells' shells share faces, and so the union of all shells is connected.
+- Pocket filling puts every L1 cell that is not a cavity in the same component as the shell.
+- So the graph of live L1 cells, joined by faces that carry ports, is connected. ∎
+
+**Theorem W (global connectivity).** The network N is connected.
+
+*Proof.* By A, the skeleton of each live cell is connected and contains all its ports. By B, adjacent cells' skeletons are joined through each port of the shared face (two ports are two L2 cells of the face, and both belong to the skeletons on either side). By C, the live cells form one connected graph. So N is connected. ∎
+
+Nothing in the proof depends on the stack geometry (Flat, Tilted, Vertical, Curved), on the void shapes, on the orientation policy, or on the neighbouring regime. This is why the skeleton, and not the crusts, carries the guarantee.
+
+**Lemma D (finer levels attach to N).** In every L2 cell the cell's ports, entrances, routes and structures connect, inside the cell, to the artery cells of its parent skeleton, or to an artery port of its own. This is the order of the tissue (`levels.md` §5W, PW.0.4): reserve → route → grow → dress. The route stage connects every port of the cell (cascaded from arteries, forced and own) with walks on the slot lattice, which is almost empty at that time, so a route always exists. The validator (`worldgen::validate`) checks each cell, and a failure is a generator bug (CLAUDE.md §3.5).
+
+For L3 the same statement holds within the parent L2 cell (`levels.md` §6.8, PW.0.5). Deliberately sealed rooms and dead ends are marked as such and are exempt. A dead end must hold a payoff (`PRN-05`).
+
+### 6W.4 Corollaries
+
+**Horizon promise (reachability).** Every far-visible walkable feature of a live L1 cell is tied to the cell's skeleton (§4W.5.4): every walkable beam, every crust skin piece, and every tether, drip, spire and island that touches the cell. N is connected, so each of them can be reached by walking. A crust surface is also reached through its skin ties. A knot is in `T` by construction.
+
+**Between crossings.** Because Betweens are live and every face carries ports, there is always a route across a Between. It may be a thin catwalk or a cable rather than a stair. The engine does not need to know: those are artery types.
+
+### 6W.5 What this does not claim
+
+- Time: a 20 km catwalk is reachable but slow. Lifts, trams and gravity are the shortcuts (`lifts.md`, `trams.md`, `gravity.md`).
+- It assumes Lemma A is implemented as written. PW.2.8 tests it over 10⁴ L1 cells with a connectivity check, and the phase-exit check (PW.12) runs the bots over many kilometres.
+- Cavity cells and L0 features that exclude cells must satisfy the shell rule. A new such feature has to re-prove Lemma C.
+- Gravity wells change what "down" is and so what is walkable. `gravity.md` states the extra conditions.
 
 ## 7. Salts
 

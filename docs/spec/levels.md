@@ -39,6 +39,10 @@ What each hierarchy level decides, from what inputs, and with which salts. Coord
 - **Clipping is exact.** Clipping a box at an integer-quantum face gives two boxes whose shared face is bit-identical (`primitives.md` §1). There are no seams or gaps.
 - **The cost is a placement constraint.** Trunks keep a margin from L1 X and Z faces, so trunk centres never fall in a band near those faces. Decks are continuous across faces through layer keys, which hides the cell grid. The trunk margin is small next to a 4096 m cell, and trunk positions are jittered within the allowed area. The slice tool (P0.10.4) will show whether a grid is still visible. If it is, revisit by making L1 trunk placement come from a coarser key (for example L0-level columns) rather than switching to overflow.
 
+### 1.4 Oriented pieces (PW.0.3)
+
+Rule 2's list of shapes that may cross a face is replaced from version 7. **Any** shape, at any angle, may cross a face if it is derived from a shared key, because each cell emits its own piece **clipped to the cell box** (`primitives.md` §9.4). The two pieces of one solid meet on the face plane exactly, since both clips use the same integer plane. The features of §4W (beams, voids, spines, roads) are all of this kind. Ramps and stair runs with a rise still stay inside one cell unless they are part of such a keyed feature.
+
 ## 2. Conventions for this document
 
 - **Regime inputs.** The L0 fields used below are `density` (packed vs hollow) and `verticality` (pillars vs slabs). Both are `u8` values from 0 to 255, defined in `regimes.md`. Write `d = density / 255` and `v = verticality / 255`.
@@ -47,6 +51,8 @@ What each hierarchy level decides, from what inputs, and with which salts. Coord
 - **Margins.** Margins are measured from the cell faces, in the owning cell's local space.
 - **Status of numbers.** Probabilities and sizes are first guesses. P0.10.4 tunes them with slice images. Changing them after golden tests exist requires a `GEN_VERSION` bump.
 - **Salts.** Salts are listed per level (§8). Every decision names its salt in brackets, for example `[TRUNK]`.
+
+> **Web redesign (PW.0.3, 2026-10-18).** From `GEN_VERSION` 7 the content of L1 is replaced by §3W–§4W below (stack, frame, voids, fill field, arteries). Sections 3 and 4 stay as the description of versions 1–6 until PW.2.8 removes the code they describe. Everything in §1 (ownership and keys) still holds, with the oriented clipping of §1.4.
 
 ## 3. L0: Regime (32768 m)
 
@@ -184,6 +190,250 @@ The ceiling and floor of a cavity are the deck undersides and tops of the cells 
 ### 4.8 Far-band reduction (P0.7.6)
 
 `l1_far_primitives(cell)` is the `FAR_VISIBLE` subset: trunks, deck pieces, and bridges at least 16 m wide. It is the same data, not a simplification.
+
+## 3W. L0 in the Web: stack, line features, wells
+
+*Version 7. The L0 cell still draws a regime (`regimes.md` §1, §7). It adds the following.*
+
+### 3W.1 Stack
+
+The regime's **stack** (`regimes.md` §8) is a pure function of the L0 cell, with seam Betweens derived from the L0 face keys. L1 cells ask it three questions, all answered in integers:
+
+- `stratum_at(p)` → `Crust(k)` or `Between(j)` for the stack coordinate `u(p)` of the point, in units of 64 m;
+- `crust_extent(k)` → the `u` interval of crust `k`;
+- `character_at(p)` → the `Character` of `regimes.md` §10, `None` in a Between.
+
+For `Flat` stacks `u` is the cell-local `y` in units; for `Tilted`, `Vertical`, `Curved` the integer formulas of `regimes.md` §8.1 apply.
+
+### 3W.2 L0 line features
+
+Great Roads, Spines, Bores, Rivers, the Rail Abyss and the Cable Highway (`the-web-ideas.md` §3, registry `RD-*`) are keyed by **L0 lines**. They use the line machinery of §4W.1 with the L0 lattice pitch (§4W.1.4). In L1 they are **forced arteries** (§4W.5.5): a line forces a port on every L1 face it crosses, and the cell connects its entry and exit ports by an artery of the line's type. What each line is made of is specified by the items that own it (PW.10.x); the rules that make them safe for connectivity are in §4W.5.5.
+
+- **Spine.** `ColumnKey(L0, x, z)` `[SPINE]`: exactly one Spine in every L0 column (the user's "about one every 30 km"). Its L1 column is `(below(6) + 1, below(6) + 1)`, which keeps it inside the inner 6×6 of the L0 cell, and its L2 column in that L1 cell is `(below(6) + 1, below(6) + 1)` (draws in the order L1 x, L1 z, L2 x, L2 z). It runs through **every** L0 cell of the column and every L1 cell of it, from the bottom of the world to the top. A Spine has a lift (`lifts.md`), a stair that never ends and a station on every crust and Between it crosses.
+- **Voids may not touch the L0 faces** (§4W.3), so line features that cross an L0 face never meet a void there.
+
+### 3W.3 Wells
+
+Gravity wells are specified in `gravity.md` (PW.0.6). L0 only holds their centres: an integer point per well from the L0 key `[WELL]`, about one per 50 km. They matter here in two places: `StackGeometry::Curved` (`regimes.md` §8.1) and the radial orientation policy.
+
+## 4W. L1 in the Web: Frame, Voids, Fill, Arteries (4096 m)
+
+| | |
+|---|---|
+| **Inputs** | the parent regime and its stack, the cavity `KeepOut` if any, line keys, face keys |
+| **Outputs** | Frame pieces (beams, knots), Between content (tethers, drips, spires, …), crust skin pieces, `KeepOut`s for voids, the fill field, ports and arteries (the skeleton) |
+| **Children receive** | `KeepOut` for voids, `ForcedPort` for every artery that crosses an L2 face, the fill density per L2 cell, `Zone` for knots and sanctuaries |
+
+Order of computation in a cell: **line features** (§4W.1–§4W.3) → **stack classification of the cell** → **knot** → **fill** (§4W.4) → **ports** → **arteries and ties** (§4W.5). Port derivation (`ports.md` §3) uses only keyed features, never the cell's output.
+
+### 4W.1 Line machinery
+
+*Owners: FRM-01 (and the beam, valley, rift, bore, Road and Spine keys).*
+
+A **line key** names an infinite straight line. Every cell it crosses derives the same line and emits its own clipped piece (§1.4).
+
+#### 4W.1.1 Lines
+
+- A line is `(i, p, q)`: a direction index `i` into the 49-entry table of `primitives.md` §9.1.3, and two integers `p, q` that locate it.
+- The **dominant axis** `a(i)` is the axis with the largest `|d|`; ties go to Y, then X, then Z. The other two axes are `u` and `v` in cyclic order after `a` (X, Z for a = Y; Z, Y for a = X; Y, X for a = Z).
+- The slopes are `m_u = d_u / d_a` and `m_v = d_v / d_a`. All are ratios of small integers (denominator 1 or 2) and `|m| ≤ 1`.
+- A lattice with pitch `P` places the line's intercept with the plane `a = 0`: `u₀ = p·P + jitter_u`, `v₀ = q·P + jitter_v`, where the jitters are drawn from the line's RNG as multiples of 16 m in `[0, P)`. The line is `u(a) = u₀ + m_u·a`, `v(a) = v₀ + m_v·a`, in exact rational arithmetic (`i64` numerator over 2).
+- The **line RNG** is `hash(seed, level, I64Vec3(p, q, i), salt)`.
+
+#### 4W.1.2 Finding the lines through a cell
+
+For direction `i`, the lines crossing a cell with range `[a₀, a₁]` along `a` have `u₀ ∈ [u₀min − m_u·a₁ , u₀max − m_u·a₀]` (and the same for `v`), taking the endpoints in the order that gives a non-empty interval. That is at most `⌈(size·(1 + |m|)) / P⌉ + 1` lattice indices per axis. With `size = 4096`, `P = 2048` that is at most 5 per axis, so at most 25 candidate lines per direction and 1225 over all 49. A candidate costs one hash for its existence test. The cell loops the candidates in the order `i`, then `p`, then `q`, each ascending, which fixes the order of its output.
+
+#### 4W.1.3 Spans and extents
+
+A line is cut into **spans** of 32 768 m along `a`, aligned to the world origin (so a span is one L0 cell long along its dominant axis). Each span `s` has its own RNG `absorb(line_rng, s)` which draws, in order: `present` (chance 3/4), `full` (chance 1/2), and if not full the L1-cell-aligned start and end (`a0 = range(0, 8)`, `a1 = range(a0 + 1, 9)` in L1 units within the span). Ends of a partial span are `Knot` or `Stub` (`range(0, 2)`, one draw per end). A full span continues into the next span, whose own draw may end it (that end is a `Stub`).
+
+The **home regime** of a span is the regime of the L0 cell that contains the span's midpoint (`a` at the middle of the span, `u` and `v` from the line equation, floor-divided by 32768). Every property of the span (kind, section, whether it exists, ends) is drawn from the home regime's fields and from the line RNG alone. Cells on the other side of an L0 face therefore agree, although the regime values there differ (`levels.md` §3 only forbids blending, not reading a neighbour's regime, which is a pure function of its key).
+
+#### 4W.1.4 Pitch and existence
+
+| Feature | Level of lattice | Pitch `P` |
+|---|---|---|
+| Beams | L1 | 2048 m |
+| Valleys, rifts | L1 | 4096 m |
+| Bores, Roads, Rivers, Rail Abyss, Cable Highway | L0 | 16 384 m |
+
+Beams exist per lattice point with chance `E_i / 4096`, with
+
+`E_i = floor(4096 · cw(c_i) / (n(c_i) · Σ cw))`,
+
+where `cw` is the weave class weight of `regimes.md` §7.2 for the class `c_i` of direction `i`, `n(c)` the number of table entries in the class (3, 6, 4, 36), and `Σ cw` the sum over classes. The expected number of beams crossing an L1 cell is 4 to 10 depending on the weave. At `weave = 0` only the three axes carry beams and `E = 1365` each. Oblique beams exist only when `weave ≥ 16` (`regimes.md` §7.2).
+
+### 4W.2 Frame: beams and knots
+
+*Owners: FRM-01..14 (PW.2.5).*
+
+#### 4W.2.1 Beams
+
+A **beam** is the part of a span that lies in the cell. Its parameters, drawn from the span RNG after the extent draws:
+
+| Parameter | Value |
+|---|---|
+| Section | 32–400 m, step 16 m. Shape: square, flattened (height ½ of width) or round (cylinder), `pick_weighted` by the character weights (`regimes.md` §10, forms and paths) |
+| Kind | `solid girder`, `inhabited beam`, `truss`, `conduit`, `rail beam`, `stepped beam`, `stair beam`, `fallen beam` (FRM-05..12). A stair beam needs `|m| ≤ tan 35°`, so only directions whose rise over run is ≤ 0.7, with `a` horizontal. A fallen beam needs a direction with a vertical component |
+| Ends | `Knot`, `Stub` (FRM-04) or continuing |
+| Carries | the tag `FRM-xx` of its kind and `FRM-03` for its section shape |
+
+- The beam's solid is `Oriented` with `Frame::Dir { d }`, `origin` on the line, clipped to the cell (`primitives.md` §9). Axis directions give the old trunk case (a vertical beam is exactly a trunk with another section).
+- A **mega-bridge** (FRM-14) is any beam, of any kind except `stub`-only, whose line crosses a void or a Between. Nothing extra is generated: the census counts the beams whose span intersects a void.
+- **Reservations.** A beam is a `KeepOut` for tissue except for the parts the kind says are inhabited (floors in an inhabited beam, the stair of a stair beam).
+- **Beam ties** (§4W.5.4) make every beam in a live cell reachable.
+
+#### 4W.2.2 Knots
+
+*Owners: FRM-13.*
+
+Every live L1 cell has one **knot** `K`, a point in the L2 grid of the cell, drawn as:
+
+1. The L2 cell: `(range(1, 7), range(1, 7), range(1, 7))` from `hash(seed, 1, cell, KNOT)`, so a knot is never on the outer ring of the cell.
+2. **Snapping.** If any beam of the cell has a section axis passing through an L2 cell of the inner box `[1, 7)³` at a Chebyshev distance of at most 1 L2 cell from the drawn cell, the knot moves to the nearest such cell on the beam (ties: lowest beam index, then lowest cell index). A beam whose end is `Knot` always wins, regardless of distance, and snaps to its end cell.
+3. The knot's **hub kind** is drawn from the character weights for the hub family (junction hall, lift nexus, machine, gravity furnace, sanctuary site; `PW.3.15`), and its far signature (silhouette, light colour, rhythm) from the cell hash (§11.3 of `the-web.md`).
+
+A knot is **cell-local**: only this cell and its L2 children read it. Neighbouring cells never need to agree on it, which is why it may depend on the beams.
+
+### 4W.3 Voids
+
+*Owners: VOID-01..14 (PW.2.6).*
+
+A void is carved out of crust: it is a `KeepOut` for tissue and fill, and it is not an obstacle for beams or arteries (they cross it as bridges, `§4W.5`).
+
+#### 4W.3.1 Rules for every void
+
+1. **Inner box.** A void lies inside the **inner 6×6×6 L1 cells** of its L0 cell (L1 indices 1–6), so it never touches an L0 face and never crosses into a neighbouring regime. Bores are the exception (see below).
+2. **Margin.** Its footprint keeps at least 64 m from the faces of an L1 cell unless it is a line void (valley, rift, bore) whose continuation across the face is derived from the same line key.
+3. **Convex pieces.** A void is the union of convex oriented pieces (boxes, cylinders, cone rings). Voids of different keys are separated by at least one L2 cell (512 m) in the Chebyshev metric, **except** line voids with each other, which may cross.
+4. **Carries** its tag `VOID-xx`, and every piece is `KeepOut`.
+5. **Void fraction.** The expected void volume in a crust is at most 8 % of it. Draw counts are fixed and the odds are scaled by the regime (`1 − fill_crust/255` and `fill_between`).
+
+#### 4W.3.2 Kinds
+
+| Kind | Keyed by | Shape | Parameters |
+|---|---|---|---|
+| Valley (VOID-01) | line, L1 lattice, horizontal direction (`d_y = 0`) | a box prism along the line, through one crust's full thickness | width 300–2000 m (step 100 m), length 2–24 km, ends rounded by a 4-ring taper |
+| Hall (VOID-02..08) | cell | a flat box or ellipse prism inside one crust | footprint 300–1500 m, height 20–120 m (step 4 m); variants: hypostyle forest (grid of columns left standing), vault, cathedral (nave), crush (height 20 m), stepped (terraced floor), drowned (fog) |
+| Shaft (VOID-09) | cell | a prism through the crust's whole thickness | 64–512 m, square or round |
+| Rift (VOID-10) | line, L1 lattice | a thin prism, tilted from vertical by a tilt index 0–6 | width 20–80 m, length 1–6 km, may step |
+| Bore (VOID-11) | line, L0 lattice, horizontal axis or diagonal | a tunnel prism | diameter 12–40 m, length 12–48 km, passing straight through everything. It may cross an L0 face; the same line key gives the same bore on both sides |
+| Lungs (VOID-12) | the bore's key | halls spaced `m · pitch` along a bore, `pitch ∈ {2, 3, 4} km` | hall footprint 200–600 m |
+| Funnel (VOID-13) | cell | a stack of coaxial rings narrowing downward | top radius 200–1500 m, depth = crust thickness, 8–16 rings |
+| Cavity (VOID-14) | L0 rare event | whole L1 cells (§3) | unchanged. It crosses the stack; its rim cells use the crust structure |
+
+Each kind draws in the order: existence (by chance), then the parameters in the order of the table's columns, then the position (on a 16 m step), then variants. A rejected void (it would break rule 3) is absent and the later draws are still made.
+
+**Which crust.** A valley, hall, shaft, rift or funnel belongs to one crust: the crust is drawn by `pick_weighted` over the crusts of the stack with weights proportional to crust thickness, from the void's key. The void's vertical extent follows that crust. Where the crust has the Tilted, Vertical or Curved geometry the void follows `u(p)` (it is an oriented prism in the crust's frame).
+
+### 4W.4 Fill field
+
+*Owner: FILL-01 (PW.2.7).*
+
+Every L2 cell has an integer **fill** `f ∈ 0..=255`, the built fraction the L2 cell aims at. For the L2 cell with L1-local index `(ix, iy, iz)`:
+
+1. **Base.** Take the 8 sample points at the cell's centre column (x and z at the centre, `y` at the 8 sub-slab centres of 64 m). For each sample `t`: `base_t = fill` of the stratum's character if `stratum_at` is `Crust(k)`, `fill_between` of the regime if a Between, and `0` if the sample lies in a void piece. `base = Σ base_t / 8` (integer division, rounding down). For non-Flat stacks the sample column follows `u`.
+2. **Noise.** Each L1 lattice corner `c` has `n(c) = below(64)` from `hash(seed, 1, c, FILL_CORNER)`. The L2 cell's noise is the trilinear blend with integer weights over 16: the weights along an axis for index `i ∈ 0..8` are `(15 − (2i + 1), 2i + 1)` over 16, and the product is a weight over 16³ = 4096. `n_t = Σ n(corner) · w / 4096`. Neighbouring L1 cells share corners, so `n_t` is continuous across faces.
+3. **Result.** `f = base · (192 + 2·n_t) / 256`, clamped to 255. The multiplier is between 0.75 and 1.24.
+4. **L2 obligation.** L2 fills its cell to `f` within ±10 % (of the cell volume), and its outer skin covers the far envelope (PW.2.4).
+
+Everything in the formula is integer, depends only on the stack, void pieces and corner hashes, and is the same on both sides of every face.
+
+### 4W.5 Ports and arteries: the skeleton
+
+*Owners: ART-01..13 (PW.2.8 and PW.2.9). This replaces the lift core, which is no longer in every cell (ART-13).*
+
+#### 4W.5.1 Live cells and ports
+
+- An L1 cell is **live** unless it is a cavity cell. (Betweens are live: they hold arteries as catwalks, tethers and cables. See §4W.5.6 for why.)
+- **Every face between two live cells carries at least 2 ports** (`ports.md` §4W). A port is an L2 cell of the face, `(i, j)` in the 8×8 grid of the face, plus an artery type. Ports are drawn from the face key (`ports.md` §3), count `2 + below(3)` (2–4), and distinct cells.
+- The port type (`ArteryType`) is drawn from the face key with weights from the stratum characters (`regimes.md` §10), restricted to the types allowed on the face axis (§4W.5.3), and to the environment of the face centre: crust, Between or void (all computed from `stratum_at` and the void pieces, which both cells can evaluate).
+
+#### 4W.5.2 Walks
+
+Each L1 cell has a **tree** `T` of L2 cells, starting as `{K}`. The cell processes, in order:
+
+1. **Port arteries.** The cell's ports, in the order faces `−x, +x, −y, +y, −z, +z` then port id. For port cell `P`:
+   1. The **target** is the nearest cell of `T` in Chebyshev distance (ties: smallest index `x + 8y + 64z`).
+   2. A **walk** starts at `P`. At each step the candidate moves are the 6 axis moves, the 12 face-diagonal moves and the 8 space-diagonal moves whose destination is inside the 8×8×8 grid and not yet visited by this walk. A move that goes through a void cell is allowed (it becomes a spanning variant, §4W.5.3). Weights: `w_axis = 255 − weave`, `w_diag = weave / 2`, `w_space = weave / 4` (as in `regimes.md` §7.2), multiplied by 4 if the move reduces the Chebyshev distance to the target, else by 1. The pick is `pick_weighted` from the artery RNG `hash(seed, 1, cell, ARTERY)`; draws follow the order of the arteries.
+   3. The walk ends when it enters a cell of `T`. If it has not arrived after `4 · dist + 8` steps, a **BFS** over the 6-neighbour grid finishes it from the current cell to the nearest cell of `T` (ties by the lowest index). All cells of the 8×8×8 grid are passable, so the BFS always succeeds.
+   4. The cells of the walk are added to `T`.
+2. **Loops.** `loops = below(3)`. Each picks two cells of `T` (`below(|T|)` each, the lower index first) at Chebyshev distance of at least 3 and walks between them as above; each loop artery has a type drawn like a port's.
+3. **Ties** (§4W.5.4).
+0. **Forced arteries** (§4W.5.5) come first. Each forced artery is a straight axis path between its entry and exit port cells. It is joined to `T` by a walk from its cell nearest to `K`, exactly like a port (step 1), and then added to `T`. So lines and spines are in `T` before the other ports.
+
+An artery's **cell list** is the sequence of cells. A diagonal move is recorded with its **supporting axis path** (x, then y, then z), so every artery is also a path of axis steps. The connectivity argument uses only the axis steps. The oblique geometry is drawn inside the supporting cells (clipped to the L2 cell, as everything is).
+
+At every L2 face between consecutive cells of an artery, the L1 cell emits a `ForcedPort` of the artery's type (`primitives.md` §7). Both L2 cells read the same record, so they agree.
+
+#### 4W.5.3 Artery types
+
+| Type | Allowed on faces | Spanning variant (over voids and air) |
+|---|---|---|
+| Grand stair | any | stair bridge |
+| Ramp road | X, Z | ramp bridge |
+| Lift trunk | Y | lift on a tether |
+| Avenue | X, Z | viaduct |
+| Tram tube | X, Z | tube |
+| Catwalk web | any | catwalk with cable stays |
+| Inhabited beam corridor | any, if a beam passes the port cell, else not offered | beam with floors |
+| Ladder chain | Y | ladder cage on a tether |
+| Gravity gate | any, only near a well | gate frame |
+
+Which one an artery gets is the only thing PW.2.9 specifies per type. The *spanning variant* is chosen whenever a cell of the artery lies in air (void or Between) at the artery's height. These types are the *arteries*; the tissue's path types (PH-*, PV-*) are chosen by L2 within its own cell.
+
+#### 4W.5.4 Ties
+
+Every feature that is far-visible and has a walkable surface gets a **tie** so it is reachable (the horizon promise):
+
+- every beam in the cell whose kind has a walkable surface (girder, inhabited, truss, rail, stepped, stair, fallen): the tie is a walk from the L2 cell of the beam closest to `K` to `T`;
+- every crust skin piece in the cell (one per crust the cell intersects): the walk starts at the skin L2 cell closest to `K`;
+- every tether, drip, spire and island (Between content): from its L2 cell closest to `K`.
+
+Ties are processed in the order beams (by line index), crusts (by `k`), Between content (by key), after the loops. Ties add their cells to `T`. A feature that lies in the cell only as a clipped sliver within the outer L2 ring is still tied.
+
+#### 4W.5.5 Forced arteries: Roads and Spines
+
+Roads and Spines (and rivers, bores) are line features at L0 scale. In an L1 cell:
+
+- A **Spine** forces, on every Y face, a port at its L2 column (`§3W.2`) with the types lift trunk and ladder chain (two ports on adjacent L2 cells of the column, chosen by the key). Inside the cell they connect bottom to top as straight axis steps.
+- A **Road** (PW.10.1) forces a port on each L1 face its line crosses, at the L2 cell given by its line equation, with the Road's type. Inside the cell, entry and exit are joined by an artery with the Road's type (straight, then axis steps).
+- A bore's floor forces a port on the same terms.
+
+Forced ports are part of the face key (the face evaluates the same L0 lines for both cells), so they are in `ports.md`'s count: the count of own ports is `2 + below(3)` **plus** the forced ones. The forced arteries are joined to `T` first (step 0 of §4W.5.2), which is why the later walks attach to them. A forced port must not coincide with an own port; an own port that would is redrawn (`ports.md` §3 keeps the draw count fixed).
+
+#### 4W.5.6 Why Betweens are live
+
+The user asked for "an infinite web of routes on every axis" (PRN-03, PRN-04). A Between is therefore not empty: it holds the skeleton threads. The visual cost is low (a catwalk 4 m wide across 4 km of air), and the guarantee does not depend on the stack geometry, the void shapes or the neighbouring regime. The built fraction stays within the targets of the-web.md §4 (2–10 % for the Between).
+
+### 4W.6 Between content and crust surfaces
+
+Tethers (STR-03), drips (STR-04), spires (STR-05), kisses (STR-06), islands (STR-07), tubes, nets, dead machines and the underside lights (STR-08..11), and the crust skins (SURF-01..04, HOR-02) are specified by PW.2.3 and PW.2.4. The rules that bind them here:
+
+- They are keyed by the Between or the crust (a key from the stack), and by a 2D lattice on the surface, so neighbouring cells agree. Pieces are clipped (§1.4).
+- Each is "tied" (§4W.5.4) when it intersects the cell.
+- Their footprints keep out of the artery cells that carry the `Catwalk web` and `Lift trunk` types only when they are solid (arteries pass through light structures but not through dead machines).
+- A crust's **skin** (SURF-04) is a shell of at least 16 m with openings wider than 32 m (HOR-02). The shell is part of L1; L2 covers it to ≥ 90 % (the-web.md §11.2).
+
+### 4W.7 Salts and draw order
+
+Salts added in the L1 block (`0x0200–0x02FF`), append-only:
+
+| Salt | Value | Key | Use |
+|---|---|---|---|
+| `LINE_BEAM` | `0x0210` | `(p, q, i)` | beam line properties and span draws |
+| `LINE_VALLEY` | `0x0211` | `(p, q, i)` | valley and rift lines |
+| `KNOT` | `0x0212` | cell (L1) | knot draw |
+| `VOID_CELL` | `0x0213` | cell (L1) | halls, shafts, funnels |
+| `FILL_CORNER` | `0x0214` | lattice corner (L1) | fill noise |
+| `ARTERY` | `0x0215` | cell (L1) | walks, loops, ties |
+| `LINE_L0` | `0x0120` | `(p, q, i)` (level 0) | Bore, Road, River lines |
+| `SPINE` | `0x0121` | ColumnKey (L0) | spine placement |
+| `WELL` | `0x0122` | cell (L0) | gravity well centres (`gravity.md`) |
+
+Draw order in an L1 cell (version 7): beams (§4W.2), knot, voids, fill, then arteries (§4W.5.2). Everything the L2 children need is passed as `KeepOut`, `ForcedPort`, `Zone` and the fill field.
+
 
 ## 5. L2: Districts (512 m)
 
