@@ -255,22 +255,357 @@ This implements cell-level connectivity (CLAUDE.md §3.5, `ports.md`):
 - **As implemented** (`worldgen::l2_vista`, P0.8.7): draws are the 0.25 chance, a starting side, then eight placement offsets. For each shaft or chasm of the parent and each deck top in the cell, the four sides are tried from the starting side: a 16 m wide strip of deck 8 m behind the void's edge must be fully supported and clear, then the balcony (8 m over the void, a 0.5 m `GRATING` slab flush with the deck) and a corridor (16 m wide, 8 m high, 16–64 m long over the void) must be free of every L1 solid and `KeepOut` except the void's own, of skywalk corridors and lift shafts, and inside the 72 m margin of the cell. The first fit wins; if none does the cell has no vista. The corridor is a `KeepOut`; balcony and corridor form a `Zone { Vista }`; the cell sets `MetaFlags::VISTA`; masses avoid the zone.
 - The vista is a walkable platform at the void's edge with a 16 m wide `KeepOut` corridor facing the void, and a `Zone { Vista }` for L3. L3 must keep the corridor open.
 
-## 6. L3: Blocks (64 m), outline
+## 6. L3: Blocks (64 m)
 
-- Rooms, corridors, stairwells, pipe runs and voids are generated with bounded WFC (model synthesis) over the block's 8×8×8 grid of L4 cells.
-- Boundary conditions are fixed by `ForcedPort`s, envelopes and zones.
-- Failure handling: retry with sub-seeds `[L3_RETRY]`, then fall back to a known-good template.
-- Specified in P4.1.1.
+**Specified in P4.1.1 (2026-10-18).** L3 turns every L2 mass envelope into architecture: rooms, corridors, stairwells, voids and pipe runs. Each block is solved on its own by model synthesis, inside boundary conditions that its parent fixes completely. Everything outside envelopes is already final at L2.
+
+| | |
+|---|---|
+| **Inputs** | the parent L2 output (envelopes, ports including entrances, `KeepOut`s, `Zone`s), the regime (`d`, `v`, `style`), block keys and L3 face keys |
+| **Outputs** | structural primitives, only inside envelopes, of kinds `Mass`, `StairTower` and `Pipe` (no `ENVELOPE`, no `FAR_VISIBLE`); L3 ports; the slot layout (§6.10) |
+| **Children receive** | a `ForcedPort` for every L3 port; `KeepOut`s over door passages, stairwells and entrance passages; copied `Zone`s; the layout, as module slots (§7) |
+
+### 6.1 Active and empty blocks
+
+- A block is **active** if it overlaps (with positive volume) at least one envelope of its parent. Every other block is **empty**: it runs no solve and emits no primitives. Its output is its cascaded ports (§6.6) and the parent's zones clipped to it. That costs one pass over the parent's envelopes, ports and zones.
+- **Why empty is a legal answer.** L1 and L2 structure is final (`primitives.md` §5), and every L2 port is already realized by L2 (decks, skywalks, bridges, lift rings). `ports.md` §5 allows finer levels collidable solid only inside envelopes, on their own walkways and as railings. L3 has no walkways outside envelopes, and railings are L4's (§7), so outside envelopes L3 has nothing to add. Pipes, cables and lamps on L2 surfaces are L4/L5 dressing and `NO_COLLIDE`.
+- Inside an active block, L3 emits solid **only inside envelopes**. L2 places masses clear of every `KeepOut`, `Zone`, port corridor, lift ring and tower (§5.1, §5.5, §5.6), so L3 solid never meets a `KeepOut`. L3 asserts this in debug builds and the validator checks it (§6.11).
+- L3 never re-emits or edits parent geometry. Walkways, stairs, towers, lift shafts and railings stay as L2 made them. The only parent primitive L3 replaces is the envelope, and only while the mass's blocks are resident (§6.12).
+- `Zone { Sanctuary }` and `Zone { Vista }` never meet an envelope, so L3 only copies them, clipped, to its children. Building the sanctuary room stays with §5.5.
+
+### 6.2 L2 additions for L3: entrances and links (P4.1.6)
+
+These are **L2 outputs**, computed in `l2`. They are specified here because only L3 gives them meaning, and they change L2 output (§6.13).
+
+**Entrances `[MASS_ENTRANCE]`.** A mass gets at most one entrance: a doorway in its envelope, emitted as a port of kind `Entrance` (`ports.md` §2.1) with a `ForcedPort`. Entrances are numbered after the own ports, in mass order. Every doorway is 4 m wide and runs from the mass bottom to 3 m above it, and it always lies within one IN column (§6.3).
+
+- **Deck masses.** The RNG `hash(cell, MASS_ENTRANCE)` makes two draws per mass, in mass order: `side0 = below(4)` and `j0 = next_u32()`. The sides are tried cyclically from `side0` in the order −z, +x, +z, −x. On each side the candidates are the IN columns of the outermost row facing it, numbered along `u`. Scanning starts at index `j0 mod m` and wraps. A candidate doorway is the middle 4 m of its column (column + [2 m, 6 m)). Its **apron** is the 4 m × 8 m strip in front of it, from the deck top to 4 m above it. The first candidate whose apron is fully on deck at the mass's bottom (which is a deck top), passes `Parent::fits`, and overlaps no L2 collidable primitive and no envelope wins. The apron is emitted as a `KeepOut`. If no candidate fits, the mass has no entrance and L3 seals it (§6.4). Every deck mass makes exactly 2 draws.
+- **Trunk-attached masses** (P0.8.9). The entrance is the skywalk's doorway, with no draws. Its `u` range is the lowest 4 m sub-range of the skywalk's 8 m that lies inside one IN column. One always exists: the skywalk is 8 m wide on a 4 m grid, and the mass is at least 16 m deep along `u`. The skywalk landing is the apron.
+- Inside a mass every floor sits 0.25 m (4 Q) above its storey line (§6.5). Every entrance therefore has a 4 Q threshold step, which is within the step-up and the same for deck and attached masses.
+
+**Links (§5.3 steps 1–2) `[WALKWAY]`.**
+- **Nodes, per deck top in the cell (ascending):** ports whose floor is that top, by port index, anchored 2 m inside the face at the rect's midpoint; deck-mass entrances, by mass index, anchored at the apron's outer midpoint; skywalk stair feet on that deck, by port index; then the lift-shaft and stair-tower openings at that deck.
+- **Spanning tree.** Prim's algorithm from node 0. It repeatedly adds the unconnected node at the smallest Manhattan plan distance from the tree. Ties go to the lower new index, then the lower tree index. The tree makes no draws.
+- **Extra links (loops).** For each node `i` in order, its nearest other node `j` (same distance and tie rules) is a **candidate**, unless `(i, j)` is a tree edge or already a candidate. Each candidate draws `chance(0.3)` from `hash(cell, WALKWAY)`, in candidate order.
+- **Realization.** Each link (tree edge or fired candidate) is a 4 m wide L-shaped clearance path from the deck top to 4 m above it: x-first, else z-first. The first path that is fully on deck at that top, passes `Parent::fits`, and meets no envelope and no L2 collidable primitive is emitted as `KeepOut` boxes. If neither fits, the link is dropped and counted.
+- **Why this is enough.** Reachability does not depend on the links: an apron on deck is already in N (`ports.md` §6). The links protect the natural walking lines from any future collidable dressing, and they mark them for L4 (lamp lines, §7). The loop frequency is tested on draws, not on geometry (§6.14).
+
+### 6.3 Slot lattice and slot classes
+
+- **Solve grid.** Each block is 8 × 16 × 8 **slots** of 8 m × 4 m × 8 m (128 × 64 × 128 Q). Columns follow the L4 grid, so every L4 cell holds two slots stacked. The slot index is `i = (t · 8 + z) · 8 + x`, with `t` the storey (0–15, bottom-up). This order is used everywhere.
+- **Why 4 m storeys rather than 8 × 8 × 8 cubes.** Every floor height L3 must meet lies on a 4 m grid: deck tops (§4.2), mass bottoms and heights (§5.1), and the floors of skywalks and attached masses. With 8 m storeys, half of all masses would start mid-slot. 4 m storeys give 3.75 m clear rooms: oppressive, but above the 2.4 m minimum. Voids add double and triple heights. In L4-cell terms the solve is still the fixed 8 × 8 × 8 block of P4.1.2.
+- **IN columns** of a mass are the world-aligned 8 m columns lying fully inside its footprint. Its **storeys** run from its bottom to its top, `height / 4 m ≥ 4` of them. Each slot falls in one class, decided from the parent alone:
+
+  | Class | Condition | Content |
+  |---|---|---|
+  | `Out` | in no envelope | nothing |
+  | `Rind` | within a mass's height, in a column that meets its footprint but is not IN | solid: the slot ∩ envelope, `CONCRETE`, kind `Mass`, minus any entrance passage (§6.4) |
+  | `Core` | an IN column at a storey of the mass | solved (§6.7) |
+
+- The rind is 0–6 m thick on each side; attached-mass faces may fall on a 2 m grid. **Why solid:** it puts the exterior wall flush with the envelope face (the envelope fill of §5.1) without a second facade system, and thick walls suit the style.
+- Masses are at least 8 m apart, so a slot lies in at most one mass, and no `Core` slot touches another mass's `Core` slot.
+
+### 6.4 Mass plan and skeleton `[L3_MASS]`
+
+Every block that meets a mass computes the same **plan** for it, from the parent output alone. Masses are numbered in the order of their `Envelope` constraints. Mass `i` uses the RNG `Rng::new(s_i)`, where `s_i` is the `(i + 1)`-th `next_u64()` of `Rng::new(hash(seed, L2, parent, L3_MASS))`. Its draws, in order, are the spine pick, the door direction, then one `below(24)` per storey (step 3).
+
+**Plan class**
+- **Sealed:** the mass has no entrance. Every `Core` slot is `Solid`. With the rind, each block emits the envelope clipped to the block as one `CONCRETE` box.
+- **Vestibule-only:** exactly one IN column. Its storey-0 slot is a `Vestibule` (a dead-end entrance hall, which is allowed), and every other storey is `Solid`.
+- **Full:** two or more IN columns. Steps 1–4 below.
+
+**Full plan**
+1. **Entrance column `c_e`:** the IN column behind the doorway. Slot `(c_e, 0)` is a fixed `Vestibule`.
+2. **Spine `s`.** The candidates are the IN columns other than `c_e` whose removal leaves the IN set 4-connected. That is every column when both sides of the lattice are at least 2, and the two ends of a 1 × n row. Pick one with `below(n)`. The door direction is picked with `below(k)` among the directions (−z, +x, +z, −x) whose neighbour is IN. Call that neighbour `d`. The spine occupies every storey of column `s`, as fixed spiral tiles with rotation `r` (door towards `d`): `SpiralBase` at storey 0, `Spiral` in between, `SpiralTop` at the top storey.
+3. **Storey trees.** Each storey `t` draws `below(24)`, which selects a permutation (in lexicographic order) of the four neighbour directions. The targets at storey `t` are:
+   - `d`;
+   - `c_e`, at t = 0;
+   - for every block column range the mass meets, and every 4-connected component of (IN in that range) ∖ {s}, the component's column nearest `d` (Manhattan distance; ties go to lower z, then lower x).
+
+   A BFS from `d` over IN ∖ {s}, expanding neighbours in the drawn order, gives a tree. The **skeleton slots** at `t` are the union of its paths from `d` to the targets, and those paths' edges are **skeleton edges**. The spine's door edge `(s, d)` is a skeleton edge at every storey.
+4. **Entrance passage.** The rind slots between the doorway and `c_e` at storey 0 are solid minus a passage: the doorway's `u` range, from the storey line to 3 m, through the whole rind thickness, with a 4 Q floor slab in it.
+
+The **skeleton** `K` is the spine, the vestibule and the tree slots.
+
+**Why:** connectivity becomes a property of the plan rather than of the solve. Every block part of every storey contains a skeleton slot, so no block ever needs another block's solve to reach the entrance. The plan is a pure function of the parent, so blocks agree without communicating. The spine is the one vertical circulation every Full mass is guaranteed to have. Every other stair is optional variety from the solver.
+
+### 6.5 Tileset
+
+**Sockets.** Horizontal sides take `H = {W, O, D}` (3): wall, open (the room continues), door. Vertical sides take `V = {F, V1, V2, V3, P0, P1, P2, P3}` (8): floor (the upper slot has its own full floor), void of depth k above a floor, and spiral continuing with rotation r. **Adjacency rule:** sockets on a shared side must be equal. That is the only rule, and it is what makes propagation cheap (§6.7).
+
+**Geometry conventions** (slot-local Q; x, z ∈ [0, 128), y ∈ [0, 64)):
+- A **floor** is the slot's own slab, [0, 4) over the whole plan, so every walkable floor is at y = 4 Q. The ceiling is the slab of the slot above, which gives 60 Q (3.75 m) of clearance.
+- A **roof** is a slab at [60, 64), drawn by every `Core` slot whose upper neighbour is not a `Core` slot of the same mass. It gives 56 Q (3.5 m) of clearance.
+- A **wall** is a 4 Q half-wall on the slot's side, drawn by each slot, so back-to-back walls are 0.5 m thick. On rooms it spans y ∈ [4, 64), on voids [0, 64). Walls on z sides span the full side; walls on x sides are inset 4 Q at both ends.
+- A **door** is a wall with the opening `u ∈ [48, 80)` (2 m, centred) from the storey line to y = 48. That leaves 44 Q (2.75 m) clear and a lintel at [48, 64).
+- Rotations are quarter-turns about the slot's vertical axis. Everything is in whole Q, because 128 is even.
+
+**Tiles.** Sides are listed −z, +x, +z, −x.
+
+| Family | Tiles | Horizontal | Down / up | Geometry | Material, kind |
+|---|---|---|---|---|---|
+| `Solid` | 1 | W W W W | F / F | the whole slot | `CONCRETE`, `Mass` |
+| `Room` | 81 | any of {W, O, D}⁴ | F / F | floor, walls and doors per socket, nothing on O | `CONCRETE`, `Mass` |
+| `Atrium` (a room under a void) | 16 | {W, O}⁴ | F / V1 | as `Room` | as `Room` |
+| `Void1`, `Void2` | 32 each | {W, O}⁴ | Vk / {F, Vk+1} | walls only, no floor | `CONCRETE`, `Mass` |
+| `Void3` | 16 | {W, O}⁴ | V3 / F | walls only | `CONCRETE`, `Mass` |
+| `Corridor` | 15 | D at the mouths, W elsewhere: straight 2, bend 4, tee 4, cross 1, dead end 4 | F / F | floor; solid everywhere except a passage 32 Q wide (`[48, 80)` across) and y ∈ [4, 48), from the centre to each mouth | `CONCRETE` solid, `GRATING` floor, `Mass` |
+| `SpiralBase` | 4 (r) | D at side r, W elsewhere | F / Pr | full floor plus the spiral | §6.5.1 |
+| `Spiral` | 4 | as `SpiralBase` | Pr / Pr | landing c0 and the lane-0 flat as its floor, plus the spiral | §6.5.1 |
+| `SpiralTop` | 4 | as `SpiralBase` | Pr / F | c0 and the lane-0 flat, pillar and walls; the rest is open down the well | §6.5.1 |
+
+There are 205 tiles in all, so a domain fits in four `u64` words. Outside the domain are the fixed `Vestibule` (a room whose outer side carries the doorway or passage and whose inner sides are D towards every `Core` neighbour) and the `Rind` and `Out` slots. Ramps are not used: a 15° ramp needs 15 m of run per storey, which does not fit a slot.
+
+#### 6.5.1 The spiral stair
+
+The stair is a square spiral round a solid 4 m pillar `[32, 96)²`. It climbs one storey per slot, so stacked spirals repeat identically.
+
+- **Layout.** The four corner landings are 28 Q squares inside the 4 Q walls: c0 at (−x, −z), c1 at (+x, −z), c2 at (+x, +z) and c3 at (−x, +z). The four lanes are 28 Q wide. Lane j runs along one side from cj to the next corner: lane 0 along −z towards +x, lane 1 along +x, lane 2 along +z, lane 3 along −x back to c0. Each lane starts with a flat at its corner's height and ends with a flight.
+- **Heights.** The landings are at 4, 20, 36 and 52 Q, each a 4 Q slab.
+- **Lanes 0–2.** A 39 Q flat, then a `StairRun` of 5 steps with a 3 Q rise and 5 Q tread (15 Q over 25 Q), then a 1 Q step onto the next corner.
+- **Lane 3.** A 44 Q flat, then a `StairRun` of 4 steps (12 Q over 20 Q) that ends at y = 64, then a 4 Q step onto the next slot's c0 at 68.
+
+Every rise and tread follows `traversal.md` §6, every final step is within the step-up, and no flight crosses the slot top.
+- **Headroom** under the next storey's copy: 49 Q (3.06 m) over every flight and 60 Q over every flat and corner, both above the 2.4 m minimum.
+- **Door.** On the −z side (rotation 0), it opens onto lane 0, which gives 23 Q (1.44 m) of flat floor plus the first step, wider than the 1.2 m minimum door.
+- **Materials.** Pillar, walls and slabs are `CONCRETE`; landings and flats are `GRATING`; flights are `METAL`. The kind is `StairTower`.
+- `SpiralBase` also has a full floor. The nook under lane 3's flat has 44 Q of headroom and is reached from c0. The nooks under lanes 1 and 2 are too low to walk, and the walkability extractor drops them.
+
+**Weights** (per tile; first guesses, tuned in P4.1.3). These are integers: computed in `f32` per §2, rounded toward zero, with a minimum of 1. Side factors are f(W) = 2, f(O) = 3, f(D) = 2.
+
+| Family | Weight per tile |
+|---|---|
+| `Solid` | `lerp(300, 3000, d)` |
+| `Room` | Π f(side), family total 2401 |
+| `Atrium` | Π f(side) × `lerp(0.1, 0.6, v)` |
+| `Void1–3` | Π f(side) × `lerp(0.6, 0.1, d)` ÷ (number of up variants) |
+| `Corridor` | `lerp(20, 160, d)` |
+| `Spiral*` (solver-placed) | `lerp(10, 60, v)` |
+
+**Style multipliers:** Pipeworks ×2 on `Corridor` (and on pipe runs, §6.9); Hollow Expanse ×2 on `Void`/`Atrium` and ×½ on `Solid`; Pillar Forest ×2 on `Spiral*`; the others ×1. Pipeworks also uses `METAL` for room half-walls. Material choice makes no draws.
+
+**Proved properties of the tileset** (each is an exhaustive unit test over the 205 tiles and every matching pair):
+- Every walkable tile has one floor region that touches each of its non-W sides at y = 4. For the spirals, the walkable surface is c0 plus the lane-0 flat, with the other storey reached through the spiral.
+- Every floor region has at least 2.4 m of headroom, except the declared spiral nooks.
+- Every step is ≤ 7 Q and every tread ≥ 4 Q.
+- No piece leaves its slot.
+- A void column is at most three slots deep, so every drop inside a mass is ≤ 12 m, below the 15 m fall threshold, and needs no railing (`traversal.md` §6).
+
+**Left to L4/L5:** wall panels, door frames, railings, grating detail, lamps, cables, window panels on facades, pipe brackets and bends.
+
+### 6.6 Boundary conditions and face agreement
+
+Before solving, the sockets of every `Core` slot's sides are fixed or restricted as follows:
+
+| Side faces | Socket |
+|---|---|
+| `Rind` or `Out` (the exterior), or the mass bottom or top | W horizontally, F vertically. The roof is drawn by the geometry rule in §6.5 |
+| a fixed slot (spine, vestibule) | that slot's socket |
+| a skeleton edge inside the block | restricted to {O, D}; both slots are restricted to walkable tiles |
+| a `Core` slot of the same mass across a **block X/Z face** | fixed from the face pattern (below) |
+| a `Core` slot across a **block Y face** | P_r on the spine column, F elsewhere. Voids and solver spirals therefore never cross block Y faces |
+
+**L3 face key.** A block face is `FaceKey { level: L3, owner, axis }` (`ports.md` §1). Its draws use `hash(seed, L3, owner, PORT_FACE_X | PORT_FACE_Z)`, the cross-level port salts (`ports.md` §7): no new salt is needed. A face pattern exists only on faces inside an L2 cell, because masses keep 8 m from L2 faces. Both blocks therefore share one parent, and so the same masses, plans and regime.
+
+**Face pattern** (X/Z faces). There are 16 × 8 slot pairs, iterated by storey `v`, then column `u`. Each pair draws `chance(lerp(0.04, 0.10, 1 − d))`, all 128 always, so the draw count is fixed. The socket of the pair is:
+- **D** if the pair is a skeleton edge;
+- otherwise **D** if both slots are free `Core` slots of the same mass and the draw fired;
+- otherwise **W**.
+
+Both blocks compute exactly the same pattern, so they agree without communicating (CLAUDE.md §3.4). **Why** D, never O, across faces: a room never spans two blocks, so each block's air spaces close within the block, and the sealing rule (§6.8) stays local.
+
+**L3 ports.**
+- **Cascade.** L2 ports on L2 faces that coincide with this block's faces, clipped to the block's face, with the same kind; then the `Entrance` ports whose doorway lies in this block (converted to block-local space).
+- **Own ports.** Every D on an X/Z block face becomes a `Walkway` port: `u` is the column's offset + [48, 80), `v0` is the storey line + 4 Q (the floor on both sides), and `v1` is the storey line + 48 Q. Every spine crossing of a Y face becomes a `StairLanding` port over the 128 × 128 Q column.
+- **Numbering:** cascade, then entrances, then own ports by face (−X, +X, −Y, +Y, −Z, +Z), each by (`v`, `u`).
+- **Margin:** L3 own ports keep 3 m from column edges, so they never touch a face edge (`ports.md` §2).
+- Crossings of L2 internal structure over block faces (deck tops, skywalk slabs) are **not** listed. They are structural, already final, and nothing finer realizes them.
+
+### 6.7 Solver `[L3_SOLVE]`, `[L3_RETRY]`
+
+Model synthesis over the block's free `Core` slots, with the boundary conditions of §6.6 fixed. There is no backtracking.
+
+1. **Initial domains.** Every free `Core` slot starts with all 205 tiles, restricted by its fixed sides, its skeleton restrictions and its storey (no up-P in the top storey of the mass, no down-V in storey 0). Fixed slots are pre-collapsed and act only through their sockets.
+2. **Propagation.** AC-3 with a FIFO queue, seeded in slot order. For a slot and a direction, the **present sockets** are the sockets on that side among its remaining tiles: at most 3 or 8 values, each tested with a precomputed 256-bit mask per (direction, socket). The neighbour's domain is ANDed with the union of the masks for the opposite side of the present sockets. A changed neighbour is enqueued if it is not already queued. An empty domain is a **contradiction**, and the attempt fails.
+3. **Selection.** Collapse the uncollapsed slot with the fewest remaining tiles (popcount), with ties going to the lowest slot index. **Why this rule:** fewest-remaining avoids most contradictions, and the index tie-break keeps it deterministic.
+4. **Choice.** `pick_weighted` over the remaining tiles' weights (§6.5), in tile-id order: exactly one draw per collapse. Then propagate.
+5. **Acceptance:** §6.8.
+
+**RNG.**
+- Attempt 0 uses `Rng::new(hash(seed, L3, block, L3_SOLVE))`.
+- Attempt `k` (1 ≤ k < K) uses `Rng::new(q_k)`, where `q_k` is the k-th `next_u64()` of `Rng::new(hash(seed, L3, block, L3_RETRY))`.
+- The draws within an attempt are only the per-collapse picks, in collapse order. Pipe draws are separate (§6.9).
+
+**Retries: K = 6, then the fallback.**
+- Under independent attempts, 99.9 % success needs a per-attempt failure rate `q` with `q⁶ ≤ 10⁻³`, so `q ≤ 0.32`.
+- Socket equality plus `Room`'s full {W, O, D}⁴ alphabet means a horizontal contradiction cannot arise unless vertical sockets (spirals, voids) pin a slot's sides. The expected `q` is therefore small (a few per cent), and K = 6 leaves a wide margin for "hard" blocks whose failures are correlated.
+- Six attempts at about 0.5 ms, plus the fallback, stay within the 5 ms budget (P4.1.5).
+- If P4.1.3 measures a fallback rate above 0.1 %, the tile weights and face-opening rate are tuned, not K.
+
+**Cost bound.** A block has at most 1024 slots, domains of four words, and at most 8 sockets per direction. One propagation step therefore costs at most 2 × 8 × 4 word operations, and selection is a linear scan of 1024 popcounts per collapse, which is about 1 M simple operations per attempt. All buffers are fixed-size arrays reused per worker, with no allocation inside the loop. Typical attempts are expected to take 0.2–0.5 ms in release.
+
+### 6.8 Acceptance, sealing and the fallback
+
+After an attempt collapses every slot, build two slot graphs over the block's `Core` slots:
+- the **walk graph**: O or D sides between walkable slots, and P sides between stacked spirals;
+- the **air graph**: every non-W, non-F side (O, D, Vk, Pr).
+
+A walkable slot is any `Room`, `Atrium`, `Corridor`, spiral or `Vestibule`.
+
+1. **Seal.** Every air component that contains no skeleton slot and no face D becomes `Solid`. It is closed: only W and F separate it from everything else, so nothing outside can see into it.
+2. **Collapse dead voids.** Process the void slots bottom-up. A void whose lower neighbour is now `Solid` becomes `Solid`, unless it has an O side to a walkable slot of the walk component of `K`. In that case the solid top becomes its floor, one 4 Q step below the rooms beside it. This prevents pits that can be fallen into but not left.
+3. **Accept** if every remaining walkable slot is walk-connected, inside the block, to a skeleton slot. Otherwise the attempt fails. The only way to fail is a face door whose room cannot reach the skeleton.
+
+**Fallback (always solvable, no RNG).**
+- **Rooms.** Let R be the free `Core` slots that are:
+  - skeleton slots;
+  - on a **fallback path**: a BFS at one storey, inside the block and the same IN component, avoiding the spine, from each face-D slot to the nearest skeleton slot;
+  - or adjacent to a fixed slot's D side.
+
+  Each slot in R is a `Room` (up F) with D on every side whose neighbour is in R or is a fixed D, unless that side is fixed W. Every other side is W.
+- **Everything else** free is `Solid`.
+
+**Lemma L3-1 (the fallback is legal for every boundary condition).** Sockets agree on every side:
+- **R–R:** D on both sides, except where fixed W, and then W on both.
+- **R–Solid:** W–W.
+- **R–fixed:** the fixed socket. The spine's only D faces `d`, which is a skeleton slot at every storey and so in R. The vestibule's D sides face `Core` neighbours, all in R. Rind/Out sides are W.
+- **Face pattern:** a face D has both of its slots in R (they are fallback-path roots); a W stays W.
+- **Vertical:** every Room and Solid has F/F; the spine is a fixed P stack; block Y faces are F off the spine.
+
+Every fallback path exists, because step 3 of §6.4 puts a target in every IN component of every block part at every storey. Every tile used exists: `Room` with sides in {W, D}, and `Solid`. The construction uses only the boundary conditions, so it exists for every combination of entrance, spine, skeleton and face pattern the parent can produce.
+
+**Lemma L3-2 (skeleton connectivity).** In a Full mass, `K` is connected in the walk graph across blocks, and it contains the vestibule:
+- each storey's tree is connected (a BFS tree over IN ∖ {s});
+- tree edges are O/D inside a block and fixed D across block faces, in both blocks;
+- `d` meets the spine's door at every storey;
+- the spine's P stack joins all storeys;
+- `c_e` is a target at storey 0.
+
+**Lemma L3-3 (block closure).** In every accepted layout, solved or fallback:
+- every walkable slot is walk-connected inside its block to `K` (acceptance rule 3; for the fallback, by its paths);
+- every face D is joined to `K` on both sides;
+- every other air space is sealed.
+
+**Lemma L3-4 (geometry realizes the slot graph).** Equal floors at y = 4 in every storey, with the tile properties of §6.5, turn every walk-graph edge into a link of the walkability `Nav` (`primitives.md` §6). Pipes keep at least 2.75 m clear (§6.9), so they remove no link.
+
+**Theorem L3 (L3 attaches to N).** Every L3 port, every entrance and every unsealed L3 walkable surface connects to N **inside the parent L2 cell**. The chain is:
+1. Lemmas 3 and 4 join any of them to `K`.
+2. Lemma 2 joins `K` to the vestibule.
+3. The vestibule opens on the entrance.
+4. The entrance's apron is deck, which is N (§6.2), or the attached mass's skywalk, which L2 connects to N (§5.1).
+
+This is CLAUDE.md §3.5 at L3. "Inside that cell" is read as **inside the parent L2 cell**: a block buried in a mass contains no part of N, so the per-block form is Lemma 3 ("reaches the mass skeleton"). The validator checks the theorem directly (§6.11).
+
+### 6.9 Pipe runs `[L3_PIPE]`
+
+- **Pass.** Pipes are an overlay, added after acceptance, so they never affect solvability. The RNG is `hash(seed, L3, block, L3_PIPE)`. Draws, in order:
+  - the run count `n = below(N + 1)`, with `N = lerp(1, 6, d)`, doubled in Pipeworks;
+  - then per run: the storey `below(16)`, the axis `below(2)`, the line `below(8)`, the pipe count `range_i32(1, 4)`, and three offsets `below(5)`. All three offsets are always drawn.
+- **Route.** A run follows the longest stretch of consecutive `Room`, `Atrium` and `Void` slots on that line and storey that contains the line's first such slot. It never crosses the block boundary, a `Rind` slot, or any other tile. If there is no such slot, the run is empty, and its draws still count.
+- **Geometry.**
+  - Each pipe is a horizontal `Cylinder` of radius 4 Q along the run, with its axis at y = 52 Q above the storey line. That occupies y ∈ [48, 56), level with the underside of the door lintels, and leaves 44 Q (2.75 m) clear above the floor.
+  - Pipes are placed across the slot at 16 Q + 24 Q × offset.
+  - Material `PIPE`, kind `Pipe`, collidable.
+  - Pipes pass through half-walls; overlapping solid is allowed (`primitives.md` §3, union).
+
+### 6.10 Output
+
+`l3_block(seed, l2_cache, block) -> (CellOutput, L3Layout)`. Both are pure functions of their arguments, and the golden digest covers both.
+
+- **`primitives`**, in this order:
+  1. `Rind` and `Solid` slots merged into maximal boxes: runs along x, then equal runs along z, then along t. The merge is pinned by golden tests.
+  2. Every other slot's tile pieces, in slot order, each tile's pieces in a fixed order.
+  3. The pipes.
+
+  Sealed masses are one box per block.
+- **`ports`:** as in §6.6.
+- **`child_constraints`**, in this order:
+  1. a `ForcedPort` for every port;
+  2. `KeepOut` over every door passage (the opening plus 1 m on each side, floor to lintel);
+  3. `KeepOut` over every spiral slot's interior minus the pillar;
+  4. `KeepOut` over every entrance passage and vestibule doorway;
+  5. the parent's `Zone`s clipped to the block.
+- **`meta`:** `flags` (copied SANCTUARY or VISTA if a zone meets the block), plus a new `L3Meta { attempt: u8, fallback: bool, sealed_slots: u16 }`. `attempt` is 0 to K − 1, and K when the fallback was used.
+- **`L3Layout`:** per slot, the class, the mass index, the tile id and the sealed flag; plus the pipe runs. It is the hand-off to L4 (§7) and to the slice tool.
+- **Budget.** At most 4096 primitives per block, checked by a test.
+
+### 6.11 Validator (P4.1.4)
+
+`check_l3(seed, cache, l2_cell)` works per L2 cell, because Theorem L3 is stated inside the parent L2 cell.
+
+**Building the Nav:**
+1. the L1 window (as in `check_cell`);
+2. the L2 output with the `ENVELOPE` primitives removed;
+3. every active block's L3 primitives, shifted into L2-local space by the exact offset `(b mod 8) × 1024 Q`.
+
+Plates of L1 origin are N, as before.
+
+**Required:**
+1. Every non-lift L2 port still has floor and reaches N. L3 must not break L2.
+2. Every entrance has floor outside (apron deck or skywalk landing) and inside (vestibule), and both reach N.
+3. Every L3 own port has floor on both sides of its opening (`plates_at_port`), and both reach N.
+4. **No stranded floor:** every plate of L3 origin reaches N, except plates on an envelope's top (roofs). This also catches pits and unreachable rooms, which a ports-only check would miss.
+5. No L3 primitive leaves its block. No collidable L3 solid lies outside an envelope or meets a parent `KeepOut`.
+6. **Envelope fill:** every envelope face is covered by L3 solid within 0.5 m of its plane over at least 75 % of its area (§5.1).
+
+Headroom and steps are enforced through the Nav (plates need 29 Q of headroom, links ≤ 7 Q), and the 2.4 m design clearance is proved per tile (§6.5). `check_random_l3` samples L2 cells in a fixed order on several threads, like `check_random`, until the active blocks reach the target count.
+
+### 6.12 Streaming and rendering hooks
+
+- **Chunks.** The streamer requests an L3 chunk only for **active** blocks (listed cheaply from the L2 output, §6.1) within `l3_radius_m = 300 m` of the camera, the near band of PLAN.md §4. Distance is measured to the block's AABB. A 32 m hysteresis applies. Priority sits below the L2 near chunks.
+- **Swap per mass.** A mass's L3 blocks are drawn, and collided with, only once **all** of its blocks are resident: at most 3 × 5 × 3 = 45. The L2 chunk then stops drawing that mass's envelope. Until then, the envelope is drawn and collided with. This follows the "finest resident level" rule (`primitives.md` §5) and avoids a half-built mass.
+- **Far never simplifies fine.** The mid band draws L2 envelopes, the far band draws L1 data. No L3 mesh is ever decimated into a farther band. Consistency between the envelope and its L3 facade comes from the envelope fill (§5.1), which is checked by P2.7.1 and P6.1.3.
+- **Expectations,** to be measured in P4.1.5 and P4.2.3:
+  - **Per active block:** 300–1500 primitives (cap 4096) and 10–40 k triangles after internal-face removal, with a worst case of about 120 k. Output is about 30–100 KB.
+  - **Active blocks within 300 m:** about 20–150, depending on density. That is roughly 0.5–5 M triangles in dense regimes, which **risks** the 6 ms geometry budget. L4 instancing and the measurement in P4.2.3 decide it, and any miss is reported (CLAUDE.md §4).
+  - **Generation:** at under 5 ms per block on 8 workers, about 1600 blocks/s, enough for a 100 m/s tram crossing the 300 m band in 3 s.
+
+### 6.13 GEN_VERSION and golden tests
+
+- L3 is a pure consumer of L2. Building L3 (P4.1.2–P4.1.5) changes no L2 output, so the L2 golden digests stay valid. Until P4.1.6, L3 is reachable only through `l3_block` (tests, tools, bots), not through the engine's generator entry. The entrance function (§6.2) is written first and called directly by L3.
+- **One bump, 3 → 4,** in the commit that lands P4.1.6. That commit makes L2 emit entrances, aprons and links (an L2 output change) and enables L3 in the generator entry (new output for a level that had none). Both changes are deliberate, so the L2 golden digests are regenerated in that commit.
+- 100 L3 golden blocks (active blocks only, picked deterministically, like the existing per-level lists) are added to `tests/golden/cells.txt` when P4.1.3 lands. Their digests cover `CellOutput` and `L3Layout`. They do not change at the bump, because `GEN_VERSION` is not hashed.
+
+### 6.14 Test plan
+
+| Item | Test | Size | Pass |
+|---|---|---|---|
+| P4.1.1 | Spec review against this table | — | user sign-off |
+| P4.1.2 | Toy tilesets: a 2-tile checkerboard on 4 × 1 × 4; a 3-tile pipe set; a forced contradiction; fixed boundaries respected | exhaustive | exact layouts; a contradiction returns `Err`, never panics |
+| P4.1.2 | Exhaustive tile proofs (§6.5): floor regions, sides, headroom ≥ 2.4 m, steps, slot bounds; and every matching tile pair links in `Nav` | 205 tiles, all matching pairs | all pass |
+| P4.1.2 | Pinned solve: one 8 × 16 × 8 block at a fixed seed | 1 | layout digest equal to its pin (draw order) |
+| P4.1.3 | Fallback rate over active blocks sampled across 8 seeds | 10⁵ blocks | fallback ≤ 0.1 %; histogram of attempts recorded |
+| P4.1.3 | Forced fallback (attempts = 0), then validate the L2 cells | 10⁴ blocks | 0 failures in `check_l3` |
+| P4.1.4 | `check_random_l3` | L2 cells covering ≥ 10⁴ active blocks | 0 failures of checks 1–6 |
+| P4.1.4 | Face agreement: for every pair of adjacent active blocks in the sample, both compute the same ports and the same 128 sockets for the shared face | ≥ 10⁴ faces | identical |
+| P4.1.4 | Determinism: blocks generated single-threaded in slot order vs 8 threads in shuffled order, with fresh vs shared L2 caches | 4096 blocks | identical digests |
+| P4.1.5 | Bench `cargo bench -p gen --bench l3`, native Windows release | 1000 busiest blocks plus 1000 empty | p99 < 5 ms busy; empty < 20 µs; recorded in PLAN.md §11.4 |
+| P4.1.6 | Entrances: masses without one | 10⁴ L2 cells | ≤ 1 %, reported |
+| P4.1.6 | Loop frequency: fired / candidates | ≥ 10⁴ candidates | within 0.30 ± 0.015 (about 3σ) |
+| P4.1.6 | Loops exist: realized extra links | same cells | ≥ 1 in at least 20 % of cells with ≥ 3 nodes |
+| P4.1.6 | `check_l3` after the change | ≥ 10⁴ active blocks | every port and entrance reachable; 0 failures |
 
 ## 7. L4: Modules (8 m), outline
 
 - Places code-generated kit pieces (panels, railings, grating, pipes, cables, door frames, lamps) on L3 surfaces and edges `[MODULE]`.
+- **Input from L3 (fixed by P4.1.1).** An L4 cell holds two slots of its parent block's `L3Layout` (§6.10). L4 reads the layout through an L3 cache, as L2 reads L1, and derives its module slots from it rather than from parsing primitives:
+
+  | Module slot | Taken from |
+  |---|---|
+  | Wall faces | the inner face of every W side of a walkable slot. Facade faces (the outer faces of the rind and of exterior W sides) take `NO_COLLIDE` window and emissive panels |
+  | Floor cells | every walkable slot's floor at y = 4 Q. Corridors and spiral flats take grating overlays |
+  | Door openings | every D side (door frames). L3 ports and entrances are `ForcedPort`s and stay open |
+  | Edges | `Room` O sides facing a void (optional atrium balustrades; every drop is ≤ 12 m, §6.5). Railing modules replace the look of L2's P0.8.8 railing boxes in place. No edge inside a mass needs a guard |
+  | Lamp sockets | the ceiling centre of every `Room`, `Atrium`, `Corridor` and `Vestibule` slot, every spiral corner, and the deck link paths of §6.2 |
+  | Pipe routes | the runs of §6.9 (brackets, and bends where a run meets a wall), plus `NO_COLLIDE` cable bundles |
+
+- **Collision rule for L4.** Collidable additions only within 0.25 m of an L3 wall face, or at least 2.65 m above a storey line, and never inside an L3 `KeepOut`. Everything else is `NO_COLLIDE`. This keeps every walk link of Lemma L3-4 intact without re-validating.
 - L5 dressing adds visual-only props inside L4 cells `[DRESSING]`.
 - Specified in P4.2.
 
 ## 8. Salt registry (initial)
 
-Values follow the blocks in `hashing.md` §4. Port salts are defined in `ports.md`.
+Values follow the blocks in `hashing.md` §4. Port salts are defined in `ports.md`. L3 face patterns (§6.6) reuse `PORT_FACE_X` and `PORT_FACE_Z` at level L3. `L3_MASS` belongs to the L3 block although it is keyed by the L2 parent, because every block of a mass must derive the same plan.
 
 | Salt | Value | Key | Use |
 |---|---|---|---|
@@ -294,6 +629,11 @@ Values follow the blocks in `hashing.md` §4. Port salts are defined in `ports.m
 | `RAMP` | `0x0305` | cell (L2) | ramp and stair-run variants |
 | `EDGE_GUARD` | `0x0306` | cell (L2) | guarded vs unguarded edges |
 | `VISTA` | `0x0307` | cell (L2) | vista existence and side |
-| `L3_RETRY` | `0x0401` | cell (L3) | WFC sub-seeds |
+| `TRUNK_MASS` | `0x0308` | cell (L2) | trunk-attached masses (§5.1, P0.8.9) |
+| `MASS_ENTRANCE` | `0x0309` | cell (L2) | deck-mass entrance side and column (§6.2) |
+| `L3_RETRY` | `0x0401` | cell (L3) | sub-seeds of solve attempts 1 to K − 1 (§6.7) |
+| `L3_SOLVE` | `0x0402` | cell (L3) | solve attempt 0: one `pick_weighted` per collapse (§6.7) |
+| `L3_MASS` | `0x0403` | cell (L2), the parent | mass plans: per-mass sub-seeds, spine, door direction, storey tree orders (§6.4) |
+| `L3_PIPE` | `0x0404` | cell (L3) | pipe runs (§6.9) |
 | `MODULE` | `0x0501` | cell (L4) | module variants |
 | `DRESSING` | `0x0601` | cell (L4) | L5 props |

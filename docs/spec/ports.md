@@ -51,6 +51,23 @@ Every `Port` has a `FaceKey`: ports exist only on faces. A lift core's internal 
   - `LiftStop` and `StairLanding` are at least 8 × 8 m.
 - **Margins.** Ports a level draws itself keep **64 m** from the face edges at both L1 and L2, so they never touch an edge or corner shared with a third cell. At L1 that is `l1::SEPARATION`: `DeckContinuation` and `BridgeEnd` spans lie in `[64 m, 4032 m)`, and a `LiftStop` is the core footprint, which keeps the same 64 m. At L2 it is `l2_port::MARGIN`, which applies to own (`Walkway`) ports only. Cascaded L2 ports are L1 ports or L1 pieces clipped to the L2 tile, so they can touch the tile's edge (§4.2).
 
+### 2.1 Internal ports: entrances (P4.1.6)
+
+A doorway in a mass envelope lies inside its L2 cell, not on a face, and the `Port` fields above cannot place it. Hence one appended kind (`PortKind` is append-only):
+
+```rust
+pub enum PortKind {
+    // … the five kinds above …
+    Entrance { plane: Q }, // doorway in an envelope face (levels.md §6.2)
+}
+```
+
+- `face` is `FaceKey { level, owner: the emitting cell, axis }`. It names the level and the axis only; no cell face lies there.
+- `plane` is the envelope face's coordinate along `axis` in the owner's local space. The doorway faces away from the mass, whose envelope has a face on that plane; masses are 8 m apart, so the envelope is unique.
+- `rect` uses the usual `(u, v)` of the axis, in the owner's local space. `v0` is the floor outside. The opening is 4 m wide and 3 m tall, and the floor inside is 4 Q higher, which leaves 2.75 m clear.
+- At L3, the block that holds the doorway lists it with its own `owner` and a block-local `plane` (`levels.md` §6.6).
+- Entrances never cross a face, so Lemma B does not apply. They join N through their apron or skywalk (`levels.md` §6.2).
+
 ## 3. Deriving ports
 
 A face's ports come from two inputs only:
@@ -101,7 +118,7 @@ L2 has no own ports on Y faces. Vertical movement inside an L1 cell uses L2 towe
 
 ### 4.3 L3 and finer
 
-L2 ports and envelope entrances become L3 boundary conditions (P4.1.1). The same rules apply.
+L2 ports and envelope entrances become L3 boundary conditions (P4.1.1). The same rules apply. L3 cascades L2 ports that lie on its block faces, lists entrances, and derives its own `Walkway` and `StairLanding` ports from the L3 face key and the parent's mass plans (`levels.md` §6.6). Own L3 ports keep 3 m from column edges, not 8 m.
 
 ## 5. The cascade (L1 → L2 → L3)
 
@@ -143,7 +160,7 @@ By §5, finer levels do not obstruct any of this.
 - the walkway solver links everything to the deck or core it stands on,
 - the validator (P0.9) rejects any cell that fails, as a generator bug.
 
-L3 has the same obligation toward L2 surfaces. Deliberately sealed rooms and dead ends are marked as such and are exempt.
+L3 has the same obligation toward L2 surfaces, stated as Theorem L3 in `levels.md` §6.8. For L3, "within the cell" means within the parent L2 cell, because a block buried inside a mass contains no part of N. Deliberately sealed rooms and dead ends are marked as such and are exempt.
 
 **Corollary (horizon promise, reachability).** Every walkable surface that is not marked sealed is reachable from every other one. Every far-visible structure (deck, bridge, trunk) can be reached by walking:
 - decks and bridges are part of N,
