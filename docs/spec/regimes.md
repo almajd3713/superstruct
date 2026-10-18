@@ -131,7 +131,8 @@ Over 10⁵ cells, each frequency must fall within ±10% of its weight / 1000 (P0
   - a 64 × 64 m footprint under the L1 separation rule (`levels.md` §4.0): the min corner is drawn on a 16 m step, x then z, with the 64 m margin. If the footprint comes within 64 m of the L1 core, the staircase is absent from that L1 column.
 - Placement is drawn **before** the trunk, shaft and chasm, so those avoid it.
 - A switchback of `StairRun`s ascends without end, with landings joined to every deck it crosses. It is an L1 keyed feature.
-- Geometry details are in P5.2.3. Until then, the generator reserves the footprint as a full-height `KeepOut` in every cell of the column, cuts it out of every deck, and routes bridges around it (`l1_bridge`).
+- The generator reserves the footprint as a full-height `KeepOut` in every cell of the column, cuts it out of every deck, and routes bridges around it (`l1_bridge`).
+- **As implemented** (`worldgen::l1_stair`, P5.2.3, `GEN_VERSION` 6): a square spiral inside the footprint, identical in every L1 cell of the column. Each side carries one 4 m wide `StairRun` of 128 steps (0.25 m rise, 0.375 m tread: 32 m up over 48 m), and an 8 m landing slab in each corner joins one flight to the next. A turn is 128 m, so a cell holds 32 turns and its top landing is the bottom landing of the cell above. The flights hug the footprint's edge, so a deck around the hole meets the flight that passes its height. Cavity cells hold no staircase.
 
 ### 5.3 Not events
 

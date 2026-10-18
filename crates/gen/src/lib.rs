@@ -13,6 +13,7 @@ pub mod l1_bridge;
 pub mod l1_port;
 pub mod l1_query;
 pub mod l1_rim;
+pub mod l1_stair;
 pub mod l2;
 pub mod l2_attach;
 pub mod l2_column;
@@ -44,4 +45,4 @@ pub mod walk;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 5;
+pub const GEN_VERSION: u32 = 6;

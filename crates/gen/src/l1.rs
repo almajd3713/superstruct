@@ -359,6 +359,9 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     let holes = deck_holes(seed, cell);
     let bites = rim_bites(seed, &cavity, cell, &ds, &holes, t.as_ref());
     out.primitives.extend(deck_pieces(&ds, &holes, &bites));
+    if let Some(foot) = stair {
+        out.primitives.extend(crate::l1_stair::stair_pieces(foot));
+    }
     // Children keep clear of the bitten slabs.
     for (deck, rects) in ds.iter().zip(&bites) {
         out.child_constraints
@@ -1444,7 +1447,12 @@ mod tests {
                         .any(|c| matches!(c, ChildConstraint::KeepOut { aabb } if *aabb == keep)),
                     "{cell:?} lacks the staircase KeepOut"
                 );
-                for p in &out.primitives {
+                // The staircase's own flights and landings fill the footprint (P5.2.3).
+                for p in out
+                    .primitives
+                    .iter()
+                    .filter(|p| p.kind != FeatureKind::STAIR_TOWER)
+                {
                     let bb = p.aabb();
                     let inside = bb.min.x < want.x1
                         && want.x0 < bb.max.x

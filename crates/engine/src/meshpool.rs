@@ -833,6 +833,63 @@ mod tests {
         }
     }
 
+    /// Prints standpoints for the infinite staircase: on a deck beside the hole, and floating
+    /// 150 m off its corner at the middle of an L1 cell.
+    #[test]
+    #[ignore = "diagnostic"]
+    fn print_staircase_viewpoints() {
+        use worldgen::key::ColumnKey;
+        use worldgen::l1::{DECK_REGION_LOG2, decks, stair_footprint};
+        let seed = WorldSeed(0);
+        let mut shown = 0;
+        for lx in -40..40i64 {
+            for lz in -40..40i64 {
+                let l0 = ColumnKey {
+                    level: Level::L0,
+                    x: lx,
+                    z: lz,
+                };
+                let Some(st) = worldgen::regime::rare_stair(seed, l0) else {
+                    continue;
+                };
+                let col = ColumnKey {
+                    level: Level::L1,
+                    x: lx * 8 + i64::from(st.l1_x),
+                    z: lz * 8 + i64::from(st.l1_z),
+                };
+                let Some(foot) = stair_footprint(seed, col) else {
+                    continue;
+                };
+                let m = |v: i32| f64::from(v) / 16.0;
+                for y in 0..4i64 {
+                    let cell = CellKey::new(Level::L1, I64Vec3::new(col.x, y, col.z));
+                    let Some(deck) =
+                        decks(seed, worldgen::key::LayerKey::of(cell, DECK_REGION_LOG2))
+                            .first()
+                            .copied()
+                    else {
+                        continue;
+                    };
+                    let origin = cell.coords.as_dvec3() * 4096.0;
+                    // Beside the hole's west edge on the deck, looking east at it (yaw 270).
+                    let p = origin
+                        + glam::DVec3::new(m(foot.x0) - 6.0, m(deck.top) + 1.65, m(foot.z0) + 32.0);
+                    let sector = (p / 1024.0).floor();
+                    let local = p - sector * 1024.0;
+                    println!(
+                        "deck: SUPERSTRUCT_SECTOR={},{},{} SUPERSTRUCT_LOCAL={:.1},{:.1},{:.1} SUPERSTRUCT_YAW=270",
+                        sector.x, sector.y, sector.z, local.x, local.y, local.z
+                    );
+                    shown += 1;
+                    break;
+                }
+                if shown >= 3 {
+                    return;
+                }
+            }
+        }
+    }
+
     #[test]
     fn an_l3_chunk_carries_its_interior_modules_and_ao_boxes() {
         let seed = WorldSeed(0);
