@@ -526,9 +526,10 @@ fn far_instances_draw_like_the_meshed_primitives() {
         &a,
     )
     .unwrap();
-    // Cylinders are polygons with a different side count, so only their rims may differ.
+    // Far cylinders are smooth-shaded with their own side count, the meshed ones flat, so
+    // only the cylinders may differ.
     let (_, mean) = image_diff(&a, &f);
-    assert!(mean < 0.6, "mean difference {mean}");
+    assert!(mean < 1.5, "mean difference {mean}");
     assert!(
         image_diff(&a, &vec![a[0]; a.len()]).1 > 1.0,
         "scene should not be empty"
@@ -894,5 +895,81 @@ fn half_resolution_horizon_matches_full_resolution() {
         .unwrap();
         assert!(overlap > 0.95, "coverage overlap {overlap}");
         assert!(mean < 6.0, "mean difference {mean}");
+    }
+}
+
+/// Far band to `reach_m` plus the horizon from there, in clear air, as one image.
+#[allow(clippy::cast_possible_truncation)] // the reach is a few tens of kilometres
+fn handoff_image(h: &Headless, reach_m: f64, cam: &Camera, size: (u32, u32)) -> Vec<u8> {
+    use engine::farinst::far_instances;
+    use engine::stream::{ChunkId, Detail, StreamConfig, desired_set};
+    use worldgen::cell::Level;
+    use worldgen::l1::l1_far_primitives;
+    use worldgen::seed::WorldSeed;
+    let seed = WorldSeed(0);
+    let cfg = StreamConfig {
+        l2_radius_m: 0.0,
+        l2_mid_radius_m: 0.0,
+        l1_full_radius_m: 0.0,
+        l1_far_radius_m: reach_m,
+    };
+    let mut wanted = Vec::new();
+    desired_set(&cfg, &cam.pos, Vec3::NEG_Z, &mut wanted);
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    for w in wanted
+        .iter()
+        .filter(|w| w.id.key.level == Level::L1 && w.id.detail == Detail::Far)
+    {
+        let ChunkId { key, .. } = w.id;
+        let Ok(b) = key.aabb_world() else { continue };
+        renderer.upload_far_chunk(
+            &h.queue,
+            b.min,
+            &far_instances(&l1_far_primitives(seed, key)),
+        );
+    }
+    renderer.set_horizon_enabled(true);
+    renderer.set_world_seed(seed.0);
+    renderer.set_horizon_start(reach_m as f32);
+    let params = FrameParams {
+        fog_density: 0.0,
+        ..PLAIN
+    };
+    h.render_with(&mut renderer, cam, size, params, &[])
+        .unwrap()
+}
+
+/// The far band and the horizon draw the same structure, so moving the handoff radius must
+/// not change the picture: any seam would show up as a difference between two radii.
+#[test]
+fn moving_the_handoff_radius_does_not_change_the_picture() {
+    let Some(h) = headless() else { return };
+    let size = (640, 360);
+    let start = WorldPos::new(I64Vec3::new(-2, -2, -3), Vec3::new(10.0, 745.0, 584.0)).unwrap();
+    for (n, yaw) in [0.0_f32, 2.1, 4.2].into_iter().enumerate() {
+        let mut cam = Camera::new(start, 70.0);
+        cam.yaw = yaw;
+        cam.pitch = 0.02;
+        let near = handoff_image(&h, 20_480.0, &cam, size);
+        let far = handoff_image(&h, 51_200.0, &cam, size);
+        let (max, mean) = image_diff(&near, &far);
+        eprintln!("yaw {yaw}: handoff 20 km vs 51 km, mean diff {mean:.3}, max {max}");
+        save_png(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("../../out/handoff-{n}-20km.png")),
+            size.0,
+            size.1,
+            &near,
+        )
+        .unwrap();
+        save_png(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("../../out/handoff-{n}-51km.png")),
+            size.0,
+            size.1,
+            &far,
+        )
+        .unwrap();
+        assert!(mean < 2.0, "mean difference {mean}");
     }
 }

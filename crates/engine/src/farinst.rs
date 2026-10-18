@@ -8,7 +8,7 @@ use worldgen::cell::Axis;
 use worldgen::prim::{Primitive, Q_PER_M, Shape};
 
 use crate::mesh::Mesh;
-use crate::primmesh::add_unit_cylinder;
+use crate::vertex::Vertex;
 
 pub const UNIT_CYLINDER_SIDES: usize = 32;
 const CYLINDER_BIT: u32 = 1 << 16;
@@ -104,6 +104,51 @@ pub fn far_instances(prims: &[Primitive]) -> FarData {
     data
 }
 
+/// A cylinder along y inside the unit box (radius 0.5), with smooth radial side normals so a
+/// far trunk shades like the horizon's exactly round one; the caps are flat.
+fn add_unit_cylinder_smooth(mesh: &mut Mesh, sides: usize) {
+    let ring = |k: usize| {
+        let a = std::f32::consts::TAU * k as f32 / sides as f32;
+        Vec3::new(a.cos(), 0.0, a.sin())
+    };
+    let base = mesh.vertices.len() as u32;
+    for k in 0..sides {
+        let r = ring(k);
+        let at = |y: f32| Vec3::new(0.5 + 0.5 * r.x, y, 0.5 + 0.5 * r.z);
+        mesh.vertices.push(Vertex::new(at(0.0), r, 0));
+        mesh.vertices.push(Vertex::new(at(1.0), r, 0));
+    }
+    for k in 0..sides as u32 {
+        let k1 = (k + 1) % sides as u32;
+        let (b0, t0, b1, t1) = (
+            base + 2 * k,
+            base + 2 * k + 1,
+            base + 2 * k1,
+            base + 2 * k1 + 1,
+        );
+        // Counter-clockwise seen from outside, matching the box faces.
+        mesh.indices.extend([b0, t0, t1, b0, t1, b1]);
+    }
+    for (y, normal) in [(0.0, Vec3::NEG_Y), (1.0, Vec3::Y)] {
+        let first = mesh.vertices.len() as u32;
+        for k in 0..sides {
+            let r = ring(k);
+            mesh.vertices.push(Vertex::new(
+                Vec3::new(0.5 + 0.5 * r.x, y, 0.5 + 0.5 * r.z),
+                normal,
+                0,
+            ));
+        }
+        for k in 1..sides as u32 - 1 {
+            if y == 0.0 {
+                mesh.indices.extend([first, first + k + 1, first + k]);
+            } else {
+                mesh.indices.extend([first, first + k, first + k + 1]);
+            }
+        }
+    }
+}
+
 /// The shared unit meshes: a box then a cylinder, in one vertex and one index buffer.
 pub struct UnitMeshes {
     pub mesh: Mesh,
@@ -116,7 +161,7 @@ pub fn unit_meshes() -> UnitMeshes {
     let mut mesh = Mesh::default();
     mesh.add_box(Vec3::ZERO, Vec3::ONE, 0);
     let (box_vertices, box_indices) = (mesh.vertices.len() as u32, mesh.indices.len() as u32);
-    add_unit_cylinder(&mut mesh, UNIT_CYLINDER_SIDES);
+    add_unit_cylinder_smooth(&mut mesh, UNIT_CYLINDER_SIDES);
     let cylinder_indices = mesh.indices.len() as u32 - box_indices;
     UnitMeshes {
         mesh,
