@@ -9,6 +9,9 @@ struct Instance {
     mesh: vec4<u32>,
 };
 
+// 64x64 blue-noise tile, ranks scaled to 0..1.
+@group(0) @binding(1) var blue_noise: texture_2d<f32>;
+
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
 
 // Far band: a primitive's bounding box in cell-local metres plus the owning cell's slot.
@@ -37,6 +40,9 @@ struct VsOut {
     @location(0) rel: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) @interpolate(flat) material: u32,
+    // Band cross-fade: magnitude is the fade level, the sign says whether the chunk is
+    // fading in (positive) or out (negative). The two rules are exact complements.
+    @location(3) @interpolate(flat) fade: f32,
 };
 
 fn oct_decode(e: vec2<f32>) -> vec3<f32> {
@@ -57,6 +63,7 @@ fn vs_main(in: VsIn) -> VsOut {
     out.clip = globals.view_proj * vec4<f32>(rel, 1.0);
     out.normal = oct_decode(in.normal_oct);
     out.material = in.material.x;
+    out.fade = bitcast<f32>(instances[in.draw].mesh.w);
     return out;
 }
 
@@ -90,6 +97,7 @@ fn vs_far(in: FarIn) -> VsOut {
     out.clip = globals.view_proj * vec4<f32>(rel, 1.0);
     out.normal = n;
     out.material = inst.attrs & 0xffffu;
+    out.fade = far_cells[inst.cell].w;
     return out;
 }
 
@@ -116,8 +124,31 @@ fn material_albedo(id: u32) -> vec3<f32> {
     }
 }
 
+// Blue-noise dither: true when this pixel belongs to the other band at this fade level.
+fn fade_discard(fade: f32, frag: vec4<f32>) -> bool {
+    let f = abs(fade);
+    if (f >= 1.0) {
+        return false;
+    }
+    let n = textureLoad(blue_noise, vec2<u32>(frag.xy) & vec2<u32>(63u), 0).r;
+    let keep_in = n < f;
+    let keep_out = n >= 1.0 - f;
+    return !select(keep_out, keep_in, fade >= 0.0);
+}
+
+// Depth prepass while chunks are fading: only the pixels the colour pass will keep.
+@fragment
+fn fs_prepass(in: VsOut) {
+    if (fade_discard(in.fade, in.clip)) {
+        discard;
+    }
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    if (fade_discard(in.fade, in.clip)) {
+        discard;
+    }
     let n = normalize(in.normal);
     let sun = normalize(vec3<f32>(0.4, 0.8, 0.3));
     let lambert = max(dot(n, sun), 0.0);

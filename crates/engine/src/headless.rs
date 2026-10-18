@@ -76,6 +76,19 @@ impl Headless {
         params: FrameParams,
         boxes: &[DebugBox],
     ) -> Result<Vec<u8>, ReadbackError> {
+        self.render_dt(renderer, camera, size, params, boxes, 0.0)
+    }
+
+    /// Like [`Headless::render_with`], advancing chunk fades by `dt` seconds.
+    pub fn render_dt(
+        &self,
+        renderer: &mut Renderer,
+        camera: &Camera,
+        size: (u32, u32),
+        params: FrameParams,
+        boxes: &[DebugBox],
+        dt: f32,
+    ) -> Result<Vec<u8>, ReadbackError> {
         let target = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("headless target"),
             size: wgpu::Extent3d {
@@ -106,6 +119,7 @@ impl Headless {
                 params,
                 boxes,
                 timer: None,
+                dt,
             },
         );
         self.queue.submit([encoder.finish()]);
@@ -160,6 +174,7 @@ impl Headless {
                     params,
                     boxes: &[],
                     timer: Some(&timer),
+                    dt: 0.0,
                 },
             );
             timer.resolve(&mut encoder);

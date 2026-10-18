@@ -392,6 +392,7 @@ impl App {
                     ),
                     boxes: &self.box_scratch,
                     timer: Some(&running.timer),
+                    dt: frame_time as f32,
                 },
             );
             let mode = mode_line(

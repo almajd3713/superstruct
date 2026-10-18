@@ -31,14 +31,17 @@ pub struct RendererSink<'a> {
 
 impl ChunkSink for RendererSink<'_> {
     fn upload(&mut self, chunk: &ChunkMesh) -> (ChunkHandle, u64) {
-        match &chunk.far {
+        let (handle, bytes) = match &chunk.far {
             Some(far) => self
                 .renderer
                 .upload_far_chunk(self.queue, chunk.origin, far),
             None => self
                 .renderer
                 .upload_chunk(self.device, self.queue, chunk.origin, &chunk.mesh),
-        }
+        };
+        // Streamed chunks fade in; a bare upload (tests, tools) is drawn at once.
+        self.renderer.begin_fade_in(handle);
+        (handle, bytes)
     }
 
     fn remove(&mut self, handle: ChunkHandle) {

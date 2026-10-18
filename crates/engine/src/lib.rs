@@ -20,6 +20,7 @@ pub mod hiz;
 pub mod input;
 pub mod mesh;
 pub mod meshpool;
+pub mod noise;
 pub mod overlay;
 pub mod primmesh;
 pub mod profile;

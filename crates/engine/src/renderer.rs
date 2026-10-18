@@ -10,6 +10,7 @@ use crate::farinst::{FarData, FarInstance, UnitMeshes, unit_meshes};
 use crate::gpu_timer::{GpuTimer, Zone};
 use crate::hiz::HizPass;
 use crate::mesh::Mesh;
+use crate::noise;
 use crate::shaders::ShaderSources;
 use crate::suballoc::{Range, SubAllocator};
 use crate::vertex::Vertex;
@@ -159,7 +160,9 @@ struct GpuChunk {
     /// Stable index into the culling pass's per-chunk visibility history.
     slot: u32,
     bytes: u64,
+    /// Target: fading in (true) or out (false).
     visible: bool,
+    fade: f32,
 }
 
 /// Everything that varies per frame.
@@ -170,6 +173,8 @@ pub struct FrameInput<'a> {
     pub params: FrameParams,
     pub boxes: &'a [DebugBox],
     pub timer: Option<&'a GpuTimer>,
+    /// Seconds since the previous frame, which advances chunk fades.
+    pub dt: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -202,6 +207,24 @@ impl Default for FrameParams {
     }
 }
 
+/// Seconds for a chunk to fade in or out when bands swap or the load radius moves.
+const FADE_SECONDS: f32 = 0.5;
+
+/// Signed fade level the shaders read: negative while the chunk fades out.
+fn signed_fade(fade: f32, fading_in: bool) -> f32 {
+    if fading_in { fade } else { -fade }
+}
+
+/// Moves `fade` towards its target by `dt` seconds.
+fn step_fade(fade: f32, fading_in: bool, dt: f32) -> f32 {
+    let d = dt / FADE_SECONDS;
+    if fading_in {
+        (fade + d).min(1.0)
+    } else {
+        (fade - d).max(0.0)
+    }
+}
+
 /// Most far cells and instances resident at once; beyond that new ones are not drawn.
 const FAR_MAX_CELLS: usize = 32768;
 const FAR_MAX_INSTANCES: u32 = 1 << 20;
@@ -215,7 +238,9 @@ struct FarChunk {
     /// Cell-local bounding sphere.
     bounds: [f32; 4],
     bytes: u64,
+    /// Target: fading in (true) or out (false).
     visible: bool,
+    fade: f32,
 }
 
 /// Far-band chunks as instance ranges, drawn from one shared unit box and cylinder.
@@ -287,9 +312,9 @@ impl FarState {
         self.cell_scratch.resize(self.next_slot as usize, [0.0; 4]);
         for c in &self.chunks {
             let o = camera_relative(&c.origin, cam);
-            self.cell_scratch[c.slot as usize] = [o.x, o.y, o.z, 0.0];
+            self.cell_scratch[c.slot as usize] = [o.x, o.y, o.z, signed_fade(c.fade, c.visible)];
         }
-        for c in self.chunks.iter().filter(|c| c.visible) {
+        for c in self.chunks.iter().filter(|c| c.fade > 0.0) {
             let o = camera_relative(&c.origin, cam);
             let centre = o + Vec3::new(c.bounds[0], c.bounds[1], c.bounds[2]);
             if !frustum.sphere_visible(centre, c.bounds[3]) {
@@ -341,6 +366,11 @@ pub struct Renderer {
     far: FarState,
     /// Two-phase occlusion culling (needs the prepass and indirect draws).
     occlusion: bool,
+    /// Some chunk is mid-fade, so the prepass needs its fragment stage.
+    fading: bool,
+    fades_enabled: bool,
+    noise: wgpu::Texture,
+    noise_uploaded: bool,
     /// Culling frustum held fixed in the world, with the camera position it was taken at.
     frozen: Option<(Frustum, WorldPos)>,
     freeze_pending: bool,
@@ -399,24 +429,57 @@ impl Renderer {
         });
         let globals_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals bgl"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
         });
+        let noise = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("blue noise"),
+            size: wgpu::Extent3d {
+                width: noise::TILE as u32,
+                height: noise::TILE as u32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let noise_view = noise.create_view(&wgpu::TextureViewDescriptor::default());
         let globals_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globals bg"),
             layout: &globals_bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: globals_buf.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: globals_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&noise_view),
+                },
+            ],
         });
 
         let instances_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -504,6 +567,10 @@ impl Renderer {
             cull,
             far,
             occlusion: true,
+            fading: false,
+            fades_enabled: true,
+            noise,
+            noise_uploaded: false,
             frozen: None,
             freeze_pending: false,
             free_slots: Vec::new(),
@@ -600,6 +667,7 @@ impl Renderer {
             slot,
             bytes,
             visible: true,
+            fade: 1.0,
         });
         (handle, bytes)
     }
@@ -696,6 +764,7 @@ impl Renderer {
             bounds: data.bounding_sphere(),
             bytes,
             visible: true,
+            fade: 1.0,
         });
         (handle, bytes)
     }
@@ -731,6 +800,42 @@ impl Renderer {
     }
 
     /// Hidden chunks stay resident but are not drawn.
+    /// Starts a freshly uploaded chunk invisible so it fades in.
+    pub fn begin_fade_in(&mut self, handle: ChunkHandle) {
+        self.set_chunk_fade_state(handle, 0.0, true);
+    }
+
+    /// Forces a chunk's fade level and direction; for tests and tools.
+    pub fn set_chunk_fade_state(&mut self, handle: ChunkHandle, fade: f32, fading_in: bool) {
+        if let Some(c) = self.chunks.iter_mut().find(|c| c.handle == handle) {
+            (c.fade, c.visible) = (fade, fading_in);
+        } else if let Some(c) = self.far.chunks.iter_mut().find(|c| c.handle == handle) {
+            (c.fade, c.visible) = (fade, fading_in);
+        }
+    }
+
+    /// With fades off, chunks pop in and out at once; for comparing against the fading look.
+    pub fn set_fades_enabled(&mut self, on: bool) {
+        self.fades_enabled = on;
+    }
+
+    fn advance_fades(&mut self, dt: f32) {
+        let dt = if self.fades_enabled { dt } else { 1.0e6 };
+        let mut any = false;
+        let mut step = |fade: &mut f32, target: bool| {
+            *fade = step_fade(*fade, target, dt);
+            any |= *fade > 0.0 && *fade < 1.0;
+        };
+        for c in &mut self.chunks {
+            step(&mut c.fade, c.visible);
+        }
+        for c in &mut self.far.chunks {
+            step(&mut c.fade, c.visible);
+        }
+        self.fading = any;
+    }
+
+    /// Hidden chunks fade out; they stay resident.
     pub fn set_chunk_visible(&mut self, handle: ChunkHandle, visible: bool) {
         if let Some(c) = self.chunks.iter_mut().find(|c| c.handle == handle) {
             c.visible = visible;
@@ -814,7 +919,7 @@ impl Renderer {
         self.instance_scratch.clear();
         self.indirect_scratch.clear();
         self.runs.clear();
-        let mut order: Vec<&GpuChunk> = self.chunks.iter().filter(|c| c.visible).collect();
+        let mut order: Vec<&GpuChunk> = self.chunks.iter().filter(|c| c.fade > 0.0).collect();
         order.truncate(MAX_DRAWS);
         order.sort_by_key(|c| c.page);
         for (i, c) in order.iter().enumerate() {
@@ -827,7 +932,7 @@ impl Renderer {
                     c.indices.offset,
                     c.indices.len,
                     base_vertex.cast_unsigned(),
-                    0,
+                    signed_fade(c.fade, c.visible).to_bits(),
                 ],
             });
             self.indirect_scratch.push(IndirectArgs {
@@ -947,7 +1052,12 @@ impl Renderer {
             timestamp_writes: timer.and_then(|t| t.pass_writes(Zone::Prepass)),
             ..Default::default()
         });
-        self.draw_chunks(&mut pass, &self.pipelines.prepass, set);
+        let pipeline = if self.fading {
+            &self.pipelines.prepass_fade
+        } else {
+            &self.pipelines.prepass
+        };
+        self.draw_chunks(&mut pass, pipeline, set);
     }
 
     /// Draws one Hi-Z level over the whole frame; `None` turns it off.
@@ -978,7 +1088,22 @@ impl Renderer {
             params,
             boxes,
             timer,
+            dt,
         } = *frame;
+        if !self.noise_uploaded {
+            self.noise_uploaded = true;
+            queue.write_texture(
+                self.noise.as_image_copy(),
+                noise::blue_noise_tile(),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(noise::TILE as u32),
+                    rows_per_image: None,
+                },
+                self.noise.size(),
+            );
+        }
+        self.advance_fades(dt);
         let aspect = size.0 as f32 / size.1 as f32;
         let view_proj: Mat4 = camera.view_proj(aspect);
         let local = camera.pos.local();
@@ -1139,6 +1264,8 @@ enum DepthUse {
     Test,
     /// Depth only: no fragment stage and no colour target.
     PrepassOnly,
+    /// Depth only, with a fragment stage that discards the faded-out pixels.
+    PrepassFade,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1157,6 +1284,7 @@ fn build_pipeline(
         label: Some(label),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     });
+    let colour_targets = [Some(format.into())];
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: Some(layout),
@@ -1168,9 +1296,17 @@ fn build_pipeline(
         },
         fragment: (depth != DepthUse::PrepassOnly).then_some(wgpu::FragmentState {
             module: &module,
-            entry_point: Some("fs_main"),
+            entry_point: Some(if depth == DepthUse::PrepassFade {
+                "fs_prepass"
+            } else {
+                "fs_main"
+            }),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(format.into())],
+            targets: if depth == DepthUse::PrepassFade {
+                &[]
+            } else {
+                &colour_targets
+            },
         }),
         primitive: wgpu::PrimitiveState {
             topology,
@@ -1223,6 +1359,8 @@ struct Pipelines {
     /// Colour pass that only tests against a finished prepass depth.
     scene_tested: wgpu::RenderPipeline,
     prepass: wgpu::RenderPipeline,
+    /// Prepass with the dither test, used while any chunk is fading.
+    prepass_fade: wgpu::RenderPipeline,
     /// Far-band instances scaled out of the shared unit meshes; writes depth itself.
     far: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
@@ -1268,6 +1406,7 @@ fn build_pipelines(
         scene: scene("scene", DepthUse::Write, "vs_main"),
         scene_tested: scene("scene tested", DepthUse::Test, "vs_main"),
         prepass: scene("depth prepass", DepthUse::PrepassOnly, "vs_main"),
+        prepass_fade: scene("depth prepass fade", DepthUse::PrepassFade, "vs_main"),
         far: scene("far band", DepthUse::Write, "vs_far"),
         lines,
     }

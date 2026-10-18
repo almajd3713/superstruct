@@ -592,6 +592,7 @@ fn far_band_frame_cost() {
                 params: PLAIN,
                 boxes: &[],
                 timer: None,
+                dt: 0.0,
             },
         );
         cpu.push(t.elapsed().as_secs_f64() * 1000.0);
@@ -608,6 +609,51 @@ fn far_band_frame_cost() {
     if let Some(t) = h.gpu_times(&mut renderer, &cam, size, PLAIN, 30) {
         for (z, ms) in t {
             eprintln!("gpu {} {ms:.3} ms", z.name());
+        }
+    }
+}
+
+/// Renders a screen-filling wall with the given fade state and returns which pixels were drawn
+/// (not the clear colour).
+fn fade_mask(h: &Headless, material: u16, fade: f32, fading_in: bool) -> Vec<bool> {
+    let size = (96, 96);
+    let cam = camera_at(I64Vec3::ZERO);
+    let (origin, mesh) = wall(&cam, 2.0, 50.0, material);
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    let (handle, _) = renderer.upload_chunk(&h.device, &h.queue, origin, &mesh);
+    renderer.set_chunk_fade_state(handle, fade, fading_in);
+    let img = h
+        .render_with(&mut renderer, &cam, size, PLAIN, &[])
+        .unwrap();
+    let clear = h.render(&[], &cam, size, PLAIN, &[]).unwrap();
+    img.chunks(4)
+        .zip(clear.chunks(4))
+        .map(|(a, b)| a != b)
+        .collect()
+}
+
+#[test]
+fn fade_level_sets_the_share_of_pixels_drawn() {
+    let Some(h) = headless() else { return };
+    for fade in [0.25_f32, 0.5, 0.75] {
+        let mask = fade_mask(&h, 0, fade, true);
+        let share = mask.iter().filter(|&&d| d).count() as f32 / mask.len() as f32;
+        assert!((share - fade).abs() < 0.03, "fade {fade} drew {share}");
+    }
+}
+
+#[test]
+fn fading_in_and_fading_out_chunks_tile_the_screen_exactly() {
+    let Some(h) = headless() else { return };
+    for t in [0.2_f32, 0.5, 0.8] {
+        let incoming = fade_mask(&h, 0, t, true);
+        let outgoing = fade_mask(&h, 1, 1.0 - t, false);
+        for (i, (a, b)) in incoming.iter().zip(&outgoing).enumerate() {
+            assert!(
+                a != b,
+                "t {t}: pixel {i} drawn by {} chunks",
+                u8::from(*a) + u8::from(*b)
+            );
         }
     }
 }
