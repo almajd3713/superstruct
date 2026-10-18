@@ -192,6 +192,22 @@ The hash and RNG are integer-only, but generator code turns their outputs into `
 - **Banned in anything that affects output:** `sin`, `cos`, `tan`, `atan2`, `exp`, `ln`, `powf`, `powi`, `hypot`, `cbrt` and other libm functions, whose results can differ between platforms and libm versions (`powi` can even differ between debug and release builds). Where one is needed, write an in-house polynomial or a lookup table, pinned by tests.
 - **Fixed evaluation order:** no parallel float reductions, and no iterating a `HashMap`. Sums run in a defined order.
 
+### 6.1 Rotations and the Web (PW.0.2)
+
+The Web adds oriented primitives (`primitives.md` §9). The determinism rules above are enough for them, with the following explicit list.
+
+- **No trigonometric function runs in `gen`.** Every angle is a table index. The tables are constants:
+  - 64 headings as integer pairs `(a, b)`, first quadrant pinned, other quadrants by the exact map `(a, b) → (−b, a)`;
+  - 7 tilt slopes `s`;
+  - 49 direction vectors with components in `−2..=2`;
+  - the discretised catenary tilts.
+  A test re-derives the first two with `f64::tan` from the formulas in `primitives.md` and checks them. That test is the only place a trig function appears, and it is not generator code.
+- **Operations used to build a frame:** integer arithmetic, `+ − × ÷` and `sqrt` in `f64`, and `floor(x + 0.5)` for rounding positions to Q. All are exactly specified (§6 above), so equal integer keys give identical bits.
+- **No FMA.** Rust does not contract `a * b + c` into a fused operation unless `mul_add` is called, and `gen` never calls it (a lint check in `scripts/check.sh` greps for `mul_add`, `sin`, `cos`, `tan`, `atan`, `exp`, `ln`, `powf`, `powi`, `hypot`, `cbrt` in `crates/gen/src`).
+- **Order:** matrices are built and applied in the order written in `primitives.md` §9.1. Dot products and cross products sum left to right.
+- **Integers first.** Whatever decides *what exists* (counts, indices, which cell, which line key) is integer. Floats only place the vertices of a feature already decided, and a geometric test whose result changes what exists (a `KeepOut` overlap) is evaluated on the **integer AABB** (`primitives.md` §9.5), not on the float solid.
+- **New salts** are append-only in the usual blocks. The orientation salts are listed in `regimes.md` §12.
+
 ## 7. GPU port (for P3.3)
 
 WGSL has no 64-bit integers unless `wgpu::Features::SHADER_INT64` is enabled. That feature is available on Vulkan and DX12 (SM 6.0+), and therefore on the RTX 4070 target.

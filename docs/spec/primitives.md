@@ -26,14 +26,14 @@ Geometry normally lies inside the cell, `[0, size)`. It may extend outside only 
 
 ## 2. Orientation
 
-All primitives are **axis-aligned**. Ramps and stairs rise along one of four horizontal directions, and cylinders lie along one of the three axes.
+Primitives are **axis-aligned by default**: ramps and stairs rise along one of four horizontal directions, and cylinders lie along one of the three axes. The shapes in §3 stay exactly as they are.
 
 ```rust
 pub enum Dir4 { PosX, NegX, PosZ, NegZ }   // direction of ascent
 pub enum Axis { X, Y, Z }                // shared with cell faces (worldgen::cell)
 ```
 
-The megastructure's language is orthogonal: slabs, shafts, pillars, ducts. Axis-alignment keeps collision analytic and exact, and keeps the SDF horizon cheap. Arbitrary rotation (diagonal bridges, for example) would be a later addition and a `GEN_VERSION` bump. **The user confirmed axis-aligned only on 2026-10-17**, over yaw rotation and 45° steps.
+**Revised 2026-10-18 (PW.0.2).** The user reversed the axis-aligned-only decision of 2026-10-17: the Web design allows any angle (`docs/proposals/the-web.md` §7). Oriented shapes are specified in §9. They wrap the shapes of §3 in a frame, so an axis-aligned primitive is simply the case with the identity frame, and its output is unchanged.
 
 ## 3. Primitive types
 
@@ -170,3 +170,129 @@ pub struct CellMeta {
 - Envelope-fill tolerance per level: `levels.md`.
 - `Port` fields: `ports.md`.
 - Stair rise and tread defaults, and the lift platform: `traversal.md`.
+
+## 9. Oriented primitives (PW.0.2)
+
+*Owners: TEC-01..04 (specified here, built in PW.1.1); TEC-05, TEC-07 (PW.1.2); TEC-06 (PW.1.3). Architecture: `the-web.md` §7.3.*
+
+### 9.1 Integer orientation (TEC-01)
+
+A rotation is never computed from an angle. It is a **key into constant tables of integer vectors**. Matrices are then built with `+ − × ÷` and `sqrt` only, which IEEE 754 rounds correctly, so equal keys give equal bits on every machine (`hashing.md` §6).
+
+```rust
+pub enum Frame {
+    /// Axis-aligned. The identity.
+    Id,
+    /// A yaw heading (§9.1.1) then a tilt (§9.1.2).
+    Table { yaw: u8, tilt: u8 },          // yaw 0..64, tilt 0..7
+    /// The local X axis along an integer direction (§9.1.3), with a derived roll.
+    Dir { d: [i8; 3] },
+}
+```
+
+`Frame::Table { yaw: 0, tilt: 0 }` and `Frame::Id` are the same frame (a constructor normalises it to `Id`, and the shape code treats `Id` as "emit the old axis-aligned primitive").
+
+#### 9.1.1 Headings
+
+There are 64 headings. Heading `k` is the integer vector `(a, b)` and the unit vectors are `X = (a, 0, b) / L`, `Z = (−b, 0, a) / L` with `L = sqrt(a² + b²)`, computed in `f64`.
+
+- First quadrant (`k = 0..16`), derived once with `round(64 · tan(5.625° · r))` and then **pinned as a constant table**. The derivation is documentation only; the table is the definition:
+
+| k | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| (a, b) | (64,0) | (64,6) | (64,13) | (64,19) | (64,27) | (64,34) | (64,43) | (64,53) | (64,64) | (53,64) | (43,64) | (34,64) | (27,64) | (19,64) | (13,64) | (6,64) |
+
+- Other quadrants: heading `k = 16q + r` is the first-quadrant vector `r` turned `q` quarter turns by the exact integer map `(a, b) → (−b, a)`.
+- Heading 0 is +X, 16 is +Z, 32 is −X, 48 is −Z. The headings are 5.625° apart to within about 0.3°. They need not be exactly even.
+- `yaw + 32` is the exact opposite direction; `yaw + 16` is the exact right angle. Both follow from the quadrant rule, so perpendicular and antiparallel facets are exact.
+- At heading 0, `X = (1, 0, 0)` and `Z = (0, 0, 1)` come out **exactly**, because `64/64 = 1` and `0/64 = 0`.
+
+#### 9.1.2 Tilts
+
+`tilt ∈ 0..7` selects a slope `s = [0, 6, 11, 17, 23, 30, 37][tilt]` (`64 · tan` of 0°, 5°, …, 30°, rounded). The frame axes are:
+
+```
+m   = sqrt(64² + s²)
+ex  = (64 / m) · X + (s / m) · Y        // local X, tilted up by atan(s/64)
+ey  = (−s / m) · X + (64 / m) · Y       // local up
+ez  = Z
+```
+
+`tilt = 0` gives `s = 0`, `m = 64`, and `ex = X`, `ey = Y` exactly. A tilt is about the frame's horizontal axis `Z`, so the heading also says in which direction the slab leans.
+
+#### 9.1.3 Direction frames
+
+For beams and other members at an arbitrary angle, `Frame::Dir { d }` with `d` a component of the **direction table**:
+
+- The table lists every vector `(x, y, z)` with components in `−2..=2`, not all zero, `gcd(|x|, |y|, |z|) = 1`, and whose first nonzero component is positive. There are **49** entries, enumerated in lexicographic order of `(x, y, z)` from `(0,0,1)`. Since a beam is an undirected line, the sign does not matter.
+- Classes (the classes of `weave`, `regimes.md` §7.2): **axis** 3, **face diagonal** 6 (two components of magnitude 1, one zero), **space diagonal** 4 (all three of magnitude 1), **skew** 36 (the rest).
+- Axes: `ex = d / |d|`, `|d| = sqrt(x² + y² + z²)`. For the second axis take `w = Y` if `x ≠ 0 or z ≠ 0`, else `w = X`; then `ey = normalize(w − (w · ex) ex)` and `ez = ex × ey`. All of this is `+ − × ÷ sqrt`. If `d` is an axis, the result is the identity (up to a permutation of axes, which the constructor performs exactly, so a beam along Y is an axis-aligned cylinder).
+
+Frames from an up vector (`Frame::from_up`, used by gravity wells and the radial policy, PW.0.6) follow the same Gram–Schmidt recipe with `ey = up / |up|`. They are specified in `gravity.md`.
+
+#### 9.1.4 Using a frame
+
+A frame plus an integer **origin** `o: QVec3` (cell-local Q) maps frame-local integer Q coordinates `l` to cell-local coordinates `p = o + R · l`, where `R = [ex ey ez]`. The mapping is computed in `f64` and **rounded to the nearest Q** with `floor(x + 0.5)` whenever a position must become an integer (for example the centre of a helix step). Everything that stays in frame-local integers (extents, step counts) is exact.
+
+### 9.2 Oriented shapes (TEC-03)
+
+```rust
+pub struct Oriented {
+    pub frame: Frame,
+    pub origin: QVec3,          // frame origin, cell-local Q
+    pub shape: Shape,           // any §3 shape, in frame-local Q (axis-aligned there)
+    pub clip: QAabb,            // §9.4, cell-local Q
+}
+```
+
+`Shape` is exactly the §3 enum (`Box`, `Ramp`, `StairRun`, `Cylinder`). So the new shapes are:
+
+| New shape | Is |
+|---|---|
+| Oriented box | `Box` in a frame |
+| Oriented ramp | `Ramp` in a frame (rises along ±frame X or ±frame Z) |
+| Oriented stair run | `StairRun` in a frame |
+| Cylinder on any axis | `Cylinder` along frame X, Y or Z, so with `Frame::Dir` it lies along any of the 49 directions |
+| Faceted helix, polygons | built from the above (§9.3) |
+
+`Primitive.shape` becomes `enum Shape { …§3…, Oriented(Box<Oriented>) }` (append-only). A primitive whose frame is `Id` is never stored as `Oriented`. It keeps the old variant, so old output is bit-identical and the golden tests stay valid (§9.6).
+
+### 9.3 Faceted helix and curves (TEC-04)
+
+Curved things are made from straight pieces, so every piece keeps an analytic shape.
+
+- **Helical stair**: `n` steps per turn from the set `{8, 16, 32}` (so each step is a whole number of headings: `64 / n` = 8, 4, 2), `turns` a half-integer count, an inner radius `r0`, a width `w`, a rise per step `h` (whole Q, ≤ 7 Q so the stair is walkable), a handedness, and a base heading `k0`.
+- Step `j` is a `Box` (tread) with frame `Table { yaw: k0 + j · (64/n) ± 16, tilt: 0 }`: a heading turned a quarter turn from the radial direction, so its long axis is tangent. Its origin is the centre of the tread on the circle of radius `r0 + w/2`, computed as `round(centre + radius · (a, b) / L)` per §9.1.4, and its vertical position is `base_y + j · h`.
+- The tread length along the tangent is `ceil(2 · radius · tan(π/n))` rounded up to a whole Q using the integer ratio table of §9.1.1 (the facet chord), plus an overlap of 1 Q so adjacent treads share a face and the stair has no cracks.
+- **Helical ramp** uses a `Ramp` per facet with the rise along the tangent. Its `rise` per facet equals `h`, so the slope is `h / chord`; the slope limit (40°, `traversal.md`) applies per facet.
+- **Polygonal ring, dome, rotunda, curved gallery**: a ring of `n ∈ {8, 16, 32, 64}` box facets at the headings `k0 + j · (64/n)`, each facing inwards; a dome adds rings at tilts from the tilt table, with the radius per ring from the integer ratios of the table. The walls of a curved gallery (PH-20) and a rotunda (FORM-16) use the same recipe.
+- **Catenary** (PH-04) is a chain of oriented boxes whose per-segment tilt index follows a pinned table of integer tilts (a discretised parabola), so no `cosh` is ever evaluated.
+- **Cones and funnels** (FORM-23, VOID-13): a stack of coaxial rings (cylinders on the Y axis, or facet rings) with radius decreasing by a whole number of Q per ring.
+
+### 9.4 Clipping instead of shape rules (TEC-02)
+
+Every oriented primitive carries a `clip: QAabb`, the box of its owning cell (or a tighter one), in the emitting cell's local space.
+
+- `contains(p) = shape.contains(p) ∧ clip.contains(p)`.
+- `sdf(p) = max(shape.sdf(p), clip.sdf(p))`. It is a valid lower bound: it never overestimates distance, so the raymarcher stays safe, and it is exact inside both.
+- **Meshing** clips each output polygon to the six clip planes (Sutherland–Hodgman against a box). No cap faces are generated on the clip planes: the neighbouring cell emits its own clipped piece of the same solid, and the faces on the shared plane are interior.
+- **Why this is enough for keyed features.** A beam, a staircase or any feature whose description is a pure function of a key is evaluated by every cell it crosses. Each cell emits the whole solid **with its own clip**, so the pieces tile the solid exactly at the cell planes, and nothing needs to know about neighbours. This keeps the ownership rule (`levels.md` §1.1) and removes the old restriction that only boxes can cross faces.
+- To limit work, a cell first discards a feature whose integer AABB (§9.5) misses the clip box.
+- The clip is part of the primitive's description and hence of the golden hash.
+
+### 9.5 Bounds
+
+`aabb()` of an oriented primitive is the **integer AABB** of its eight frame-box corners mapped to cell-local Q (rounded outwards: `floor` for the minimum, `ceil` for the maximum), intersected with `clip`. It is conservative (never smaller than the solid), and it is what constraints, `KeepOut` tests and overlap queries use. For `Id` it is exactly the old AABB.
+
+### 9.6 Axis-aligned output is unchanged
+
+- `Frame::Id` maps to the old variants. Nothing about those is touched: no matrix, no rounding.
+- `Table { yaw: 0, tilt: 0 }` produces `ex = X = (1,0,0)`, `ey = Y`, `ez = Z` exactly (§9.1.1 and §9.1.2), and the constructor turns it into `Id` anyway.
+- `Table { yaw: 16 · q, tilt: 0 }` (quarter turns) has `(a, b)` = `(64, 0)` turned `q` times by `(a, b) → (−b, a)`: `(0, 64)`, `(−64, 0)`, `(0, −64)`, so the unit vectors are `±1` and `0` exactly. Mapping integer Q through it is exact (no rounding), so quarter-turned boxes equal the old `Dir4`-style boxes.
+- A test (PW.1.1) asserts this and that the golden content hashes of every existing cell are identical until the first generator change after it (invariant 8).
+
+### 9.7 Collision, walkability and SDF (summary; built in PW.1.2 and PW.1.3)
+
+- **Collision (TEC-05).** To test a capsule against an oriented primitive, transform the capsule's two end points into the frame (`R^T (p − o)`), run the existing axis-aligned test there (the capsule keeps its radius under a rotation), and rotate the contact normal back. The clip box is an additional axis-aligned test in cell space. A vertical capsule becomes a slanted capsule in the frame, so the test is segment-versus-box, which already exists for the horizontal-cylinder case.
+- **Walkability (TEC-06).** A plate is an oriented rectangle with a normal. A surface is walkable if the angle between its normal and the local up (usually +Y, `gravity.md` otherwise) is ≤ 40°, which is checked with the integer slope tables, not with an angle. Links join plates whose overlap and height difference meet the same tests, in the plate's frame. `walk.rs` keeps its axis-aligned fast path for `Id` plates.
+- **SDF (TEC-07).** The SDF of an oriented primitive is the axis-aligned SDF evaluated at `R^T (p − o)`. A rotation is an isometry, so exactness and the lower-bound property carry over unchanged. For the clip the formula in §9.4 applies.
