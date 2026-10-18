@@ -1,26 +1,25 @@
 // Shared surface shading for the scene and the horizon pass. `common.wgsl` is prepended.
 
-// Ids follow `worldgen::prim::MaterialId`: concrete, metal, grating, emissive, pipe, warm.
+// The material table lives in the globals (`materials.rs`): ids follow
+// `worldgen::prim::MaterialId`, and anything past the table reads the fallback slot.
 fn material_albedo(id: u32) -> vec3<f32> {
-    switch id {
-        case 0u: { return vec3<f32>(0.36, 0.37, 0.39); }
-        case 1u: { return vec3<f32>(0.2, 0.21, 0.24); }
-        case 2u: { return vec3<f32>(0.14, 0.15, 0.17); }
-        case 3u: { return vec3<f32>(0.9, 0.88, 0.8); }
-        case 4u: { return vec3<f32>(0.27, 0.29, 0.29); }
-        case 5u: { return vec3<f32>(0.62, 0.46, 0.3); }
-        default: { return vec3<f32>(0.4, 0.4, 0.4); }
-    }
+    return globals.materials[min(id, 15u)].rgb;
 }
 
-// Lighting before fog: a Lambert sun plus ambient, tinted by the regime's light.
+// Lighting before fog: a Lambert sun plus ambient, tinted by the regime's light, with a little
+// sheen on glossy materials and the emissive share of the base tone added back unlit.
 fn lit_colour(n: vec3<f32>, material: u32) -> vec3<f32> {
+    let slot = min(material, 15u);
+    let albedo = globals.materials[slot].rgb;
+    let emissive = globals.materials[slot].a;
+    let gloss = 1.0 - globals.materials[16u + slot].x;
     let sun = normalize(vec3<f32>(0.4, 0.8, 0.3));
     let lambert = max(dot(n, sun), 0.0);
     // Tuned so a grey palette at light 0.25 matches the earlier flat greybox look.
     let tint = globals.ambient.rgb / 0.27;
-    let shade = 0.22 + 0.1 * n.y + 3.0 * globals.ambient.a * lambert;
-    return material_albedo(material) * tint * shade;
+    let sheen = gloss * gloss * pow(lambert, 6.0);
+    let shade = 0.22 + 0.1 * n.y + 3.0 * globals.ambient.a * (lambert + sheen);
+    return mix(albedo * tint * shade, albedo, emissive);
 }
 
 // Fog and the death fade, for a surface point `rel` metres from the camera.

@@ -33,6 +33,8 @@ struct Globals {
     params: [f32; 4],
     fog: [f32; 4],
     ambient: [f32; 4],
+    /// `materials::gpu_table`: albedo and emissive, then roughness.
+    materials: [[f32; 4]; 2 * crate::materials::SLOTS],
 }
 
 #[repr(C)]
@@ -1211,6 +1213,7 @@ impl Renderer {
                 params.fog_color[2],
                 params.fog_height_k,
             ],
+            materials: crate::materials::gpu_table(),
             ambient: [
                 params.ambient[0],
                 params.ambient[1],
