@@ -262,6 +262,7 @@ tools/
   - forward+ with clustered lights, to handle many small emissive and point lights
   - few shadow-casting lights, by stylistic choice
   - because the world is made of primitives, ambient occlusion and soft shadows can be computed analytically or with SDFs from a GPU buffer of nearby primitives
+  - **Decision, ambient occlusion (P5.1.4, 2026-10-18): analytic box-distance AO.** Both candidates were built (`engine::ao`) and compared on a corner room and on the densest sampled L3 block at 1440p. SSAO costs 0.39 ms but is nearly invisible at a radius that does not halo, and grainy without a blur pass. The analytic one measures the distance to the nearest of up to 256 boxes along the normal, culled per 8×8 tile: 0.47 ms, noise-free, stable under motion, and exact for a world of boxes. SSAO stays selectable as a fallback for non-box shapes (cylinders). The analytic mode needs a buffer of nearby boxes, so streaming L3 blocks into the game must also feed `Renderer::set_ao_boxes`.
 - **Fog:** froxel volumetric fog, a compute pass over a 3D grid fitted to the camera's view.
 - **Post-processing:** tone mapping, then the stylization pass (posterize, dither, ink outlines from depth and normals, grain), then FXAA or SMAA.
 

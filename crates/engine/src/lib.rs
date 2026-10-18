@@ -3,6 +3,7 @@
 // Time and pixel conversions between f64/u32 and f32 are deliberate and small.
 #![allow(clippy::cast_possible_truncation)]
 
+pub mod ao;
 pub mod app;
 pub mod camera;
 pub mod cellscene;

@@ -1634,3 +1634,189 @@ fn froxel_fog_matches_analytic_and_shows_beams() {
         assert!(ms(Zone::Fog) < 2.0, "fog budget is 2 ms");
     }
 }
+
+/// P5.1.4: both ambient-occlusion candidates on the same scenes. A corner room with crates is
+/// rendered with AO off, SSAO and analytic box-distance AO; both darken creases and contacts
+/// and leave open floor alone. A dense L3 block at 1440p gives each one's cost. Writes
+/// `out/ao-*.png`.
+#[test]
+#[allow(clippy::too_many_lines)] // one scenario read top to bottom
+fn ao_candidates_darken_contacts_and_report_cost() {
+    use engine::ao::{AoBox, AoMode};
+    use engine::gpu_timer::Zone;
+    use engine::kit::expand;
+    use worldgen::cell::{CellKey, Level};
+    use worldgen::l2_port::L1Cache;
+    use worldgen::l3::{l3_block_with, l3_blocks_of, l3_parent};
+    use worldgen::l4::{ModuleKind, block_modules};
+    use worldgen::prim::Shape;
+    use worldgen::seed::WorldSeed;
+    let Some(h) = headless() else { return };
+    let origin = WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0)).unwrap();
+    let at = |p: Vec3| WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0) + p).unwrap();
+    // A corner of two walls on a floor, with crates in it. (min, max) in metres.
+    let solids: Vec<(Vec3, Vec3)> = vec![
+        (Vec3::new(-8.0, -0.5, -8.0), Vec3::new(8.0, 0.0, 8.0)),
+        (Vec3::new(-8.0, 0.0, 6.0), Vec3::new(8.0, 4.0, 6.5)),
+        (Vec3::new(5.5, 0.0, -8.0), Vec3::new(6.0, 4.0, 6.0)),
+        (Vec3::new(1.0, 0.0, 2.0), Vec3::new(2.0, 1.0, 3.0)),
+        (Vec3::new(2.0, 0.0, 2.0), Vec3::new(3.0, 1.0, 3.0)),
+        (Vec3::new(1.5, 1.0, 2.0), Vec3::new(2.5, 2.0, 3.0)),
+        (Vec3::new(-3.0, 0.0, 4.5), Vec3::new(-1.5, 1.2, 6.0)),
+    ];
+    let mut mesh = Mesh::default();
+    for (a, b) in &solids {
+        mesh.add_box(*a, *b, 0);
+    }
+    let boxes: Vec<AoBox> = solids
+        .iter()
+        .map(|(a, b)| AoBox {
+            centre: at((*a + *b) * 0.5),
+            half: (*b - *a) * 0.5,
+        })
+        .collect();
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = WorldPos::new(
+        I64Vec3::ZERO,
+        Vec3::new(512.0 - 3.0, 512.0 + 2.2, 512.0 - 4.0),
+    )
+    .unwrap();
+    cam.yaw = std::f32::consts::PI + 0.35;
+    cam.pitch = -0.15;
+    let size = (960, 540);
+    let params = FrameParams {
+        ambient: [0.5, 0.5, 0.5],
+        light: 0.05,
+        fog_density: 0.0,
+        ..FrameParams::default()
+    };
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out");
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_scene(&h.device, &h.queue, &[(origin, mesh)]);
+    renderer.set_ao_boxes(&boxes);
+    let mut shot = |name: &str, mode: AoMode| {
+        renderer.set_ao(mode);
+        let img = h
+            .render_with(&mut renderer, &cam, size, params, &[])
+            .unwrap();
+        save_png(&dir.join(format!("ao-{name}.png")), size.0, size.1, &img).unwrap();
+        img
+    };
+    let off = shot("off", AoMode::Off);
+    let ssao = shot("ssao", AoMode::Ssao);
+    let analytic = shot("analytic", AoMode::Analytic);
+    let lum = |img: &[u8], i: usize| {
+        u32::from(img[i * 4]) + u32::from(img[i * 4 + 1]) + u32::from(img[i * 4 + 2])
+    };
+    for (name, img) in [("ssao", &ssao), ("analytic", &analytic)] {
+        let darker = (0..img.len() / 4)
+            .filter(|&i| lum(img, i) + 24 < lum(&off, i))
+            .count();
+        let brighter = (0..img.len() / 4)
+            .filter(|&i| lum(img, i) > lum(&off, i) + 6)
+            .count();
+        eprintln!("{name}: {darker} pixels darker, {brighter} brighter");
+        assert!(darker > 2000, "{name} darkens the creases: {darker}");
+        assert!(brighter < 200, "{name} never brightens: {brighter}");
+    }
+    assert_ne!(ssao.len(), 0);
+    assert!(
+        ssao.iter().zip(&analytic).any(|(a, b)| a != b),
+        "the two candidates differ"
+    );
+
+    // A dense L3 block at 1440p: the cost of each candidate on a real interior.
+    let seed = WorldSeed(0x0423);
+    let cache = L1Cache::default();
+    let mut best: Option<(usize, CellKey, worldgen::l3::L3Block)> = None;
+    'scan: for x in -30..30i64 {
+        let l1 = CellKey::new(Level::L1, I64Vec3::new(x, x % 4, 2 * x % 7));
+        for k in (0..512i64).step_by(5) {
+            let cell = CellKey::new(
+                Level::L2,
+                l1.coords * 8 + I64Vec3::new(k % 8, k / 64, k / 8 % 8),
+            );
+            if l3_blocks_of(seed, &cache, cell).is_empty() {
+                continue;
+            }
+            let parent = l3_parent(seed, &cache, cell);
+            for (key, _) in l3_blocks_of(seed, &cache, cell) {
+                let b = l3_block_with(seed, &parent, key);
+                let n = block_modules(seed, key, &b).len();
+                if best.as_ref().is_none_or(|(m, _, _)| n > *m) {
+                    best = Some((n, key, b));
+                }
+            }
+            if best.as_ref().is_some_and(|(n, _, _)| *n > 3000) {
+                break 'scan;
+            }
+        }
+    }
+    let (_, key, block) = best.unwrap();
+    let modules = block_modules(seed, key, &block);
+    let mut prims = Mesh::default();
+    let mut block_boxes = Vec::new();
+    for p in &block.out.primitives {
+        engine::primmesh::add_primitive(&mut prims, p);
+        if let Shape::Box { aabb } = p.shape {
+            let (lo, hi) = (aabb.min, aabb.max);
+            let f = |v: i32| v as f32 / 16.0;
+            let (a, b) = (
+                Vec3::new(f(lo.x), f(lo.y), f(lo.z)),
+                Vec3::new(f(hi.x), f(hi.y), f(hi.z)),
+            );
+            block_boxes.push(AoBox {
+                centre: at((a + b) * 0.5),
+                half: (b - a) * 0.5,
+            });
+        }
+    }
+    let lamp = modules
+        .iter()
+        .find(|m| m.kind == ModuleKind::Lamp)
+        .expect("a lit slot");
+    let eye = Vec3::new(
+        lamp.pos.x as f32 / 16.0,
+        lamp.pos.y as f32 / 16.0 - 4.0 + 0.25 + 1.65,
+        lamp.pos.z as f32 / 16.0,
+    );
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0) + eye).unwrap();
+    cam.yaw = 0.6;
+    let big = (2560, 1440);
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, big);
+    renderer.set_scene(&h.device, &h.queue, &[(origin, prims)]);
+    renderer.upload_module_chunk(&h.queue, origin, &expand(&modules));
+    renderer.set_ao_boxes(&block_boxes);
+    for (name, mode) in [("ssao", AoMode::Ssao), ("analytic", AoMode::Analytic)] {
+        renderer.set_ao(mode);
+        if let Some(times) = h.gpu_times(&mut renderer, &cam, big, params, 30) {
+            let ms = |zone| {
+                times
+                    .iter()
+                    .find(|(z, _)| *z == zone)
+                    .map_or(0.0, |(_, v)| *v)
+            };
+            eprintln!(
+                "{name} at 1440p in a dense block: ao {:.3} ms, scene {:.3} ms",
+                ms(Zone::Ao),
+                ms(Zone::Scene)
+            );
+        }
+        let img = h
+            .render_with(&mut renderer, &cam, big, params, &[])
+            .unwrap();
+        save_png(
+            &dir.join(format!("ao-block-{name}.png")),
+            big.0,
+            big.1,
+            &img,
+        )
+        .unwrap();
+    }
+    renderer.set_ao(AoMode::Off);
+    let img = h
+        .render_with(&mut renderer, &cam, big, params, &[])
+        .unwrap();
+    save_png(&dir.join("ao-block-off.png"), big.0, big.1, &img).unwrap();
+}

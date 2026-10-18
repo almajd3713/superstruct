@@ -20,6 +20,16 @@ struct PointLight {
 @group(2) @binding(1) var<storage, read> point_lights: array<PointLight>;
 @group(2) @binding(3) var<storage, read> cluster_counts: array<u32>;
 @group(2) @binding(4) var<storage, read> cluster_list: array<u32>;
+@group(2) @binding(5) var ao_tex: texture_2d<f32>;
+@group(2) @binding(6) var ao_sampler: sampler;
+
+// Ambient occlusion at a pixel: 1 when the AO pass is off.
+fn ao_factor(frag: vec2<f32>) -> f32 {
+    if (light_params.counts.z == 0u) {
+        return 1.0;
+    }
+    return textureSampleLevel(ao_tex, ao_sampler, frag / light_params.screen.xy, 0.0).r;
+}
 
 // A windowed inverse-square falloff that reaches exactly zero at the light's radius.
 fn light_term(l: PointLight, rel: vec3<f32>, n: vec3<f32>) -> vec3<f32> {

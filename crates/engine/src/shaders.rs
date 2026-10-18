@@ -17,6 +17,7 @@ const LIGHTS: &str = include_str!("../shaders/lights.wgsl");
 const LIGHT_CULL: &str = include_str!("../shaders/light_cull.wgsl");
 const VOLFOG: &str = include_str!("../shaders/volfog.wgsl");
 const FOG: &str = include_str!("../shaders/fog.wgsl");
+const AO: &str = include_str!("../shaders/ao.wgsl");
 
 /// Fully composed WGSL for each pipeline.
 #[derive(Debug, Clone)]
@@ -31,6 +32,7 @@ pub struct ShaderSources {
     pub post: String,
     pub light_cull: String,
     pub fog: String,
+    pub ao: String,
 }
 
 fn compose(common: &str, body: &str) -> String {
@@ -56,6 +58,7 @@ impl ShaderSources {
             post: POST.to_owned(),
             light_cull: LIGHT_CULL.to_owned(),
             fog: FOG.to_owned(),
+            ao: AO.to_owned(),
         }
     }
 
@@ -89,6 +92,7 @@ impl ShaderSources {
             post: read("post.wgsl", POST),
             light_cull: read("light_cull.wgsl", LIGHT_CULL),
             fog: read("fog.wgsl", FOG),
+            ao: read("ao.wgsl", AO),
         }
     }
 }

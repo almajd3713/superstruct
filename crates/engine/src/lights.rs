@@ -120,6 +120,10 @@ pub struct LightSystem {
     lights: Vec<Light>,
     scratch: Vec<(f32, GpuLight)>,
     size: (u32, u32),
+    ao_view: wgpu::TextureView,
+    ao_sampler: wgpu::Sampler,
+    /// Tells the scene shader to multiply by the AO texture.
+    pub ao_on: bool,
     /// Lights in the grid last frame, for tests and the overlay.
     pub active: u32,
     /// Skip the clusters and test every light per fragment, for comparing against them.
@@ -129,6 +133,7 @@ pub struct LightSystem {
 }
 
 impl LightSystem {
+    #[allow(clippy::too_many_lines)] // the layouts and their buffers read top to bottom
     pub fn new(device: &wgpu::Device, size: (u32, u32), source: &str) -> Self {
         use wgpu::BufferBindingType::{Storage, Uniform};
         use wgpu::ShaderStages as S;
@@ -139,6 +144,22 @@ impl LightSystem {
                 entry(1, S::FRAGMENT, Storage { read_only: true }),
                 entry(3, S::FRAGMENT, Storage { read_only: true }),
                 entry(4, S::FRAGMENT, Storage { read_only: true }),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: S::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: S::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let compute_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -166,6 +187,28 @@ impl LightSystem {
             storage,
         );
         let view_lights = buffer(device, "view lights", (MAX_LIGHTS * 16) as u64, storage);
+        let ao_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("ao sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let ao_view = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("ao placeholder"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let (counts, list, compute_bg, render_bg) = Self::sized(
             device,
             size,
@@ -174,8 +217,13 @@ impl LightSystem {
             &params,
             &lights_buf,
             &view_lights,
+            &ao_view,
+            &ao_sampler,
         );
         Self {
+            ao_view,
+            ao_sampler,
+            ao_on: false,
             render_bgl,
             compute_bgl,
             view_pipeline,
@@ -196,7 +244,7 @@ impl LightSystem {
         }
     }
 
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     fn sized(
         device: &wgpu::Device,
         size: (u32, u32),
@@ -205,6 +253,8 @@ impl LightSystem {
         params: &wgpu::Buffer,
         lights: &wgpu::Buffer,
         view_lights: &wgpu::Buffer,
+        ao_view: &wgpu::TextureView,
+        ao_sampler: &wgpu::Sampler,
     ) -> (wgpu::Buffer, wgpu::Buffer, wgpu::BindGroup, wgpu::BindGroup) {
         let (nx, ny) = grid_for(size);
         let clusters = u64::from(nx) * u64::from(ny) * u64::from(SLICES);
@@ -235,6 +285,14 @@ impl LightSystem {
                 bind(1, lights),
                 bind(3, &counts),
                 bind(4, &list),
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(ao_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(ao_sampler),
+                },
             ],
         });
         (counts, list, compute_bg, render_bg)
@@ -253,6 +311,28 @@ impl LightSystem {
             &self.params,
             &self.lights_buf,
             &self.view_lights,
+            &self.ao_view,
+            &self.ao_sampler,
+        );
+        self.counts = counts;
+        self.list = list;
+        self.compute_bg = compute_bg;
+        self.render_bg = render_bg;
+    }
+
+    /// Points the scene shader at a new AO texture.
+    pub fn set_ao_view(&mut self, device: &wgpu::Device, view: &wgpu::TextureView) {
+        self.ao_view = view.clone();
+        let (counts, list, compute_bg, render_bg) = Self::sized(
+            device,
+            self.size,
+            &self.render_bgl,
+            &self.compute_bgl,
+            &self.params,
+            &self.lights_buf,
+            &self.view_lights,
+            &self.ao_view,
+            &self.ao_sampler,
         );
         self.counts = counts;
         self.list = list;
@@ -338,7 +418,12 @@ impl LightSystem {
             grid: [nx, ny, SLICES, MAX_PER_CLUSTER],
             screen: [self.size.0 as f32, self.size.1 as f32, TILE_PX as f32, 0.0],
             lens: [(fov_y * 0.5).tan(), aspect, NEAR, FAR],
-            counts: [self.active, u32::from(self.brute_force), 0, 0],
+            counts: [
+                self.active,
+                u32::from(self.brute_force),
+                u32::from(self.ao_on),
+                0,
+            ],
         };
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
         if !gpu.is_empty() {

@@ -4,6 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3, Vec4};
 use worldgen::coord::WorldPos;
 
+use crate::ao::{AoBox, AoMode, AoPass};
 use crate::camera::{Camera, camera_relative};
 use crate::cull::{CullParams, CullPass, Frustum};
 use crate::farinst::{FarData, FarInstance, UnitMeshes, unit_meshes};
@@ -376,6 +377,7 @@ pub struct Renderer {
     post: PostPass,
     lights: LightSystem,
     volfog: VolFog,
+    ao: AoPass,
     light_scratch: Vec<Light>,
     horizon: HorizonPass,
     world_seed: u64,
@@ -546,8 +548,10 @@ impl Renderer {
         });
 
         let sources = ShaderSources::embedded();
-        let lights = LightSystem::new(device, size, &sources.light_cull);
+        let mut lights = LightSystem::new(device, size, &sources.light_cull);
         let volfog = VolFog::new(device, size, &sources.fog);
+        let ao = AoPass::new(device, size, &sources.ao);
+        lights.set_ao_view(device, ao.view());
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene layout"),
             bind_group_layouts: &[
@@ -603,6 +607,7 @@ impl Renderer {
             post,
             lights,
             volfog,
+            ao,
             light_scratch: Vec::new(),
             horizon,
             world_seed: 0,
@@ -946,6 +951,22 @@ impl Renderer {
         self.lights.set_lights(lights);
     }
 
+    /// Selects the ambient-occlusion candidate (needs the depth prepass).
+    pub fn set_ao(&mut self, mode: AoMode) {
+        self.ao.mode = mode;
+    }
+
+    /// AO reach in metres and strength 0 to 1.
+    pub fn set_ao_tuning(&mut self, radius: f32, strength: f32) {
+        self.ao.radius = radius;
+        self.ao.strength = strength;
+    }
+
+    /// Boxes the analytic AO measures distance to (the nearest 256 within 64 m are used).
+    pub fn set_ao_boxes(&mut self, boxes: &[AoBox]) {
+        self.ao.set_boxes(boxes);
+    }
+
     /// Turns the froxel volumetric fog on; off falls back to the analytic height fog.
     pub fn set_volumetric_fog(&mut self, on: bool) {
         self.volfog.enabled = on;
@@ -1044,6 +1065,11 @@ impl Renderer {
             self.shader_error = Some(msg.clone());
             return Err(msg);
         }
+        if let Err(msg) = self.ao.reload(device, &sources.ao) {
+            tracing::error!("ao shader reload failed, keeping previous pipeline:\n{msg}");
+            self.shader_error = Some(msg.clone());
+            return Err(msg);
+        }
         if let Err(msg) = self.volfog.reload(device, &sources.fog) {
             tracing::error!("fog shader reload failed, keeping previous pipelines:\n{msg}");
             self.shader_error = Some(msg.clone());
@@ -1075,6 +1101,9 @@ impl Renderer {
             self.post.resize(device, size);
             self.lights.resize(device, size);
             self.volfog.resize(device, size);
+            if self.ao.resize(device, size) {
+                self.lights.set_ao_view(device, self.ao.view());
+            }
         }
     }
 
@@ -1323,6 +1352,7 @@ impl Renderer {
             Some((f, at)) => f.translated(camera_relative(&camera.pos, at)),
             None => Frustum::from_view_proj(view_proj),
         };
+        self.lights.ao_on = self.prepass && self.ao.mode != AoMode::Off;
         self.light_scratch.clear();
         self.modules.collect_lights(&mut self.light_scratch);
         self.lights.record(
@@ -1417,6 +1447,18 @@ impl Renderer {
             }
         }
         self.cull.resolve(encoder);
+        let ao_on = self.prepass && self.ao.mode != AoMode::Off;
+        if ao_on {
+            self.ao.record(
+                queue,
+                encoder,
+                &self.depth_view,
+                &camera.pos,
+                camera.view_rotation(),
+                camera.fov_y,
+                timer.and_then(|t| t.compute_pass_writes(Zone::Ao)),
+            );
+        }
         // Without the prepass the colour pass clears and writes depth itself; with it the depth
         // is already final and the colour pass only tests against it.
         let prepassed = self.prepass;

@@ -23,10 +23,12 @@ pub enum Zone {
     LightCull = 9,
     /// Froxel fog injection.
     Fog = 10,
+    /// Ambient occlusion.
+    Ao = 11,
 }
 
 impl Zone {
-    pub const ALL: [Zone; 11] = [
+    pub const ALL: [Zone; 12] = [
         Zone::Scene,
         Zone::Ui,
         Zone::Cull,
@@ -38,6 +40,7 @@ impl Zone {
         Zone::Post,
         Zone::LightCull,
         Zone::Fog,
+        Zone::Ao,
     ];
 
     pub fn name(self) -> &'static str {
@@ -53,6 +56,7 @@ impl Zone {
             Zone::Post => "post",
             Zone::LightCull => "light cull",
             Zone::Fog => "fog",
+            Zone::Ao => "ao",
         }
     }
 }
