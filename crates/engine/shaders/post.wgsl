@@ -9,6 +9,8 @@ struct Params {
     near: f32,
     // x: tan(fov_y / 2), y: aspect, z: ink strength, w: grain amount.
     lens: vec4<f32>,
+    // x: exposure multiplier.
+    exposure: vec4<f32>,
 };
 
 @group(0) @binding(0) var scene_colour: texture_2d<f32>;
@@ -88,7 +90,7 @@ fn to_linear(c: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_post(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let p = vec2<i32>(frag.xy);
-    var c = to_display(textureLoad(scene_colour, p, 0).rgb);
+    var c = to_display(textureLoad(scene_colour, p, 0).rgb * params.exposure.x);
     if (has(2u)) {
         let a = ink(p) * params.lens.z;
         c = mix(c, vec3<f32>(0.02, 0.025, 0.035), a);

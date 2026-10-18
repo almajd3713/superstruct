@@ -37,6 +37,12 @@ pub enum Action {
     ToggleReadout,
     /// Drops a beacon at the player's feet (P5.4.2).
     DropBeacon,
+    /// Photo mode (P5.4.3).
+    TogglePhoto,
+    FovWider,
+    FovNarrower,
+    ExposureUp,
+    ExposureDown,
 }
 
 /// A physical key or mouse button.
@@ -82,6 +88,11 @@ impl Default for Bindings {
             (K::KeyG, A::ToggleGrain),
             (K::Tab, A::ToggleReadout),
             (K::KeyB, A::DropBeacon),
+            (K::KeyP, A::TogglePhoto),
+            (K::PageUp, A::FovWider),
+            (K::PageDown, A::FovNarrower),
+            (K::Period, A::ExposureUp),
+            (K::Comma, A::ExposureDown),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),

@@ -65,6 +65,16 @@ struct Running {
     shader_watcher: ShaderWatcher,
 }
 
+/// Photo mode: the player stands still and the camera roams within [`PHOTO_RADIUS_M`].
+struct Photo {
+    anchor: WorldPos,
+    /// Overlay and readout visibility to restore on leaving.
+    hud: (bool, bool),
+}
+
+const PHOTO_RADIUS_M: f64 = 40.0;
+const PHOTO_SPEED: f32 = 4.0;
+
 #[allow(clippy::struct_excessive_bools)] // independent debug and input flags
 struct App {
     title: String,
@@ -76,6 +86,7 @@ struct App {
     survival: Survival,
     lifts: LiftSystem,
     lift_draw: LiftDraw,
+    photo: Option<Photo>,
     save: Save,
     beacons: Vec<WorldPos>,
     beacon_draw: BeaconDraw,
@@ -188,6 +199,30 @@ impl App {
         };
         let flat = self.camera.forward_flat() * axis(Action::MoveForward, Action::MoveBack)
             + self.camera.right_flat() * axis(Action::MoveRight, Action::MoveLeft);
+        if let Some(photo) = &self.photo {
+            let dir = flat + Vec3::Y * axis(Action::MoveUp, Action::MoveDown);
+            let boost = if grabbed && self.input.held(Action::Sprint) {
+                4.0
+            } else {
+                1.0
+            };
+            if let Ok(p) = self
+                .camera
+                .pos
+                .offset(dir.normalize_or_zero() * PHOTO_SPEED * boost * dt)
+            {
+                let off = p.delta(&photo.anchor);
+                self.camera.pos = if off.length() > PHOTO_RADIUS_M {
+                    photo
+                        .anchor
+                        .offset((off.normalize() * PHOTO_RADIUS_M).as_vec3())
+                        .unwrap_or(photo.anchor)
+                } else {
+                    p
+                };
+            }
+            return;
+        }
         if self.fly_mode
             && let Some(speed) = self.autofly
         {
@@ -378,11 +413,67 @@ impl App {
         }
     }
 
+    /// Photo-mode toggle and controls. True while the mode is on, which suppresses the other
+    /// actions.
+    fn photo_actions(&mut self) -> bool {
+        let Some(running) = &mut self.running else {
+            return false;
+        };
+        if self.input.pressed(Action::TogglePhoto)
+            || (self.frame_count == 2 && std::env::var_os("SUPERSTRUCT_PHOTO").is_some())
+        {
+            if let Some(photo) = self.photo.take() {
+                running.overlay.visible = photo.hud.0;
+                running.overlay.readout = photo.hud.1;
+                self.camera.fov_y = self.settings.fov_deg.to_radians();
+                self.camera.pos = if self.fly_mode {
+                    photo.anchor
+                } else {
+                    self.walker.eye()
+                };
+                self.prev_cam_pos = self.camera.pos;
+                let mut post = running.renderer.post();
+                post.exposure_stops = 0.0;
+                running.renderer.set_post(post);
+            } else {
+                self.photo = Some(Photo {
+                    anchor: self.camera.pos,
+                    hud: (running.overlay.visible, running.overlay.readout),
+                });
+                running.overlay.visible = false;
+                running.overlay.readout = false;
+                // `SUPERSTRUCT_PHOTO=<stops>` also sets the exposure, for captures.
+                if let Some(stops) = std::env::var("SUPERSTRUCT_PHOTO")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                {
+                    let mut post = running.renderer.post();
+                    post.exposure_stops = stops.clamp(-3.0, 3.0);
+                    running.renderer.set_post(post);
+                }
+            }
+        }
+        if self.photo.is_some() {
+            let turn = f32::from(self.input.pressed(Action::FovWider))
+                - f32::from(self.input.pressed(Action::FovNarrower));
+            self.camera.fov_y = (self.camera.fov_y + turn * 5.0_f32.to_radians())
+                .clamp(20.0_f32.to_radians(), 120.0_f32.to_radians());
+            let step = f32::from(self.input.pressed(Action::ExposureUp))
+                - f32::from(self.input.pressed(Action::ExposureDown));
+            let mut post = running.renderer.post();
+            post.exposure_stops = (post.exposure_stops + step * 0.5).clamp(-3.0, 3.0);
+            running.renderer.set_post(post);
+            // The HUD stays hidden and nothing is dropped while framing a shot.
+            return true;
+        }
+        false
+    }
+
     fn handle_actions(&mut self) {
         if self.input.pressed(Action::ReleaseCursor) && self.cursor_grabbed {
             self.set_cursor_grab(false);
         }
-        if self.input.pressed(Action::ToggleFly) {
+        if self.input.pressed(Action::ToggleFly) && self.photo.is_none() {
             self.fly_mode = !self.fly_mode;
             if !self.fly_mode {
                 self.enter_walk_mode();
@@ -393,6 +484,9 @@ impl App {
         }
         if self.input.pressed(Action::FlySlower) {
             self.fly_speed = (self.fly_speed / 2.0).max(1.0);
+        }
+        if self.photo_actions() {
+            return;
         }
         let Some(running) = &mut self.running else {
             return;
@@ -825,6 +919,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         survival: Survival::new(start),
         lifts: LiftSystem::new(WorldSeed(settings_seed)),
         lift_draw: LiftDraw::default(),
+        photo: None,
         beacons: save.beacons.iter().filter_map(BeaconPos::pos).collect(),
         save,
         beacon_draw: BeaconDraw::default(),

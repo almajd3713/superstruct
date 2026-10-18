@@ -343,7 +343,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 ### P5.4 Quiet tools
 - [x] **P5.4.1** Altimeter and coordinates readout toggle (absurd numbers welcome). *Done when:* it toggles. (2026-10-18: Tab toggles a quiet two-line readout, absolute altitude and x/z in whole metres, independent of the F1 overlay; `SUPERSTRUCT_READOUT=1` starts it on. Checked in a Windows screenshot.)
 - [x] **P5.4.2** Droppable beacons, visible from distance through fog, persisted in the save file. *Done when:* they survive a restart. (2026-10-18: B drops a 4 m x 600 m pillar of the new `BEACON` material (drawn 90 % through fog) at the player's feet and writes `save.toml` (`SUPERSTRUCT_SAVE`); P6.2.2 extends the same file. Checked on Windows: a save with one beacon loaded at start and the pillar showed through the haze from 300 m. Beacons cannot be removed yet, and have no light.)
-- [ ] **P5.4.3** Photo mode: free camera within a radius, HUD hidden, FOV and exposure controls. *Done when:* it works.
+- [x] **P5.4.3** Photo mode: free camera within a radius, HUD hidden, FOV and exposure controls. *Done when:* it works. (2026-10-18: P toggles photo mode: the player and sim stay put, the camera roams within 40 m, overlay and readout hide and are restored on leaving; PageUp/PageDown FOV 20 to 120 degrees, `.`/`,` exposure in half stops, +-3, applied in the post pass (which now also runs when exposure is not zero). Checked on Windows with `SUPERSTRUCT_PHOTO=-1.5`: darker image, HUD hidden. Not done: a lift or tram under the player keeps moving it.)
 
 ---
 

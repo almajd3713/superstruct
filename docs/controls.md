@@ -13,6 +13,7 @@ The bindings below are the defaults in `crates/engine/src/input.rs` (`Bindings::
 | Left Ctrl | Down (fly mode); call a lift down |
 | E | Interact: call a lift at an opening |
 | F4 | Toggle fly / walk mode |
+| P | Toggle photo mode: the player stands still, the camera roams within 40 m (WASD, Space, Ctrl, Shift), HUD hidden. PageUp / PageDown change FOV, `.` / `,` exposure (half stops, ±3) |
 | B | Drop a beacon at your feet (saved to `save.toml`, or `SUPERSTRUCT_SAVE`) |
 | `=` / `-` | Fly speed faster / slower |
 | Esc | Release the cursor |
@@ -55,6 +56,7 @@ Set before launch (`scripts/win.sh run` forwards them):
 | `SUPERSTRUCT_SETTINGS` | Settings file |
 | `SUPERSTRUCT_AUTOSHOT=<frames>` | Save a screenshot after that many frames, then exit |
 | `SUPERSTRUCT_OVERLAY=1` | Start with the overlay on |
+| `SUPERSTRUCT_PHOTO=<stops>` | Start photo mode at frame 2 with that exposure |
 | `SUPERSTRUCT_READOUT=1` | Start with the altimeter readout on |
 | `SUPERSTRUCT_DEBUG_BOXES=1` | Start with debug boxes on |
 | `SUPERSTRUCT_CELL=x,y,z` | Start beside that L2 cell |

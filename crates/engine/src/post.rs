@@ -8,17 +8,19 @@ use crate::camera::NEAR;
 
 // Four independent toggles, not states of one machine.
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PostSettings {
     pub posterize: bool,
     pub dither: bool,
     pub outlines: bool,
     pub grain: bool,
+    /// Photo-mode exposure compensation in stops; the pass runs whenever it is not zero.
+    pub exposure_stops: f32,
 }
 
 impl PostSettings {
     pub fn any(self) -> bool {
-        self.posterize || self.dither || self.outlines || self.grain
+        self.posterize || self.dither || self.outlines || self.grain || self.exposure_stops != 0.0
     }
 
     pub const ALL: Self = Self {
@@ -26,6 +28,7 @@ impl PostSettings {
         dither: true,
         outlines: true,
         grain: true,
+        exposure_stops: 0.0,
     };
 
     /// Parses a comma list of `posterize`, `dither`, `outlines`, `grain` or `all`; unknown names
@@ -61,6 +64,8 @@ struct Params {
     levels: f32,
     near: f32,
     lens: [f32; 4],
+    /// x: linear exposure multiplier.
+    exposure: [f32; 4],
 }
 
 pub struct PostPass {
@@ -196,6 +201,7 @@ impl PostPass {
             levels: 5.0,
             near: NEAR,
             lens: [(fov_y * 0.5).tan(), aspect, 0.85, 0.07],
+            exposure: [self.settings.exposure_stops.exp2(), 0.0, 0.0, 0.0],
         };
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&params));
         let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
