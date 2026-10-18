@@ -205,3 +205,28 @@ fn plane_point(axis: Axis, u: f64, v: f64, at: i64) -> I64Vec3 {
         Axis::Z => I64Vec3::new(u.floor() as i64, (-v).floor() as i64, at),
     }
 }
+
+/// `--fill`: the fill field of the plane, one grey level per L2 cell (white = fully built),
+/// with voids and Betweens showing as dark.
+pub fn render_fill(seed: WorldSeed, view: &View) -> RgbImage {
+    use worldgen::l1_fill::fill_field;
+
+    let res = view.res;
+    let mut img = RgbImage::new(res, res);
+    let scale = view.extent_m / f64::from(res);
+    let at = view.at_m.floor() as i64;
+    let mut cache: HashMap<I64Vec3, Vec<u8>> = HashMap::new();
+    for py in 0..res {
+        for px in 0..res {
+            let u = view.center.0 as f64 + (f64::from(px) + 0.5) * scale - view.extent_m / 2.0;
+            let v = view.center.1 as f64 + (f64::from(py) + 0.5) * scale - view.extent_m / 2.0;
+            let p = plane_point(view.axis, u, v, at);
+            let l1 = p.div_euclid(I64Vec3::splat(4096));
+            let i = (p - l1 * 4096).div_euclid(I64Vec3::splat(512));
+            let field = cache.entry(l1).or_insert_with(|| fill_field(seed, l1));
+            let f = field[((i.z * 8 + i.y) * 8 + i.x) as usize];
+            img.put_pixel(px, py, Rgb([f, f, f]));
+        }
+    }
+    img
+}

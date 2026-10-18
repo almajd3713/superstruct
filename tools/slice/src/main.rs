@@ -47,6 +47,7 @@ SECTION OPTIONS:
     --walkable           Overlay walkable surfaces that cut the plane (green)
     --stack              Draw the regime stacks instead: crusts light, Betweens dark by kind,
                          flooded ones blue, L0 cell edges red (use --extent 32768 or more)
+    --fill               Draw the fill field, one grey per L2 cell
     --between            Draw Between content over the stacks, one colour per STR-ID
 
 REPORT OPTIONS (with --report):
@@ -75,6 +76,7 @@ struct Args {
     walkable: bool,
     stack: bool,
     between: bool,
+    fill: bool,
     report: bool,
     count: u32,
     sample_seed: u64,
@@ -96,6 +98,7 @@ fn parse() -> Result<Option<Args>> {
         walkable: false,
         stack: false,
         between: false,
+        fill: false,
         report: false,
         count: 10_240,
         sample_seed: 7,
@@ -136,6 +139,7 @@ fn parse() -> Result<Option<Args>> {
             "--walkable" => a.walkable = true,
             "--stack" => a.stack = true,
             "--between" => a.between = true,
+            "--fill" => a.fill = true,
             "--report" => a.report = true,
             "--count" => a.count = value("--count")?.parse().context("--count")?,
             "--sample-seed" => {
@@ -177,7 +181,9 @@ fn main() -> Result<()> {
             walkable: a.walkable,
         };
         let start = Instant::now();
-        let image = if a.between {
+        let image = if a.fill {
+            stack_view::render_fill(a.seed, &view)
+        } else if a.between {
             stack_view::render_content(a.seed, &view)
         } else if a.stack {
             stack_view::render(a.seed, &view)

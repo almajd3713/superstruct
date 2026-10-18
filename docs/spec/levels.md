@@ -366,11 +366,13 @@ Each kind draws in the order: existence (by chance), then the parameters in the 
 Every L2 cell has an integer **fill** `f ∈ 0..=255`, the built fraction the L2 cell aims at. For the L2 cell with L1-local index `(ix, iy, iz)`:
 
 1. **Base.** Take the 8 sample points at the cell's centre column (x and z at the centre, `y` at the 8 sub-slab centres of 64 m). For each sample `t`: `base_t = fill` of the stratum's character if `stratum_at` is `Crust(k)`, `fill_between` of the regime if a Between, and `0` if the sample lies in a void piece. `base = Σ base_t / 8` (integer division, rounding down). For non-Flat stacks the sample column follows `u`.
-2. **Noise.** Each L1 lattice corner `c` has `n(c) = below(64)` from `hash(seed, 1, c, FILL_CORNER)`. The L2 cell's noise is the trilinear blend with integer weights over 16: the weights along an axis for index `i ∈ 0..8` are `(15 − (2i + 1), 2i + 1)` over 16, and the product is a weight over 16³ = 4096. `n_t = Σ n(corner) · w / 4096`. Neighbouring L1 cells share corners, so `n_t` is continuous across faces.
+2. **Noise.** Each L1 lattice corner `c` has `n(c) = below(64)` from `hash(seed, 1, c, FILL_CORNER)`. The L2 cell's noise is the trilinear blend with integer weights over 16: the weights along an axis for index `i ∈ 0..8` are `(15 − 2i, 2i + 1)` over 16 (the first version of this text, `(15 − (2i + 1), 2i + 1)`, summed to 15), and the product is a weight over 16³ = 4096. `n_t = Σ n(corner) · w / 4096`. Neighbouring L1 cells share corners, so `n_t` is continuous across faces.
 3. **Result.** `f = base · (192 + 2·n_t) / 256`, clamped to 255. The multiplier is between 0.75 and 1.24.
 4. **L2 obligation.** L2 fills its cell to `f` within ±10 % (of the cell volume), and its outer skin covers the far envelope (PW.2.4).
 
 Everything in the formula is integer, depends only on the stack, void pieces and corner hashes, and is the same on both sides of every face.
+
+*As implemented (PW.2.7, `worldgen::l1_fill`):* `fill_field(seed, l1)` returns the 512 values indexed `(iz · 8 + iy) · 8 + ix`; `fill_l2` asks for one L2 cell. The character fill of step 1 is the regime's `fill_crust` until stratum characters exist (PW.2.10, SC-06). Voids are the keep-out pieces of `voids_of_cell`; the standing columns of a hypostyle hall do not count.
 
 ### 4W.5 Ports and arteries: the skeleton
 
