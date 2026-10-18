@@ -35,6 +35,8 @@ pub enum Action {
     ToggleGrain,
     /// Altimeter and coordinates readout (P5.4.1).
     ToggleReadout,
+    /// Drops a beacon at the player's feet (P5.4.2).
+    DropBeacon,
 }
 
 /// A physical key or mouse button.
@@ -79,6 +81,7 @@ impl Default for Bindings {
             (K::F10, A::ToggleOutlines),
             (K::KeyG, A::ToggleGrain),
             (K::Tab, A::ToggleReadout),
+            (K::KeyB, A::DropBeacon),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),

@@ -13,6 +13,7 @@ The bindings below are the defaults in `crates/engine/src/input.rs` (`Bindings::
 | Left Ctrl | Down (fly mode); call a lift down |
 | E | Interact: call a lift at an opening |
 | F4 | Toggle fly / walk mode |
+| B | Drop a beacon at your feet (saved to `save.toml`, or `SUPERSTRUCT_SAVE`) |
 | `=` / `-` | Fly speed faster / slower |
 | Esc | Release the cursor |
 

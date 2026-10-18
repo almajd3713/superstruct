@@ -5,6 +5,7 @@
 
 pub mod ao;
 pub mod app;
+pub mod beacon;
 pub mod camera;
 pub mod cellscene;
 pub mod chunkmesh;
@@ -40,6 +41,7 @@ pub mod profile;
 pub mod readback;
 pub mod renderer;
 pub mod respawn;
+pub mod save;
 pub mod settings;
 pub mod shaders;
 pub mod stream;

@@ -17,6 +17,7 @@ use worldgen::cell::{CellKey, Level};
 use worldgen::coord::WorldPos;
 use worldgen::seed::WorldSeed;
 
+use crate::beacon::BeaconDraw;
 use crate::camera::Camera;
 use crate::cellscene::busiest_l2_cell;
 use crate::controller::{Controller, EYE_HEIGHT, MoveInput};
@@ -32,6 +33,7 @@ use crate::overlay::{Overlay, OverlayInfo};
 use crate::readback;
 use crate::renderer::{DebugBox, FrameInput, FrameParams, Renderer};
 use crate::respawn::{Event, SafeSpot, Survival};
+use crate::save::{BeaconPos, Save, save_path};
 use crate::settings::{Settings, VsyncMode};
 use crate::shaders::{ShaderSources, ShaderWatcher};
 use crate::streamer::{RendererSink, Streamer, StreamerConfig};
@@ -74,6 +76,9 @@ struct App {
     survival: Survival,
     lifts: LiftSystem,
     lift_draw: LiftDraw,
+    save: Save,
+    beacons: Vec<WorldPos>,
+    beacon_draw: BeaconDraw,
     trams: TramSystem,
     tram_draw: TramDraw,
     /// `SUPERSTRUCT_TRAM=auto`: a scripted ride for hitch captures.
@@ -395,6 +400,18 @@ impl App {
         if self.input.pressed(Action::ToggleFullscreen) {
             toggle_fullscreen(&running.window);
         }
+        if self.input.pressed(Action::DropBeacon) {
+            let feet = self
+                .camera
+                .pos
+                .offset(Vec3::NEG_Y * crate::controller::EYE_HEIGHT)
+                .unwrap_or(self.camera.pos);
+            self.beacons.push(feet);
+            self.save.beacons.push(BeaconPos::of(&feet));
+            if let Err(err) = self.save.save(&save_path()) {
+                tracing::warn!(%err, "could not write the save file");
+            }
+        }
         if self.input.pressed(Action::ToggleReadout) {
             running.overlay.readout = !running.overlay.readout;
         }
@@ -508,6 +525,12 @@ impl App {
             &running.gpu.device,
             &running.gpu.queue,
             &self.lifts,
+        );
+        self.beacon_draw.update(
+            &mut running.renderer,
+            &running.gpu.device,
+            &running.gpu.queue,
+            &self.beacons,
         );
         self.tram_draw.update(
             &mut running.renderer,
@@ -788,6 +811,11 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 513.65, 458.0)).unwrap_or(WorldPos::ORIGIN);
     let (debug_tx, debug_rx) = crossbeam_channel::unbounded();
     let (lift_results_tx, lift_results_rx) = crossbeam_channel::unbounded();
+    let save = Save::load(&save_path()).unwrap_or_else(|err| {
+        tracing::warn!(%err, "save file unreadable; starting without beacons");
+        Save::default()
+    });
+    tracing::info!(beacons = save.beacons.len(), path = %save_path().display(), "save loaded");
     let mut app = App {
         title: title.to_owned(),
         settings,
@@ -797,6 +825,9 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         survival: Survival::new(start),
         lifts: LiftSystem::new(WorldSeed(settings_seed)),
         lift_draw: LiftDraw::default(),
+        beacons: save.beacons.iter().filter_map(BeaconPos::pos).collect(),
+        save,
+        beacon_draw: BeaconDraw::default(),
         trams: TramSystem::new(WorldSeed(settings_seed)),
         tram_draw: TramDraw::default(),
         tram_auto: (std::env::var("SUPERSTRUCT_TRAM").as_deref() == Ok("auto"))

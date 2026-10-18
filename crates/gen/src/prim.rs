@@ -201,6 +201,8 @@ impl MaterialId {
     pub const EMISSIVE: Self = Self(3);
     pub const PIPE: Self = Self(4);
     pub const WARM: Self = Self(5);
+    /// Player beacons: drawn by the engine, mostly through fog. Never emitted by the generator.
+    pub const BEACON: Self = Self(6);
 }
 
 /// What a primitive belongs to. Append-only.

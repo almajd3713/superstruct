@@ -202,5 +202,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     colour = colour * ao_factor(in.clip.xy);
     colour = apply_fog_vol(colour, in.rel, 1.0 / in.clip.w, in.clip.xy);
+    if (in.material == 6u) {
+        // Beacons stay readable through the haze.
+        colour = mix(colour, globals.materials[6].rgb * 1.5, 0.9);
+    }
     return vec4<f32>(colour, 1.0);
 }
