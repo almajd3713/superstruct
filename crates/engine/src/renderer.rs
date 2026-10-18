@@ -7,6 +7,7 @@ use worldgen::coord::WorldPos;
 use crate::camera::{Camera, camera_relative};
 use crate::cull::{CullPass, Frustum};
 use crate::gpu_timer::{GpuTimer, Zone};
+use crate::hiz::HizPass;
 use crate::mesh::Mesh;
 use crate::shaders::ShaderSources;
 use crate::suballoc::{Range, SubAllocator};
@@ -201,6 +202,9 @@ impl Default for FrameParams {
 pub struct Renderer {
     depth_view: wgpu::TextureView,
     depth_size: (u32, u32),
+    hiz: HizPass,
+    /// Pyramid level to draw over the frame, for debugging.
+    debug_hiz: Option<u32>,
     globals_buf: wgpu::Buffer,
     globals_bg: wgpu::BindGroup,
     instances_buf: wgpu::Buffer,
@@ -243,7 +247,7 @@ fn create_depth(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         })
         .create_view(&wgpu::TextureViewDescriptor::default())
@@ -325,6 +329,15 @@ impl Renderer {
             immediate_size: 0,
         });
         let sources = ShaderSources::embedded();
+        let depth_view = create_depth(device, size.0, size.1);
+        let hiz = HizPass::new(
+            device,
+            &sources.hiz,
+            format,
+            DEPTH_FORMAT,
+            &depth_view,
+            size,
+        );
         let pipelines = build_pipelines(device, &sources, &scene_layout, &lines_layout, format);
         let lines_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("debug lines"),
@@ -334,8 +347,10 @@ impl Renderer {
         });
 
         Self {
-            depth_view: create_depth(device, size.0, size.1),
+            depth_view,
             depth_size: size,
+            hiz,
+            debug_hiz: None,
             globals_buf,
             globals_bg,
             instances_bg: draws_bg,
@@ -532,6 +547,14 @@ impl Renderer {
             self.shader_error = Some(msg.clone());
             return Err(msg);
         }
+        if let Err(msg) = self
+            .hiz
+            .reload(device, &sources.hiz, self.format, DEPTH_FORMAT)
+        {
+            tracing::error!("hiz shader reload failed, keeping previous pipelines:\n{msg}");
+            self.shader_error = Some(msg.clone());
+            return Err(msg);
+        }
         self.pipelines = pipelines;
         self.shader_error = None;
         tracing::info!("shaders reloaded");
@@ -542,6 +565,7 @@ impl Renderer {
         if size != self.depth_size {
             self.depth_view = create_depth(device, size.0, size.1);
             self.depth_size = size;
+            self.hiz.resize(device, &self.depth_view, size);
         }
     }
 
@@ -625,6 +649,15 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    /// Draws one Hi-Z level over the whole frame; `None` turns it off.
+    pub fn set_debug_hiz(&mut self, level: Option<u32>) {
+        self.debug_hiz = level;
+    }
+
+    pub fn hiz(&self) -> &HizPass {
+        &self.hiz
     }
 
     pub fn set_prepass(&mut self, on: bool) {
@@ -712,6 +745,11 @@ impl Renderer {
                 ..Default::default()
             });
             self.draw_chunks(&mut pass, &self.pipelines.prepass);
+            drop(pass);
+            self.hiz.record(
+                encoder,
+                timer.and_then(|t| t.compute_pass_writes(Zone::HiZ)),
+            );
         }
         // Without the prepass the colour pass clears and writes depth itself; with it the depth
         // is already final and the colour pass only tests against it.
@@ -758,6 +796,9 @@ impl Renderer {
             pass.set_bind_group(0, &self.globals_bg, &[]);
             pass.set_vertex_buffer(0, self.lines_buf.slice(..));
             pass.draw(0..self.lines_scratch.len() as u32, 0..1);
+        }
+        if let Some(level) = self.debug_hiz {
+            self.hiz.draw_debug(queue, &mut pass, level);
         }
     }
 }

@@ -286,3 +286,60 @@ fn prepass_cuts_shading_cost_in_a_dense_scene() {
         eprintln!("prepass {prepass}: {}", line.join(", "));
     }
 }
+
+/// CPU reduction with the rule from `hiz.wgsl`: floor-sized levels, the last texel of an odd
+/// source row or column folded into the final destination texel.
+fn reduce_cpu(prev: &[f32], (pw, ph): (u32, u32)) -> Vec<f32> {
+    let (w, h) = ((pw / 2).max(1), (ph / 2).max(1));
+    let mut out = Vec::new();
+    for y in 0..h {
+        for x in 0..w {
+            let sx = (x * 2)..(x * 2 + if x == w - 1 { pw - x * 2 } else { 2 }).min(pw);
+            let sy = (y * 2)..(y * 2 + if y == h - 1 { ph - y * 2 } else { 2 }).min(ph);
+            let mut m = 1.0_f32;
+            for yy in sy.clone() {
+                for xx in sx.clone() {
+                    m = m.min(prev[(yy * pw + xx) as usize]);
+                }
+            }
+            out.push(m);
+        }
+    }
+    out
+}
+
+#[test]
+fn hiz_levels_are_conservative_minimums_and_debug_view_draws() {
+    use engine::hiz::{level_count, level_size};
+    let Some(h) = headless() else { return };
+    let size = (157, 91);
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = cam.pos.offset(Vec3::new(0.0, 1.65, -54.0)).unwrap();
+    cam.yaw = std::f32::consts::PI;
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_scene(&h.device, &h.queue, &demo_scene_at(I64Vec3::ZERO));
+    let params = FrameParams::default();
+    let plain = h
+        .render_with(&mut renderer, &cam, size, params, &[])
+        .unwrap();
+
+    let hiz = renderer.hiz();
+    let mut prev = hiz.read_level(&h.device, &h.queue, 0);
+    assert!(prev.iter().any(|&d| d > 0.0), "level 0 saw no geometry");
+    assert!(prev.contains(&0.0), "level 0 should have sky");
+    for level in 1..level_count(size) {
+        let expected = reduce_cpu(&prev, level_size(size, level - 1));
+        let got = hiz.read_level(&h.device, &h.queue, level);
+        assert_eq!(got, expected, "level {level}");
+        prev = got;
+    }
+
+    renderer.set_debug_hiz(Some(2));
+    let debug = h
+        .render_with(&mut renderer, &cam, size, params, &[])
+        .unwrap();
+    assert!(image_diff(&plain, &debug).0 > 20, "debug view did not draw");
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/hiz-level2.png");
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    save_png(&out, size.0, size.1, &debug).unwrap();
+}

@@ -15,6 +15,7 @@ pub mod demo;
 pub mod gpu;
 pub mod gpu_timer;
 pub mod headless;
+pub mod hiz;
 pub mod input;
 pub mod mesh;
 pub mod meshpool;
