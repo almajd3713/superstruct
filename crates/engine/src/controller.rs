@@ -151,16 +151,19 @@ impl Controller {
         }
     }
 
-    /// Raise by the step height, move over the obstacle, then come back down onto it.
+    /// Raise by the step height, move over the obstacle, then come back down onto it. The move
+    /// goes at least a capsule radius past the edge, so the lowest sphere lands on the top of the
+    /// step instead of resting on its corner, which matters for steps near `STEP_UP`.
     fn try_step_up(&self, from: Vec3, sub_h: Vec3) -> Option<Vec3> {
         let mut q = from + Vec3::Y * STEP_UP;
         if penetration(&self.solids, q) > SKIN {
             return None;
         }
-        q += sub_h;
+        let dir = sub_h.normalize();
+        q += dir * (RADIUS + 0.05).max(sub_h.length());
         let mut contacts = Contacts::default();
         depenetrate(&self.solids, &mut q, &mut contacts);
-        let moved = Vec3::new(q.x - from.x, 0.0, q.z - from.z).dot(sub_h.normalize());
+        let moved = Vec3::new(q.x - from.x, 0.0, q.z - from.z).dot(dir);
         if moved < sub_h.length() * 0.5 {
             return None;
         }
@@ -177,8 +180,10 @@ impl Controller {
         };
         match probe_down(&self.solids, *p, reach) {
             Some((drop, n))
-                if self.vel.y <= 0.0 && walkable(&self.solids, *p - Vec3::Y * drop, n) =>
+                if self.vel.y <= 0.0
+                    && walkable_normal(&self.solids, *p - Vec3::Y * drop, n).is_some() =>
             {
+                let n = walkable_normal(&self.solids, *p - Vec3::Y * drop, n).unwrap_or(n);
                 p.y -= drop;
                 self.vel.y = 0.0;
                 self.ground_normal = n;
@@ -282,8 +287,15 @@ fn depenetrate(solids: &[Solid], p: &mut Vec3, contacts: &mut Contacts) {
 /// A sphere rolling over a stair edge has a tilted contact normal, so a flat surface just under
 /// the capsule axis counts too.
 fn walkable(solids: &[Solid], p: Vec3, n: Vec3) -> bool {
+    walkable_normal(solids, p, n).is_some()
+}
+
+/// The walkable surface normal under `p`: `n` when it is walkable, else the normal found by
+/// tracing further down. A sphere touching the side of a step first reports the side's normal,
+/// which must not become the ground normal or the walk direction is projected away.
+fn walkable_normal(solids: &[Solid], p: Vec3, n: Vec3) -> Option<Vec3> {
     if n.y >= max_slope_cos() {
-        return true;
+        return Some(n);
     }
     let start = p + Vec3::Y * RADIUS;
     let mut t = 0.0;
@@ -291,14 +303,15 @@ fn walkable(solids: &[Solid], p: Vec3, n: Vec3) -> bool {
         let at = start - Vec3::Y * t;
         let d = sdf(solids, at);
         if d <= 0.002 {
-            return gradient(solids, at).y >= max_slope_cos();
+            let g = gradient(solids, at);
+            return (g.y >= max_slope_cos()).then_some(g);
         }
         t += d;
         if t > RADIUS + 0.25 {
             break;
         }
     }
-    false
+    None
 }
 
 /// Sphere-traces the lowest sphere straight down. Returns how far the capsule can drop before

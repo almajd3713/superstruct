@@ -39,5 +39,6 @@ pub mod stream;
 pub mod streamer;
 pub mod suballoc;
 pub mod tram;
+pub mod tramsys;
 pub mod vertex;
 pub mod window;

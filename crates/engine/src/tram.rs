@@ -250,7 +250,7 @@ impl Schedule {
     clippy::cast_precision_loss,
     clippy::float_cmp
 )]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use worldgen::cell::Level;
     use worldgen::hash::hash;
