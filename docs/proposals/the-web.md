@@ -12,6 +12,11 @@
 | Gravity | Not a flip. **Gravity wells** in the spirit of Toha Heavy Industries, where every direction can be down (§8) |
 | Density | As dense as possible, but with breathing space that shows the extent of the structure, near and far, like the gap between old and new Aperture in Portal 2 (§4) |
 | Horizon promise in a dense world | Moments of awe need not be frequent. The promise is "you can get to that far structure, and you will find something new there" (§11) |
+| Ladder speed, crouch | 0.8 m/s climbing as proposed; all speeds are tunable later |
+| Gravity well frequency | About one every 50 km |
+| Gravity gate transition | A smooth camera roll |
+| Lulls | Both handrail tubes and free drifting |
+| Iteration 3 | More ideas without limit inside the scope: the idea bank `docs/proposals/the-web-ideas.md` |
 
 ## 0. What it should feel like
 
@@ -542,10 +547,7 @@ These come on top of the cavity and the infinite staircase:
 
 ## 13. Open questions
 
-1. **Ladder speed and auto-crouch.** 0.8 m/s climbing, crouch to 1.2 m at 0.8 m/s walking. These are player-feel numbers, so they need your yes.
-2. **How often gravity wells appear.** One well per L0 regime with 30 % chance (about one every 50 km)? Or rarer and stronger, so each is a pilgrimage?
-3. **Camera roll at gravity gates.** Proposed: a smooth 90° turn over about 1.5 s. Or instantaneous with a fade, which is calmer but less physical?
-4. **Lulls.** Handrail tubes only, as proposed? Or allow drifting free in zero-g as a rare, slow, zen verb?
+All four were answered on 2026-10-18 (see the decisions table): ladders at 0.8 m/s, wells about every 50 km, a smooth camera roll at gates, and both handrails and free drift in lulls. The free-drift verb is a slow push along the view direction at about 1 m/s; contact with any surface stops you gently, and a handrail pulls you along faster. Iteration 3 adds many more ideas in `docs/proposals/the-web-ideas.md`; the new systems it needs are listed in §16.
 
 ## 14. Measuring it
 
@@ -592,6 +594,21 @@ Each step ends with a review: slices, report numbers, and in-game screenshots fr
 8. **W4. Far bands and SDF horizon** for the frame, crust surfaces and envelopes; streaming radii; performance budget.
 9. **W5. Exterior kit, ladder kit, and the staircase rebuild.**
 10. **W6. Widen the catalogues,** regime by regime, towards everything above, and the rest of the gravity wells.
+
+## 16. Iteration 3: the idea bank
+
+`docs/proposals/the-web-ideas.md` adds:
+- **Deep time:** absolute depth sets the era, so going down goes back in history and going up approaches the Builder frontier.
+- **Wonders:** about 24 unique far landmarks, one per 30–100 km.
+- **Large-scale routes:** Great Roads, Spines and Rivers at L0 scale.
+- **Neighbourhoods:** 16 quarters.
+- **More content:** more forms, paths, interiors, payoffs and sanctuaries.
+- **Long journeys and weightlessness:** rides, featherfall shafts, the Archipelago.
+- **Light, weather and presence:** non-hostile Builders you can ride, and wake lights that leave your trail visible.
+- **Quiet tools:** scope with gaze-mark, the Atlas with names in a procedural script, listening, chalk.
+- **Strange regions,** and the sound design.
+
+Its §19 lists the new systems; they are CHECKLIST group PW.10.
 
 ## Sources of ideas
 

@@ -359,7 +359,7 @@ The design is in `docs/proposals/the-web.md`, and the decision is PLAN.md §10.4
 - [ ] **PW.0.3** `levels.md` §3–4 and `ports.md` §6: strata, Frame (line keys, oblique beams, knots), voids, fill field, arteries, and the new backbone connectivity argument. *Done when:* the lemmas are written and the lift-core guarantee is replaced.
 - [ ] **PW.0.4** `levels.md` §5: tissue order (reserve, route, grow, dress), supports, the first forms and path types, engulfable routes, the dead-end payoff rule, skin coverage. *Done when:* the spec is complete for the first catalogue (6 forms × 5 supports, 12 path types).
 - [ ] **PW.0.5** `levels.md` §6: L3 with any number of entrances on any face or storey, a skeleton over all of them, interior archetypes. *Done when:* the spec and its connectivity argument are written.
-- [ ] **PW.0.6** `traversal.md` and a new `gravity.md`: ladders, auto-crouch, gravity field `g(p)`, well kinds, gates, lulls, fall rule under any down. 🧭 The user approves ladder speed, crouch height and speed, gate roll timing, well frequency. *Done when:* the specs are written and the numbers approved.
+- [ ] **PW.0.6** `traversal.md` and a new `gravity.md`: ladders, auto-crouch, gravity field `g(p)`, well kinds, gates, lulls, fall rule under any down. Approved 2026-10-18: ladders 0.8 m/s (speeds tunable later), wells about every 50 km, a smooth camera roll at gates, lulls with both handrails and free drift. Crouch height 1.2 m is still provisional. *Done when:* the specs are written with these numbers.
 - [ ] **PW.0.7** `web-report` tool spec: the metrics of the proposal §14 and how each is measured. *Done when:* the spec is written.
 
 ### PW.1 Oriented primitives
@@ -408,7 +408,22 @@ The design is in `docs/proposals/the-web.md`, and the decision is PLAN.md §10.4
 - [ ] **PW.8.2** Rebuild the infinite staircase: open flights, railings, landing beams, core; helical variant. *Done when:* reviewed in game.
 
 ### PW.9 Widen the catalogues
-- [ ] **PW.9.1** The rest of the forms, supports, paths, places and rare events of the proposal, regime by regime. *Done when:* each regime is reviewed.
+- [ ] **PW.9.1** The rest of the forms, supports, paths, places and rare events of the proposal and the idea bank, regime by regime. *Done when:* each regime is reviewed.
+
+### PW.10 Grand systems (from `the-web-ideas.md` §19)
+- [ ] **PW.10.1** Eras by absolute depth, spec and generator. *Done when:* slices through 100 km of depth show the era bands and seams.
+- [ ] **PW.10.2** Great Roads, Spines and Rivers on L0 line keys, in the connectivity argument. *Done when:* a bot follows a Road across 3 L0 cells.
+- [ ] **PW.10.3** Quarters at L1. *Done when:* reviewed in game.
+- [ ] **PW.10.4** City script and place names. *Done when:* names are deterministic per seed and a glyph sheet is reviewed.
+- [ ] **PW.10.5** Wonders: catalogue spec, then the first three (Cenotaph, Dam, Stair). *Done when:* each is seen from 40 km and walked.
+- [ ] **PW.10.6** World-clock movers: moving bridges, the Wheel, Lamp Sun day, orbiters. *Done when:* they agree across restarts at the same world time.
+- [ ] **PW.10.7** Builders: scheduled construction geometry, movement, riding. *Done when:* a Builder places a beam that is then walkable, and the far view matches.
+- [ ] **PW.10.8** Weightless and low gravity: drift verb, currents, featherfall shafts, the Archipelago. *Done when:* 🎮 reviewed.
+- [ ] **PW.10.9** Wake lights and chalk, saved. *Done when:* your trail is visible from an overlook after a restart.
+- [ ] **PW.10.10** Scope with gaze-mark; Atlas. *Done when:* reviewed.
+- [ ] **PW.10.11** Weather: fog sea, rain, dust, wind, steam, frost. *Done when:* reviewed.
+- [ ] **PW.10.12** Generated maps and the Miniature. *Done when:* a map room shows the real surrounding region.
+- [ ] **PW.10.13** Anamorphic payoffs. *Done when:* the symbol resolves from its focal point (screenshot).
 
 ---
 
