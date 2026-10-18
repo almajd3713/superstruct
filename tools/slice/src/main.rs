@@ -13,6 +13,7 @@
 )]
 
 mod render;
+mod stack_view;
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -44,6 +45,8 @@ SECTION OPTIONS:
     --grid               Overlay cell boundaries (L1 white, L2 grey)
     --ports              Overlay ports that cut the plane (magenta)
     --walkable           Overlay walkable surfaces that cut the plane (green)
+    --stack              Draw the regime stacks instead: crusts light, Betweens dark by kind,
+                         flooded ones blue, L0 cell edges red (use --extent 32768 or more)
 
 REPORT OPTIONS (with --report):
     --report             Run the connectivity check over random cells instead of drawing
@@ -69,6 +72,7 @@ struct Args {
     grid: bool,
     ports: bool,
     walkable: bool,
+    stack: bool,
     report: bool,
     count: u32,
     sample_seed: u64,
@@ -88,6 +92,7 @@ fn parse() -> Result<Option<Args>> {
         grid: false,
         ports: false,
         walkable: false,
+        stack: false,
         report: false,
         count: 10_240,
         sample_seed: 7,
@@ -126,6 +131,7 @@ fn parse() -> Result<Option<Args>> {
             "--grid" => a.grid = true,
             "--ports" => a.ports = true,
             "--walkable" => a.walkable = true,
+            "--stack" => a.stack = true,
             "--report" => a.report = true,
             "--count" => a.count = value("--count")?.parse().context("--count")?,
             "--sample-seed" => {
@@ -167,7 +173,11 @@ fn main() -> Result<()> {
             walkable: a.walkable,
         };
         let start = Instant::now();
-        let image = render::render(a.seed, &view, &opts);
+        let image = if a.stack {
+            stack_view::render(a.seed, &view)
+        } else {
+            render::render(a.seed, &view, &opts)
+        };
         if let Some(dir) = out.parent() {
             std::fs::create_dir_all(dir)?;
         }

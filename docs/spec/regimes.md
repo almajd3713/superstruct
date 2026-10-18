@@ -295,6 +295,14 @@ pub enum StackGeometry {
 - The sequence is cheap (≤ 35 draws), but queries run per L2 cell, so `worldgen` keeps a small cache keyed by L0 cell. The function itself stays pure.
 - **Fixed-point rule:** every boundary is an integer number of units, so crust surfaces sit on the 64 m grid and never need float arithmetic.
 
+**Implementation (PW.2.2, `worldgen::stack`).**
+- `u` is taken in integer metres relative to the L0 cell, floor-divided by 64. `Tilted` uses the plane through the cell's centre with slope `s/64` towards the heading `yaw`: `shift = floor(s · (a·cx + b·cz) / (64 · isqrt(a² + b²)))` and `u = floor((y − shift) / 64)`, where `(a, b)` is the heading vector and `(cx, cz)` the offset from the cell centre. `isqrt` is the integer square root, so the lean is the tabled slope along the heading and no angle is computed. `Curved` uses `oct3(p − well) / 64` (`gravity.md` §2) and is `Flat` until a well is passed in (PW.6).
+- **Wrapping.** `u` is reduced modulo 512 before the lookup. A `Tilted` or `Curved` stack therefore has crusts right up to the L0 faces, where it is cut obliquely (SURF-03), and the top and bottom seam halves meet as one full Between when `u` wraps.
+- **Interior algorithm.** After the lower half-seam: repeat — if fewer than `crust_lo + 4` units remain before the upper half-seam, the last Between runs on to 512 and takes the upper seam's kind and flooding; otherwise draw a crust (trimmed to leave 4 units), then a Between kind, depth and flooding. If after that Between fewer than `crust_lo + 4` units would remain, it is replaced by the final Between described above. All draws are still made. The last Between of a stack can therefore be longer than its kind's range, and the Between before a final trim keeps its kind's range.
+- **Tilt and wall axis.** The lean heading of a `Tilted` stack and the axis of a `Vertical` one come from `hash(seed, 0, cell, STACK_YAW)` (§12), not from the main RNG, whose nine draws are fixed.
+- **Census tags.** `BetweenKind::tag()` (`BTW-01` Shallow, `BTW-02` Abyssal, `BTW-03` Pillared, `BTW-04` Webbed, `STR-02` Normal), `StackGeometry::tag()` (`BTW-06..08`) and `BTW-05` for flooded.
+- **Slices.** `slice --stack --axis z --extent 131072` draws crusts and Betweens by kind; see `out/stack-*.png`. A `Vertical` stack seen in a plane parallel to its walls is one flat colour.
+
 ### 8.3 Between kinds (BTW-01..05)
 
 A Between's kind decides depth and what fills it. The kinds are chosen per Between by `pick_weighted` over `between_mix` (index in the order below):
@@ -483,6 +491,7 @@ Every Web field has a tag for the census (MET-11): the registry ID (`REG-01`, `B
 | `SEAM_BETWEEN_Z` | `0x0114` | cell (L0), the cell on the + side | seam along Z |
 | `STRATUM_CHAR` | `0x0115` | cell (L0) with `k` absorbed | stratum character (§10.2) |
 | `ORI_YAW` | `0x0116` | grain cell or L1 cell | frame yaw (§7.4) |
+| `STACK_YAW` | `0x0118` | cell (L0) | lean heading of a Tilted stack, wall axis of a Vertical one (§8.2) |
 | `BETWEEN_FLOODED` | `0x0117` | cell (L0) | flooded modifier (§8.3), drawn from the `STACK` RNG; this salt is reserved for the standalone query |
 
 New salts are append-only and recorded in `worldgen::salt` when the first user of each lands (PW.2.1 and PW.2.2).

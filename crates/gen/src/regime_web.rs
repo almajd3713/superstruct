@@ -1,8 +1,8 @@
 //! The Web fields of a regime: fill, weave, grain, orientation policy and the style palettes
 //! of forms, supports, paths, quarters and mutations. Spec: `docs/spec/regimes.md` §7, §9.
 //!
-//! Stack geometry, crust depths and Between kinds (§8) join in PW.2.2; their draws are
-//! reserved here so the sequence of the later fields does not move.
+//! Stack geometry, crust depths and Between weights (§8) are drawn here; the stack itself is
+//! built from them in `stack.rs`.
 
 use glam::I64Vec3;
 
@@ -28,6 +28,12 @@ pub struct WebFields {
     /// Grain size is `2^grain_log2` metres, 6..=12 (REG-02).
     pub grain_log2: u8,
     pub orientation: OrientationPolicy,
+    /// How the strata are laid out (BTW-06..08). Spec §8.1.
+    pub stack: StackGeometry,
+    /// Crust thickness range in 64 m units, inclusive (STR-01). Spec §8.2.
+    pub crust_units: (u8, u8),
+    /// Weights over the Between kinds. Order: `BetweenKind`. Spec §8.3.
+    pub between_mix: [u8; 5],
     /// Weights 0..=8 over form families (REG-03). Order: [`FORM_FAMILIES`].
     pub forms: [u8; 7],
     /// Weights over SUP-01..11.
@@ -48,6 +54,9 @@ impl WebFields {
         weave: 0,
         grain_log2: GRAIN_LOG2.0,
         orientation: OrientationPolicy::Axis,
+        stack: StackGeometry::Flat,
+        crust_units: (8, 8),
+        between_mix: [0, 1, 0, 0, 0],
         forms: [0; 7],
         supports: [0; 11],
         paths: [0; 6],
@@ -71,6 +80,32 @@ pub const MUTATION_GROUPS: [&str; 6] = ["POSE", "DAMAGE", "COPY", "HOLLOW", "LIG
 /// Index of the families that can never be banned (§9: PH-01 and PV-01 are universal).
 pub const PATH_WALK: usize = 0;
 pub const PATH_STAIR: usize = 3;
+
+/// The coordinate along which strata alternate (BTW-06..08). Spec §8.1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum StackGeometry {
+    /// `u = y`.
+    Flat,
+    /// BTW-06: slabs lean by `tilt` (index into the tilt table) towards heading `yaw`.
+    Tilted { tilt: u8, yaw: u8 },
+    /// BTW-07: `u = x` (axis 0) or `u = z` (axis 1): the strata are walls.
+    Vertical { axis: u8 },
+    /// BTW-08: concentric around a gravity well. Flat until a well is within reach.
+    Curved,
+}
+
+impl StackGeometry {
+    /// The registry ID of the geometry; `None` for the flat default.
+    pub const fn tag(self) -> Option<&'static str> {
+        match self {
+            Self::Flat => None,
+            Self::Tilted { .. } => Some("BTW-06"),
+            Self::Vertical { .. } => Some("BTW-07"),
+            Self::Curved => Some("BTW-08"),
+        }
+    }
+}
 
 /// How structures are turned (REG-04, ORI-12..16). Spec §7.4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -111,6 +146,13 @@ pub struct WebDef {
     /// `Axis`, `YawPerL1`, `GrainYaw`, `TiltedGrain`, `Radial`.
     pub orientation: [u32; 5],
     pub tilt_cap: u8,
+    /// Flat, Tilted, Vertical, Curved.
+    pub stack: [u32; 4],
+    pub tilt: (u8, u8),
+    pub crust_lo: (u8, u8),
+    pub crust_hi: (u8, u8),
+    /// Shallow, Normal, Abyssal, Pillared, Webbed.
+    pub between_mix: [u8; 5],
     pub forms: [u8; 7],
     pub supports: [u8; 11],
     pub paths: [u8; 6],
@@ -127,6 +169,11 @@ pub const WEB_STYLES: [WebDef; 5] = [
         grain_log2: (11, 12),
         orientation: [70, 20, 5, 5, 0],
         tilt_cap: 2,
+        stack: [80, 8, 12, 0],
+        tilt: (1, 3),
+        crust_lo: (12, 20),
+        crust_hi: (28, 48),
+        between_mix: [15, 40, 15, 20, 10],
         forms: [8, 6, 3, 2, 3, 2, 2],
         supports: [8, 4, 3, 3, 3, 5, 2, 2, 4, 2, 1],
         paths: [4, 5, 8, 8, 4, 2],
@@ -140,6 +187,11 @@ pub const WEB_STYLES: [WebDef; 5] = [
         grain_log2: (8, 11),
         orientation: [25, 35, 25, 15, 0],
         tilt_cap: 3,
+        stack: [85, 5, 10, 0],
+        tilt: (1, 2),
+        crust_lo: (16, 28),
+        crust_hi: (40, 64),
+        between_mix: [40, 35, 3, 12, 10],
         forms: [3, 2, 7, 8, 4, 3, 2],
         supports: [5, 3, 4, 4, 6, 3, 4, 6, 3, 3, 1],
         paths: [6, 6, 4, 4, 5, 8],
@@ -153,6 +205,11 @@ pub const WEB_STYLES: [WebDef; 5] = [
         grain_log2: (10, 12),
         orientation: [30, 30, 15, 25, 0],
         tilt_cap: 4,
+        stack: [70, 12, 15, 3],
+        tilt: (2, 4),
+        crust_lo: (10, 18),
+        crust_hi: (24, 40),
+        between_mix: [10, 30, 10, 45, 5],
         forms: [5, 3, 4, 1, 6, 3, 4],
         supports: [4, 5, 2, 3, 8, 2, 3, 2, 2, 2, 1],
         paths: [5, 3, 3, 6, 6, 3],
@@ -166,6 +223,11 @@ pub const WEB_STYLES: [WebDef; 5] = [
         grain_log2: (9, 12),
         orientation: [20, 20, 15, 40, 5],
         tilt_cap: 6,
+        stack: [55, 20, 15, 10],
+        tilt: (2, 6),
+        crust_lo: (8, 12),
+        crust_hi: (14, 26),
+        between_mix: [5, 25, 55, 5, 10],
         forms: [4, 4, 2, 1, 5, 4, 6],
         supports: [3, 6, 6, 5, 2, 2, 6, 1, 3, 3, 1],
         paths: [8, 3, 2, 5, 6, 2],
@@ -179,6 +241,11 @@ pub const WEB_STYLES: [WebDef; 5] = [
         grain_log2: (6, 10),
         orientation: [10, 20, 40, 30, 0],
         tilt_cap: 5,
+        stack: [70, 15, 10, 5],
+        tilt: (2, 5),
+        crust_lo: (12, 20),
+        crust_hi: (30, 52),
+        between_mix: [20, 35, 5, 10, 30],
         forms: [3, 2, 3, 3, 3, 8, 5],
         supports: [4, 4, 3, 3, 4, 6, 5, 8, 5, 4, 1],
         paths: [4, 6, 5, 4, 4, 6],
@@ -186,10 +253,6 @@ pub const WEB_STYLES: [WebDef; 5] = [
         mutations: [3, 8, 3, 3, 2, 3],
     },
 ];
-
-/// Draws made for the stack fields of §8 (stack geometry, its tilt, two crust bounds, five
-/// Between weights). PW.2.2 replaces the burn with the real draws; the count must stay.
-const RESERVED_STACK_DRAWS: usize = 9;
 
 /// The Web fields of L0 cell `cell` (§7.5). `style` indexes `WEB_STYLES`.
 pub fn draw_web(seed: WorldSeed, cell: I64Vec3, style: usize) -> WebFields {
@@ -210,9 +273,32 @@ pub fn draw_web(seed: WorldSeed, cell: I64Vec3, style: usize) -> WebFields {
         4 => OrientationPolicy::Radial,
         _ => OrientationPolicy::Axis,
     };
-    for _ in 0..RESERVED_STACK_DRAWS {
-        rng.next_u64();
-    }
+    // Nine draws: stack, its tilt, the two crust bounds, five Between weights. All are made
+    // whatever the stack turns out to be, so the weights below never move.
+    let geometry = rng.pick_weighted(&def.stack).unwrap_or(0);
+    let tilt = range_u8(&mut rng, def.tilt);
+    let crust_lo = range_u8(&mut rng, def.crust_lo);
+    let crust_hi = range_u8(&mut rng, def.crust_hi).max(crust_lo);
+    let between_mix = def.between_mix.map(|v| {
+        // Around the table value, not renormalised (§8.4).
+        range_u8(&mut rng, (v.saturating_sub(5), v + 5))
+    });
+    let between_mix = if between_mix.iter().all(|&w| w == 0) {
+        [0, 1, 0, 0, 0]
+    } else {
+        between_mix
+    };
+    let stack = match geometry {
+        1 => StackGeometry::Tilted {
+            tilt,
+            yaw: stack_yaw(seed, cell),
+        },
+        2 => StackGeometry::Vertical {
+            axis: u8::from(hash(seed.0, Level::L0, cell, salt::STACK_YAW) & 0x100 != 0),
+        },
+        3 => StackGeometry::Curved,
+        _ => StackGeometry::Flat,
+    };
     let mut forms = weights(&mut rng, def.forms);
     let mut supports = weights(&mut rng, def.supports);
     let mut paths = weights(&mut rng, def.paths);
@@ -234,12 +320,21 @@ pub fn draw_web(seed: WorldSeed, cell: I64Vec3, style: usize) -> WebFields {
         weave,
         grain_log2,
         orientation,
+        stack,
+        crust_units: (crust_lo, crust_hi),
+        between_mix,
         forms,
         supports,
         paths,
         quarters,
         mutations,
     }
+}
+
+/// The lean direction of a Tilted stack, a heading of the table.
+#[allow(clippy::cast_possible_truncation)] // below(64) < 64
+fn stack_yaw(seed: WorldSeed, cell: I64Vec3) -> u8 {
+    Rng::new(hash(seed.0, Level::L0, cell, salt::STACK_YAW)).below(64) as u8
 }
 
 /// One draw per entry: `max(0, base + range(−2, 3))` capped at 8. A zero base is a ban; its

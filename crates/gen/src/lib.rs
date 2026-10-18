@@ -41,6 +41,7 @@ pub mod sanctuary;
 pub mod sanctuary_room;
 pub mod sdf;
 pub mod seed;
+pub mod stack;
 pub mod tram;
 pub mod validate;
 pub mod walk;

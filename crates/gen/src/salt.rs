@@ -24,8 +24,18 @@ salts! {
     CAVITY_NOISE = 0x0105;
     /// Keyed by the L0 cell: the Web fields (`regimes.md` §7.5).
     REGIME_WEB = 0x0110;
+    /// Keyed by the L0 cell: the interior stack sequence (`regimes.md` §8.2).
+    STACK = 0x0111;
+    /// Keyed by the L0 cell above the face: the seam Between along Y.
+    SEAM_BETWEEN_Y = 0x0112;
+    /// Keyed by the L0 cell on the + side: the seam along X (Vertical stacks).
+    SEAM_BETWEEN_X = 0x0113;
+    /// Keyed by the L0 cell on the + side: the seam along Z (Vertical stacks).
+    SEAM_BETWEEN_Z = 0x0114;
     /// Keyed by an L1 cell or a grain cell, with the grain size absorbed: frame yaw (§7.4).
     ORI_YAW = 0x0116;
+    /// Keyed by the L0 cell: lean heading and wall axis of the stack.
+    STACK_YAW = 0x0118;
 
     // L1 megaforms: 0x02xx
     /// Keyed by `ColumnSpanKey(L1)`.
