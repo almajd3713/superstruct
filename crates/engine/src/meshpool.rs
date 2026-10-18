@@ -756,6 +756,83 @@ mod tests {
         }
     }
 
+    /// Prints standpoints on the deck edge of rim cells, looking into the giant cavity.
+    #[test]
+    #[ignore = "diagnostic"]
+    fn print_cavity_rim_viewpoints() {
+        use worldgen::cavity::is_cavity;
+        use worldgen::prim::FeatureKind;
+        let seed = WorldSeed(0);
+        let mut shown = 0;
+        for l0 in -4..4i64 {
+            for l0z in -4..4i64 {
+                for l0y in -1..2i64 {
+                    let base = I64Vec3::new(l0, l0y, l0z) * 8;
+                    for k in 0..512i64 {
+                        let c = base + I64Vec3::new(k % 8, k / 64, k / 8 % 8);
+                        let cell = CellKey::new(Level::L1, c);
+                        if is_cavity(seed, cell) {
+                            continue;
+                        }
+                        // Direction (dx, dz, yaw) towards a cavity neighbour.
+                        let Some((dx, dz, yaw)) =
+                            [(1, 0, 270), (-1, 0, 90), (0, 1, 0), (0, -1, 180)]
+                                .into_iter()
+                                .find(|&(dx, dz, _)| {
+                                    is_cavity(
+                                        seed,
+                                        CellKey::new(Level::L1, c + I64Vec3::new(dx, 0, dz)),
+                                    )
+                                })
+                        else {
+                            continue;
+                        };
+                        let prims = l1_cell(seed, cell).primitives;
+                        let reach = |p: &Primitive| {
+                            let b = p.aabb();
+                            match (dx, dz) {
+                                (1, _) => b.max.x,
+                                (-1, _) => -b.min.x,
+                                (_, 1) => b.max.z,
+                                _ => -b.min.z,
+                            }
+                        };
+                        let Some(deck) = prims
+                            .iter()
+                            .filter(|p| p.kind == FeatureKind::DECK)
+                            .max_by_key(|p| reach(p))
+                        else {
+                            continue;
+                        };
+                        let b = deck.aabb();
+                        let m = |v: i32| f64::from(v) / 16.0;
+                        let x = match dx {
+                            1 => m(b.max.x) - 6.0,
+                            -1 => m(b.min.x) + 6.0,
+                            _ => m(i32::midpoint(b.min.x, b.max.x)),
+                        };
+                        let z = match dz {
+                            1 => m(b.max.z) - 6.0,
+                            -1 => m(b.min.z) + 6.0,
+                            _ => m(i32::midpoint(b.min.z, b.max.z)),
+                        };
+                        let p = c.as_dvec3() * 4096.0 + glam::DVec3::new(x, m(b.max.y) + 1.65, z);
+                        let sector = (p / 1024.0).floor();
+                        let local = p - sector * 1024.0;
+                        println!(
+                            "SUPERSTRUCT_SECTOR={},{},{} SUPERSTRUCT_LOCAL={:.1},{:.1},{:.1} SUPERSTRUCT_YAW={yaw}",
+                            sector.x, sector.y, sector.z, local.x, local.y, local.z
+                        );
+                        shown += 1;
+                        if shown == 4 {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn an_l3_chunk_carries_its_interior_modules_and_ao_boxes() {
         let seed = WorldSeed(0);
