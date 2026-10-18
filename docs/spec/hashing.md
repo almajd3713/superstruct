@@ -203,7 +203,7 @@ The Web adds oriented primitives (`primitives.md` §9). The determinism rules ab
   - the discretised catenary tilts.
   A test re-derives the first two with `f64::tan` from the formulas in `primitives.md` and checks them. That test is the only place a trig function appears, and it is not generator code.
 - **Operations used to build a frame:** integer arithmetic, `+ − × ÷` and `sqrt` in `f64`, and `floor(x + 0.5)` for rounding positions to Q. All are exactly specified (§6 above), so equal integer keys give identical bits.
-- **No FMA.** Rust does not contract `a * b + c` into a fused operation unless `mul_add` is called, and `gen` never calls it (a lint check in `scripts/check.sh` greps for `mul_add`, `sin`, `cos`, `tan`, `atan`, `exp`, `ln`, `powf`, `powi`, `hypot`, `cbrt` in `crates/gen/src`).
+- **No FMA.** Rust does not contract `a * b + c` into a fused operation unless `mul_add` is called, and `gen` never calls it (PW.1.1 adds a test that scans the non-test source of `crates/gen/src` for `mul_add`, `sin`, `cos`, `tan`, `atan`, `exp`, `ln`, `powf`, `powi`, `hypot` and `cbrt`; `atmosphere.rs` is the only known user, in a constant-derivation test).
 - **Order:** matrices are built and applied in the order written in `primitives.md` §9.1. Dot products and cross products sum left to right.
 - **Integers first.** Whatever decides *what exists* (counts, indices, which cell, which line key) is integer. Floats only place the vertices of a feature already decided, and a geometric test whose result changes what exists (a `KeepOut` overlap) is evaluated on the **integer AABB** (`primitives.md` §9.5), not on the float solid.
 - **New salts** are append-only in the usual blocks. The orientation salts are listed in `regimes.md` §12.
