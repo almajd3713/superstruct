@@ -399,3 +399,64 @@ fn occlusion_culling_drops_hidden_instances_without_changing_the_image() {
         "wanted at least 5x fewer instances: {settled} vs {frustum_only}"
     );
 }
+
+#[test]
+fn frozen_culling_keeps_the_old_frustum_while_the_camera_turns_away() {
+    use engine::camera::camera_relative;
+    use engine::cull::Frustum;
+    let Some(h) = headless() else { return };
+    let mut cam = camera_at(I64Vec3::new(3, -2, 5));
+    cam.look(0.7, 0.2);
+    let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut rnd = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f32 / (1u64 << 53) as f32 * 200.0 - 100.0
+    };
+    let mut cube = Mesh::default();
+    cube.add_box(Vec3::splat(-1.0), Vec3::splat(1.0), 0);
+    let scene: Vec<_> = (0..500)
+        .map(|_| {
+            let d = Vec3::new(rnd(), rnd(), rnd());
+            (cam.pos.offset(d).unwrap(), cube.clone())
+        })
+        .collect();
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, SIZE);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    renderer.set_occlusion(false);
+
+    h.render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
+        .unwrap();
+    let live = renderer.read_drawn_counts(&h.device).0;
+    renderer.set_freeze_culling(true);
+    h.render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
+        .unwrap();
+    assert_eq!(renderer.read_drawn_counts(&h.device).0, live);
+
+    // Turn around and step aside: the live frustum would see a different set.
+    let mut turned = cam;
+    turned.look(std::f32::consts::PI, 0.0);
+    turned.pos = cam.pos.offset(Vec3::new(10.0, 0.0, 0.0)).unwrap();
+    let frozen = Frustum::from_view_proj(cam.view_proj(1.0));
+    let to_new = camera_relative(&turned.pos, &cam.pos);
+    let expected = u32::try_from(
+        scene
+            .iter()
+            .filter(|(o, _)| {
+                let c = camera_relative(o, &turned.pos);
+                frozen.translated(to_new).sphere_visible(c, 3.0_f32.sqrt())
+            })
+            .count(),
+    )
+    .unwrap();
+    h.render_with(&mut renderer, &turned, SIZE, PLAIN, &[])
+        .unwrap();
+    assert_eq!(renderer.read_drawn_counts(&h.device).0, expected);
+    assert_eq!(expected, live, "same world set, whatever the camera does");
+
+    renderer.set_freeze_culling(false);
+    h.render_with(&mut renderer, &turned, SIZE, PLAIN, &[])
+        .unwrap();
+    assert_ne!(renderer.read_drawn_counts(&h.device).0, live);
+}

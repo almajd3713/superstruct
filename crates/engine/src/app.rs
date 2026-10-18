@@ -280,6 +280,10 @@ impl App {
         if self.input.pressed(Action::ToggleOverlay) {
             running.overlay.visible = !running.overlay.visible;
         }
+        if self.input.pressed(Action::FreezeCulling) {
+            let frozen = running.renderer.culling_frozen();
+            running.renderer.set_freeze_culling(!frozen);
+        }
         if self.input.pressed(Action::ToggleDebugLines) {
             self.debug_boxes = !self.debug_boxes;
         }

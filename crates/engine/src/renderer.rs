@@ -216,6 +216,9 @@ pub struct Renderer {
     cull: CullPass,
     /// Two-phase occlusion culling (needs the prepass and indirect draws).
     occlusion: bool,
+    /// Culling frustum held fixed in the world, with the camera position it was taken at.
+    frozen: Option<(Frustum, WorldPos)>,
+    freeze_pending: bool,
     free_slots: Vec<u32>,
     next_slot: u32,
     /// Whether indirect draws may use a non-zero first instance.
@@ -364,6 +367,8 @@ impl Renderer {
             instances_bg: draws_bg,
             cull,
             occlusion: true,
+            frozen: None,
+            freeze_pending: false,
             free_slots: Vec::new(),
             next_slot: 0,
             instances_buf,
@@ -504,6 +509,20 @@ impl Renderer {
     /// GPU; for tests and tools.
     pub fn read_drawn_counts(&self, device: &wgpu::Device) -> (u32, u32) {
         self.cull.read_counts(device)
+    }
+
+    /// Keeps culling against the current frustum while the camera moves on, so the culled set
+    /// can be inspected from outside. Occlusion culling pauses meanwhile, since its pyramid
+    /// belongs to the live view.
+    pub fn set_freeze_culling(&mut self, on: bool) {
+        self.freeze_pending = on;
+        if !on {
+            self.frozen = None;
+        }
+    }
+
+    pub fn culling_frozen(&self) -> bool {
+        self.freeze_pending || self.frozen.is_some()
     }
 
     /// Turns two-phase occlusion culling on or off; frustum culling always runs.
@@ -759,13 +778,24 @@ impl Renderer {
         let count = self.instance_scratch.len() as u32;
         // Occlusion culling needs a depth pass to build the pyramid from and GPU-written
         // draw arguments to act on.
-        let two_phase =
-            self.occlusion && self.prepass && self.indirect_first_instance && !self.force_direct;
+        if self.freeze_pending {
+            self.frozen = Some((Frustum::from_view_proj(view_proj), camera.pos));
+            self.freeze_pending = false;
+        }
+        let frustum = match &self.frozen {
+            Some((f, at)) => f.translated(camera_relative(&camera.pos, at)),
+            None => Frustum::from_view_proj(view_proj),
+        };
+        let two_phase = self.occlusion
+            && self.frozen.is_none()
+            && self.prepass
+            && self.indirect_first_instance
+            && !self.force_direct;
         self.cull.record_phase1(
             queue,
             encoder,
             &CullParams {
-                frustum: Frustum::from_view_proj(view_proj),
+                frustum,
                 view_proj,
                 screen: size,
                 count,

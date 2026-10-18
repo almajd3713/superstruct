@@ -24,6 +24,7 @@ pub enum Action {
     FlyFaster,
     FlySlower,
     TeleportPort,
+    FreezeCulling,
     TeleportSanctuary,
 }
 
@@ -62,6 +63,7 @@ impl Default for Bindings {
             (K::Minus, A::FlySlower),
             (K::F5, A::TeleportPort),
             (K::F6, A::TeleportSanctuary),
+            (K::F7, A::FreezeCulling),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),

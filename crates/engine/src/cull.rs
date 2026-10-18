@@ -28,6 +28,17 @@ impl Frustum {
         }
     }
 
+    /// The same frustum expressed relative to a camera that moved by `offset` metres from the
+    /// one it was built for (`offset` = new position minus old position).
+    #[must_use]
+    pub fn translated(&self, offset: Vec3) -> Self {
+        Self {
+            planes: self
+                .planes
+                .map(|p| p + Vec4::new(0.0, 0.0, 0.0, p.truncate().dot(offset))),
+        }
+    }
+
     /// Whether a sphere at camera-relative `centre` touches the frustum.
     pub fn sphere_visible(&self, centre: Vec3, radius: f32) -> bool {
         self.planes
@@ -359,6 +370,24 @@ impl CullPass {
 mod tests {
     use super::*;
     use crate::camera::projection_reversed_infinite;
+
+    #[test]
+    fn translated_frustum_keeps_seeing_the_same_world_points() {
+        let f = Frustum::from_view_proj(projection_reversed_infinite(1.2, 1.0, 0.1));
+        // The camera steps 10 m to the right; a point 50 m ahead of the old position is now
+        // 10 m to the left of the new axis.
+        let moved = f.translated(Vec3::new(10.0, 0.0, 0.0));
+        for p in [
+            Vec3::new(0.0, 0.0, -50.0),
+            Vec3::new(30.0, 5.0, -40.0),
+            Vec3::new(0.0, 0.0, 20.0),
+        ] {
+            assert_eq!(
+                f.sphere_visible(p, 1.0),
+                moved.sphere_visible(p - Vec3::new(10.0, 0.0, 0.0), 1.0)
+            );
+        }
+    }
 
     #[test]
     fn sphere_test_matches_the_view_cone() {
