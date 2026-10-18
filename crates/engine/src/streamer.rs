@@ -10,7 +10,7 @@ use worldgen::coord::WorldPos;
 use crate::collision::{CollisionChunk, CollisionWorld};
 use crate::meshpool::{ChunkMesh, MeshPool, PoolStats};
 use crate::renderer::{ChunkHandle, Renderer};
-use crate::stream::{ChunkId, Detail, StreamConfig, Wanted, desired_set};
+use crate::stream::{ChunkId, Detail, Probe, StreamConfig, Wanted, desired_set_with_probes};
 use crate::vertex::Vertex;
 use crate::zone;
 
@@ -104,6 +104,9 @@ const RERANK_FRAMES: u64 = 30;
 /// With everything loaded, re-ranking only pays off after the camera moved this far (metres),
 /// since the wanted set cannot change otherwise.
 const RERANK_MOVE_M: f64 = 32.0;
+/// While riding on a schedule the wanted set is stable far longer, and a re-rank costs several
+/// milliseconds, so it happens this rarely (`docs/spec/trams.md` §7).
+const RERANK_MOVE_PROBED_M: f64 = 256.0;
 
 pub struct Streamer {
     cfg: StreamerConfig,
@@ -116,6 +119,7 @@ pub struct Streamer {
     last_cell: Option<CellKey>,
     last_rank: u64,
     last_rank_pos: Option<WorldPos>,
+    probes: Vec<Probe>,
     /// Visibility only depends on the wanted and resident sets, which change rarely.
     visibility_dirty: bool,
     frame: u64,
@@ -139,6 +143,7 @@ impl Streamer {
             last_cell: None,
             last_rank: 0,
             last_rank_pos: None,
+            probes: Vec::new(),
             visibility_dirty: true,
             frame: 0,
             resident_bytes: 0,
@@ -195,7 +200,7 @@ impl Streamer {
         let cell = CellKey::containing(Level::L2, cam);
         let moved = self
             .last_rank_pos
-            .is_none_or(|p| cam.delta(&p).length() >= RERANK_MOVE_M);
+            .is_none_or(|p| cam.delta(&p).length() >= self.rerank_distance());
         let loading = self.frame - self.last_rank >= RERANK_FRAMES && self.has_pending_work();
         if self.last_cell != Some(cell) || moved || loading {
             self.last_cell = Some(cell);
@@ -211,6 +216,23 @@ impl Streamer {
             self.refresh_visibility(sink);
         }
         self.evict(sink);
+    }
+
+    /// Wanted-set look-ahead from a known schedule; empty when not on one.
+    pub fn set_probes(&mut self, probes: &[Probe]) {
+        if probes.len() != self.probes.len() {
+            self.last_rank_pos = None;
+        }
+        self.probes.clear();
+        self.probes.extend_from_slice(probes);
+    }
+
+    fn rerank_distance(&self) -> f64 {
+        if self.probes.is_empty() {
+            RERANK_MOVE_M
+        } else {
+            RERANK_MOVE_PROBED_M
+        }
     }
 
     fn has_pending_work(&self) -> bool {
@@ -244,7 +266,13 @@ impl Streamer {
     }
 
     fn retarget(&mut self, cam: &WorldPos, view_dir: Vec3) {
-        desired_set(&self.cfg.stream, cam, view_dir, &mut self.scratch);
+        desired_set_with_probes(
+            &self.cfg.stream,
+            cam,
+            view_dir,
+            &self.probes,
+            &mut self.scratch,
+        );
         std::mem::swap(&mut self.wanted, &mut self.scratch);
         self.wanted_map.clear();
         self.wanted_map

@@ -10,6 +10,8 @@
 //! | Near | L1 cell, full | `l1_full_radius_m` |
 //! | Far | L1 cell, far-visible subset | `l1_far_radius_m` |
 
+use std::collections::HashSet;
+
 use glam::{DVec3, I64Vec3, Vec3};
 use worldgen::cell::{CellKey, Level};
 use worldgen::coord::WorldPos;
@@ -144,6 +146,28 @@ fn centre_offset(cam: &WorldPos, key: CellKey) -> Option<DVec3> {
 /// Chunks wanted around `cam`, priority-ordered by distance biased towards `view_dir`
 /// (cells ahead load before cells behind at the same distance). Output order is deterministic.
 pub fn desired_set(cfg: &StreamConfig, cam: &WorldPos, view_dir: Vec3, out: &mut Vec<Wanted>) {
+    desired_set_with_probes(cfg, cam, view_dir, &[], out);
+}
+
+/// A place the camera will be, from a known schedule (`docs/spec/trams.md` §7).
+#[derive(Debug, Clone, Copy)]
+pub struct Probe {
+    pub pos: WorldPos,
+    /// Seconds until the camera gets there.
+    pub lead_s: f32,
+}
+
+/// L2 full chunks wanted within this distance of each probe, metres.
+pub const PROBE_L2_RADIUS: f64 = 512.0;
+
+/// [`desired_set`] plus the L2 full chunks around each probe, ranked by lead time first.
+pub fn desired_set_with_probes(
+    cfg: &StreamConfig,
+    cam: &WorldPos,
+    view_dir: Vec3,
+    probes: &[Probe],
+    out: &mut Vec<Wanted>,
+) {
     out.clear();
     let view = view_dir.as_dvec3().normalize_or_zero();
     let mut add = |id: ChunkId, dist: f64| {
@@ -191,11 +215,52 @@ pub fn desired_set(cfg: &StreamConfig, cam: &WorldPos, view_dir: Vec3, out: &mut
         };
         add(ChunkId::l1(k.coords, detail), d);
     });
+    if !probes.is_empty() {
+        add_probes(probes, out);
+    }
     out.sort_by(|a, b| {
         a.priority
             .total_cmp(&b.priority)
             .then_with(|| a.id.cmp(&b.id))
     });
+}
+
+/// Adds the probes' L2 full chunks. A cell wanted full by a probe is not also wanted as mid.
+fn add_probes(probes: &[Probe], out: &mut Vec<Wanted>) {
+    let mut fulls: Vec<Wanted> = Vec::new();
+    for probe in probes {
+        let centre = CellKey::containing(Level::L2, &probe.pos).coords;
+        let n = (PROBE_L2_RADIUS / Level::L2.size_m() as f64).ceil() as i64 + 1;
+        for z in -n..=n {
+            for y in -n..=n {
+                for x in -n..=n {
+                    let key = CellKey::new(Level::L2, centre + I64Vec3::new(x, y, z));
+                    if let Some(d) =
+                        distance_to_cell(&probe.pos, key).filter(|d| *d <= PROBE_L2_RADIUS)
+                    {
+                        fulls.push(Wanted {
+                            id: ChunkId::l2(key.coords),
+                            priority: 100.0 * probe.lead_s + d as f32,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    fulls.append(out);
+    fulls.sort_by(|a, b| a.id.cmp(&b.id).then(a.priority.total_cmp(&b.priority)));
+    fulls.dedup_by(|b, a| a.id == b.id);
+    let full_cells: HashSet<I64Vec3> = fulls
+        .iter()
+        .filter(|w| w.id.key.level == Level::L2 && w.id.detail == Detail::Full)
+        .map(|w| w.id.key.coords)
+        .collect();
+    fulls.retain(|w| {
+        !(w.id.key.level == Level::L2
+            && w.id.detail == Detail::Mid
+            && full_cells.contains(&w.id.key.coords))
+    });
+    *out = fulls;
 }
 
 #[cfg(test)]
@@ -304,5 +369,35 @@ mod tests {
         let v = set(&StreamConfig::default(), &cam);
         assert!(v.len() > 50);
         assert!(v.iter().all(|w| w.id.key.in_domain()));
+    }
+
+    #[test]
+    fn probes_add_l2_full_chunks_far_ahead_and_drop_their_mid_variant() {
+        let cfg = StreamConfig::default();
+        let cam = at([0, 0, 0], [512.0, 512.0, 512.0]);
+        let ahead = at([3, 0, 0], [512.0, 512.0, 512.0]);
+        let key = CellKey::containing(Level::L2, &ahead).coords;
+        let plain = set(&cfg, &cam);
+        assert!(!plain.iter().any(|w| w.id == ChunkId::l2(key)));
+        let mut with = Vec::new();
+        let probe = Probe {
+            pos: ahead,
+            lead_s: 30.0,
+        };
+        desired_set_with_probes(&cfg, &cam, Vec3::X, &[probe], &mut with);
+        assert!(with.iter().any(|w| w.id == ChunkId::l2(key)));
+        assert!(!with.iter().any(|w| w.id == ChunkId::l2_mid(key)));
+        let mut ids: Vec<_> = with.iter().map(|w| w.id).collect();
+        let n = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "duplicate ids");
+        // Same result twice.
+        let mut again = Vec::new();
+        desired_set_with_probes(&cfg, &cam, Vec3::X, &[probe], &mut again);
+        assert_eq!(
+            with.iter().map(|w| w.id).collect::<Vec<_>>(),
+            again.iter().map(|w| w.id).collect::<Vec<_>>()
+        );
     }
 }
