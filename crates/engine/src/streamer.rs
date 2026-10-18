@@ -31,8 +31,14 @@ pub struct RendererSink<'a> {
 
 impl ChunkSink for RendererSink<'_> {
     fn upload(&mut self, chunk: &ChunkMesh) -> (ChunkHandle, u64) {
-        self.renderer
-            .upload_chunk(self.device, self.queue, chunk.origin, &chunk.mesh)
+        match &chunk.far {
+            Some(far) => self
+                .renderer
+                .upload_far_chunk(self.queue, chunk.origin, far),
+            None => self
+                .renderer
+                .upload_chunk(self.device, self.queue, chunk.origin, &chunk.mesh),
+        }
     }
 
     fn remove(&mut self, handle: ChunkHandle) {
@@ -240,7 +246,7 @@ impl Streamer {
         let mut i = 0;
         while i < self.ready.len() {
             let chunk = &self.ready[i];
-            let bytes = chunk_bytes(&chunk.mesh.vertices, &chunk.mesh.indices);
+            let bytes = chunk.upload_bytes();
             if bytes > self.cfg.upload_budget_bytes {
                 tracing::error!(
                     "chunk {:?} is {bytes} bytes, over the {} byte upload budget; dropped",
@@ -359,7 +365,7 @@ mod tests {
 
     impl ChunkSink for FakeSink {
         fn upload(&mut self, chunk: &ChunkMesh) -> (ChunkHandle, u64) {
-            let bytes = chunk_bytes(&chunk.mesh.vertices, &chunk.mesh.indices);
+            let bytes = chunk.upload_bytes();
             self.next += 1;
             self.live.insert(self.next, (bytes, true));
             (ChunkHandle(self.next), bytes)
@@ -416,7 +422,7 @@ mod tests {
 
     #[test]
     fn fast_flythrough_stays_inside_the_memory_budget_without_stale_work() {
-        let memory = 700_000;
+        let memory = 400_000;
         let mut s = streamer(StreamerConfig {
             stream: small(),
             upload_budget_bytes: 1 << 20,
@@ -530,5 +536,47 @@ mod tests {
             !sink.live[&handle.0].1,
             "mid chunk still drawn under the full one"
         );
+    }
+
+    /// The far band at its default 50 km radius fills within its time budget on 8 workers.
+    /// Prints the time; run `cargo test --release -p engine --lib far_band -- --nocapture`.
+    #[test]
+    fn far_band_reaches_fifty_km_within_its_time_budget() {
+        let mut s = Streamer::new(
+            StreamerConfig {
+                stream: StreamConfig::default(),
+                upload_budget_bytes: 16 << 20,
+                memory_budget_bytes: u64::MAX,
+            },
+            MeshPool::new(WorldSeed(0), 8),
+        );
+        let mut sink = FakeSink::default();
+        let cam = pos(512.0, 0);
+        let start = Instant::now();
+        loop {
+            s.update(&cam, Vec3::X, &mut sink);
+            let st = s.stats();
+            if st.pool.queued + st.pool.running + st.ready == 0 {
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_mins(2), "{st:?}");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let took = start.elapsed();
+        let st = s.stats();
+        let far = st.wanted;
+        eprintln!(
+            "{far} chunks resident in {took:?}, {} bytes",
+            st.resident_bytes
+        );
+        // 50 km reached: a far cell 12 L1 cells (49 km) out along x is resident.
+        let edge = ChunkId::l1(I64Vec3::new(12, 0, 0), crate::stream::Detail::Far);
+        assert!(s.is_resident(&edge));
+        let budget = if cfg!(debug_assertions) {
+            Duration::from_mins(1)
+        } else {
+            Duration::from_secs(10)
+        };
+        assert!(took < budget, "took {took:?}");
     }
 }

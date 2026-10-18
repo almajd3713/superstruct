@@ -114,13 +114,38 @@ fn add_stairs(mesh: &mut Mesh, aabb: QAabb, rise: Dir4, steps: u16, material: u1
 }
 
 fn add_cylinder(mesh: &mut Mesh, axis: Axis, base: Vec3, length: f32, radius: f32, material: u16) {
+    add_cylinder_sided(
+        mesh,
+        axis,
+        base,
+        length,
+        radius,
+        material,
+        cylinder_sides(radius),
+    );
+}
+
+/// Adds a cylinder along Y inside the unit box (base cap centre `(0.5, 0, 0.5)`, radius 0.5),
+/// the mesh far-band instances scale into place.
+pub fn add_unit_cylinder(mesh: &mut Mesh, sides: usize) {
+    add_cylinder_sided(mesh, Axis::Y, Vec3::new(0.5, 0.0, 0.5), 1.0, 0.5, 0, sides);
+}
+
+fn add_cylinder_sided(
+    mesh: &mut Mesh,
+    axis: Axis,
+    base: Vec3,
+    length: f32,
+    radius: f32,
+    material: u16,
+    sides: usize,
+) {
     // (along, u, v) unit vectors, a right-handed frame so rings wind consistently.
     let (along, u, v) = match axis {
         Axis::X => (Vec3::X, Vec3::Y, Vec3::Z),
         Axis::Y => (Vec3::Y, Vec3::Z, Vec3::X),
         Axis::Z => (Vec3::Z, Vec3::X, Vec3::Y),
     };
-    let sides = cylinder_sides(radius);
     let ring = |k: usize, at: f32| {
         let a = std::f32::consts::TAU * k as f32 / sides as f32;
         base + along * at + (u * a.cos() + v * a.sin()) * radius

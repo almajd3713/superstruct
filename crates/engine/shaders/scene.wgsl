@@ -11,6 +11,19 @@ struct Instance {
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
 
+// Far band: a primitive's bounding box in cell-local metres plus the owning cell's slot.
+struct FarInstance {
+    min: vec3<f32>,
+    cell: u32,
+    size: vec3<f32>,
+    // Material in the low 16 bits, bit 16 for a cylinder, bits 17-18 its axis (0 x, 1 y, 2 z).
+    attrs: u32,
+};
+
+@group(1) @binding(1) var<storage, read> far_instances: array<FarInstance>;
+// Camera-relative origin of each far cell, rewritten every frame.
+@group(1) @binding(2) var<storage, read> far_cells: array<vec4<f32>>;
+
 struct VsIn {
     @builtin(instance_index) draw: u32,
     @location(0) position: vec3<f32>,
@@ -44,6 +57,39 @@ fn vs_main(in: VsIn) -> VsOut {
     out.clip = globals.view_proj * vec4<f32>(rel, 1.0);
     out.normal = oct_decode(in.normal_oct);
     out.material = in.material.x;
+    return out;
+}
+
+struct FarIn {
+    @builtin(instance_index) draw: u32,
+    @location(0) position: vec3<f32>,
+    @location(1) normal_oct: vec2<f32>,
+};
+
+// Scales the shared unit box or unit cylinder (axis along y inside the unit box) into place.
+@vertex
+fn vs_far(in: FarIn) -> VsOut {
+    var out: VsOut;
+    let inst = far_instances[in.draw];
+    var p = in.position;
+    var n = oct_decode(in.normal_oct);
+    let axis = (inst.attrs >> 17u) & 3u;
+    if ((inst.attrs & 0x10000u) != 0u) {
+        // Cyclic permutations are rotations, so the winding stays outward; a plain swap would
+        // mirror the mesh and the back-face cull would remove the wrong side.
+        if (axis == 0u) {
+            p = vec3<f32>(p.y, p.z, p.x);
+            n = vec3<f32>(n.y, n.z, n.x);
+        } else if (axis == 2u) {
+            p = vec3<f32>(p.z, p.x, p.y);
+            n = vec3<f32>(n.z, n.x, n.y);
+        }
+    }
+    let rel = far_cells[inst.cell].xyz + inst.min + p * inst.size;
+    out.rel = rel;
+    out.clip = globals.view_proj * vec4<f32>(rel, 1.0);
+    out.normal = n;
+    out.material = inst.attrs & 0xffffu;
     return out;
 }
 

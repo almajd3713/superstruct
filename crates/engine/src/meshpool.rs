@@ -19,6 +19,7 @@ use worldgen::prim::{PrimFlags, Primitive};
 use worldgen::seed::WorldSeed;
 
 use crate::chunkmesh::mesh_primitives;
+use crate::farinst::{FarData, far_instances};
 use crate::mesh::Mesh;
 use crate::stream::{ChunkId, Detail};
 use crate::zone;
@@ -35,6 +36,18 @@ pub struct ChunkMesh {
     pub far_digest: Option<u64>,
     pub gen_ms: f32,
     pub mesh_ms: f32,
+    /// Far L1 chunks carry instances instead of a mesh.
+    pub far: Option<FarData>,
+}
+
+impl ChunkMesh {
+    /// Bytes this chunk occupies on the GPU.
+    pub fn upload_bytes(&self) -> u64 {
+        match &self.far {
+            Some(far) => far.bytes(),
+            None => crate::streamer::chunk_bytes(&self.mesh.vertices, &self.mesh.indices),
+        }
+    }
 }
 
 pub type JobResult = Result<ChunkMesh, (ChunkId, CoordError)>;
@@ -293,7 +306,11 @@ fn build(seed: WorldSeed, cache: &L1Cache, id: ChunkId, stale: &AtomicBool) -> O
     } else {
         None
     };
-    let (mesh, _) = mesh_primitives(&prims);
+    let (mesh, far) = if id.detail == Detail::Far {
+        (Mesh::default(), Some(far_instances(&prims)))
+    } else {
+        (mesh_primitives(&prims).0, None)
+    };
     let t2 = Instant::now();
     if stale.load(Ordering::Relaxed) {
         return None;
@@ -306,6 +323,7 @@ fn build(seed: WorldSeed, cache: &L1Cache, id: ChunkId, stale: &AtomicBool) -> O
         far_digest,
         gen_ms: (t1 - t0).as_secs_f32() * 1000.0,
         mesh_ms: (t2 - t1).as_secs_f32() * 1000.0,
+        far,
     }))
 }
 

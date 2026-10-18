@@ -6,6 +6,7 @@ use worldgen::coord::WorldPos;
 
 use crate::camera::{Camera, camera_relative};
 use crate::cull::{CullParams, CullPass, Frustum};
+use crate::farinst::{FarData, FarInstance, UnitMeshes, unit_meshes};
 use crate::gpu_timer::{GpuTimer, Zone};
 use crate::hiz::HizPass;
 use crate::mesh::Mesh;
@@ -201,6 +202,129 @@ impl Default for FrameParams {
     }
 }
 
+/// Most far cells and instances resident at once; beyond that new ones are not drawn.
+const FAR_MAX_CELLS: usize = 32768;
+const FAR_MAX_INSTANCES: u32 = 1 << 20;
+
+struct FarChunk {
+    handle: ChunkHandle,
+    origin: WorldPos,
+    slot: u32,
+    boxes: Range,
+    cylinders: Range,
+    /// Cell-local bounding sphere.
+    bounds: [f32; 4],
+    bytes: u64,
+    visible: bool,
+}
+
+/// Far-band chunks as instance ranges, drawn from one shared unit box and cylinder.
+struct FarState {
+    instances: wgpu::Buffer,
+    cells: wgpu::Buffer,
+    args: wgpu::Buffer,
+    unit_vertices: wgpu::Buffer,
+    unit_indices: wgpu::Buffer,
+    unit: UnitMeshes,
+    alloc: SubAllocator,
+    chunks: Vec<FarChunk>,
+    free_slots: Vec<u32>,
+    next_slot: u32,
+    cell_scratch: Vec<[f32; 4]>,
+    args_scratch: Vec<IndirectArgs>,
+}
+
+impl FarState {
+    fn new(device: &wgpu::Device) -> Self {
+        use wgpu::util::DeviceExt;
+        let unit = unit_meshes();
+        let storage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
+        let buf = |label, size: u64, usage| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size,
+                usage,
+                mapped_at_creation: false,
+            })
+        };
+        Self {
+            instances: buf(
+                "far instances",
+                u64::from(FAR_MAX_INSTANCES) * std::mem::size_of::<FarInstance>() as u64,
+                storage,
+            ),
+            cells: buf("far cells", (FAR_MAX_CELLS * 16) as u64, storage),
+            // A box and a cylinder record per cell at most.
+            args: buf(
+                "far args",
+                (FAR_MAX_CELLS * 2 * std::mem::size_of::<IndirectArgs>()) as u64,
+                wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+            ),
+            unit_vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("far unit vertices"),
+                contents: bytemuck::cast_slice(&unit.mesh.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            unit_indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("far unit indices"),
+                contents: bytemuck::cast_slice(&unit.mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            }),
+            unit,
+            alloc: SubAllocator::new(FAR_MAX_INSTANCES),
+            chunks: Vec::new(),
+            free_slots: Vec::new(),
+            next_slot: 0,
+            cell_scratch: Vec::new(),
+            args_scratch: Vec::new(),
+        }
+    }
+
+    /// Writes the cell table and the indirect records of the chunks inside `frustum`.
+    fn prepare(&mut self, queue: &wgpu::Queue, cam: &WorldPos, frustum: &Frustum) {
+        self.args_scratch.clear();
+        self.cell_scratch.clear();
+        self.cell_scratch.resize(self.next_slot as usize, [0.0; 4]);
+        for c in &self.chunks {
+            let o = camera_relative(&c.origin, cam);
+            self.cell_scratch[c.slot as usize] = [o.x, o.y, o.z, 0.0];
+        }
+        for c in self.chunks.iter().filter(|c| c.visible) {
+            let o = camera_relative(&c.origin, cam);
+            let centre = o + Vec3::new(c.bounds[0], c.bounds[1], c.bounds[2]);
+            if !frustum.sphere_visible(centre, c.bounds[3]) {
+                continue;
+            }
+            let (nb, nc) = (c.boxes.len, c.cylinders.len);
+            if nb > 0 {
+                self.args_scratch.push(IndirectArgs {
+                    index_count: self.unit.box_indices,
+                    instance_count: nb,
+                    first_index: 0,
+                    base_vertex: 0,
+                    first_instance: c.boxes.offset,
+                });
+            }
+            if nc > 0 {
+                self.args_scratch.push(IndirectArgs {
+                    index_count: self.unit.cylinder_indices,
+                    instance_count: nc,
+                    first_index: self.unit.box_indices,
+                    // The unit mesh's indices are absolute, so no base vertex.
+                    base_vertex: 0,
+                    first_instance: c.cylinders.offset,
+                });
+            }
+        }
+        if !self.cell_scratch.is_empty() {
+            queue.write_buffer(&self.cells, 0, bytemuck::cast_slice(&self.cell_scratch));
+        }
+        if !self.args_scratch.is_empty() {
+            queue.write_buffer(&self.args, 0, bytemuck::cast_slice(&self.args_scratch));
+        }
+    }
+}
+
 // The flags are independent debug toggles, not states of one machine.
 #[allow(clippy::struct_excessive_bools)]
 pub struct Renderer {
@@ -214,6 +338,7 @@ pub struct Renderer {
     instances_buf: wgpu::Buffer,
     instances_bg: wgpu::BindGroup,
     cull: CullPass,
+    far: FarState,
     /// Two-phase occlusion culling (needs the prepass and indirect draws).
     occlusion: bool,
     /// Culling frustum held fixed in the world, with the camera position it was taken at.
@@ -302,8 +427,8 @@ impl Renderer {
         });
         let draws_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("draws bgl"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
+            entries: &[0, 1, 2].map(|binding| wgpu::BindGroupLayoutEntry {
+                binding,
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -311,15 +436,26 @@ impl Renderer {
                     min_binding_size: None,
                 },
                 count: None,
-            }],
+            }),
         });
+        let far = FarState::new(device);
         let draws_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("draws bg"),
             layout: &draws_bgl,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: instances_buf.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: instances_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: far.instances.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: far.cells.as_entire_binding(),
+                },
+            ],
         });
 
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -366,6 +502,7 @@ impl Renderer {
             globals_bg,
             instances_bg: draws_bg,
             cull,
+            far,
             occlusion: true,
             frozen: None,
             freeze_pending: false,
@@ -497,7 +634,70 @@ impl Renderer {
             p.vertices.free(c.vertices);
             p.indices.free(c.indices);
             self.free_slots.push(c.slot);
+        } else if let Some(i) = self.far.chunks.iter().position(|c| c.handle == handle) {
+            let c = self.far.chunks.swap_remove(i);
+            self.gpu_bytes -= c.bytes;
+            self.far.alloc.free(Range {
+                offset: c.boxes.offset,
+                len: c.boxes.len + c.cylinders.len,
+            });
+            self.far.free_slots.push(c.slot);
         }
+    }
+
+    /// Uploads far-band instances. Empty data gets a handle and no draw.
+    pub fn upload_far_chunk(
+        &mut self,
+        queue: &wgpu::Queue,
+        origin: WorldPos,
+        data: &FarData,
+    ) -> (ChunkHandle, u64) {
+        crate::zone!("upload far chunk");
+        let handle = ChunkHandle(self.next_handle);
+        self.next_handle += 1;
+        let total = data.len() as u32;
+        let far = &mut self.far;
+        let slot = far.free_slots.pop().unwrap_or(far.next_slot);
+        let range = (total > 0 && (slot as usize) < FAR_MAX_CELLS)
+            .then(|| far.alloc.alloc(total))
+            .flatten();
+        let Some(range) = range else {
+            if total > 0 {
+                tracing::error!("far band is full; a chunk of {total} instances is not drawn");
+            }
+            far.free_slots.push(slot);
+            return (handle, 0);
+        };
+        far.next_slot = far.next_slot.max(slot + 1);
+        let mut all: Vec<FarInstance> = data.boxes.iter().chain(&data.cylinders).copied().collect();
+        for i in &mut all {
+            i.cell = slot;
+        }
+        queue.write_buffer(
+            &far.instances,
+            u64::from(range.offset) * std::mem::size_of::<FarInstance>() as u64,
+            bytemuck::cast_slice(&all),
+        );
+        let nb = data.boxes.len() as u32;
+        let bytes = data.bytes();
+        self.gpu_bytes += bytes;
+        far.chunks.push(FarChunk {
+            handle,
+            origin,
+            slot,
+            boxes: Range {
+                offset: range.offset,
+                len: nb,
+            },
+            cylinders: Range {
+                offset: range.offset + nb,
+                len: total - nb,
+            },
+            bounds: data.bounding_sphere(),
+            bytes,
+            visible: true,
+        });
+        (handle, bytes)
     }
 
     /// Switches between the indirect path and the direct fallback, which must look the same.
@@ -534,6 +734,8 @@ impl Renderer {
     pub fn set_chunk_visible(&mut self, handle: ChunkHandle, visible: bool) {
         if let Some(c) = self.chunks.iter_mut().find(|c| c.handle == handle) {
             c.visible = visible;
+        } else if let Some(c) = self.far.chunks.iter_mut().find(|c| c.handle == handle) {
+            c.visible = visible;
         }
     }
 
@@ -548,7 +750,7 @@ impl Renderer {
     }
 
     pub fn chunk_count(&self) -> usize {
-        self.chunks.len()
+        self.chunks.len() + self.far.chunks.len()
     }
 
     /// The last shader compile error, cleared by the next successful reload.
@@ -694,6 +896,31 @@ impl Renderer {
         }
     }
 
+    /// Draws the visible far cells, after the near geometry so depth testing trims the overdraw.
+    fn draw_far(&self, pass: &mut wgpu::RenderPass<'_>) {
+        let far = &self.far;
+        if far.args_scratch.is_empty() {
+            return;
+        }
+        pass.set_pipeline(&self.pipelines.far);
+        pass.set_bind_group(0, &self.globals_bg, &[]);
+        pass.set_bind_group(1, &self.instances_bg, &[]);
+        pass.set_vertex_buffer(0, far.unit_vertices.slice(..));
+        pass.set_index_buffer(far.unit_indices.slice(..), wgpu::IndexFormat::Uint32);
+        if self.indirect_first_instance && !self.force_direct {
+            pass.multi_draw_indexed_indirect(&far.args, 0, far.args_scratch.len() as u32);
+        } else {
+            for a in &far.args_scratch {
+                let first = a.first_index;
+                pass.draw_indexed(
+                    first..first + a.index_count,
+                    a.base_vertex,
+                    a.first_instance..a.first_instance + a.instance_count,
+                );
+            }
+        }
+    }
+
     /// Depth-only pass over one draw set. The first pass clears depth, a second one adds to it.
     fn prepass_pass(
         &self,
@@ -786,6 +1013,7 @@ impl Renderer {
             Some((f, at)) => f.translated(camera_relative(&camera.pos, at)),
             None => Frustum::from_view_proj(view_proj),
         };
+        self.far.prepare(queue, &camera.pos, &frustum);
         let two_phase = self.occlusion
             && self.frozen.is_none()
             && self.prepass
@@ -882,6 +1110,7 @@ impl Renderer {
         if two_phase {
             self.draw_chunks(&mut pass, scene, DrawSet::B);
         }
+        self.draw_far(&mut pass);
         if !self.lines_scratch.is_empty() {
             pass.set_pipeline(&self.pipelines.lines);
             pass.set_bind_group(0, &self.globals_bg, &[]);
@@ -922,6 +1151,7 @@ fn build_pipeline(
     buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
     topology: wgpu::PrimitiveTopology,
     depth: DepthUse,
+    vertex_entry: &str,
 ) -> wgpu::RenderPipeline {
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
@@ -932,7 +1162,7 @@ fn build_pipeline(
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: &module,
-            entry_point: Some("vs_main"),
+            entry_point: Some(vertex_entry),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             buffers,
         },
@@ -993,6 +1223,8 @@ struct Pipelines {
     /// Colour pass that only tests against a finished prepass depth.
     scene_tested: wgpu::RenderPipeline,
     prepass: wgpu::RenderPipeline,
+    /// Far-band instances scaled out of the shared unit meshes; writes depth itself.
+    far: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
 }
 
@@ -1003,7 +1235,7 @@ fn build_pipelines(
     lines_layout: &wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
 ) -> Pipelines {
-    let scene = |label, depth| {
+    let scene = |label, depth, entry| {
         build_pipeline(
             device,
             label,
@@ -1013,6 +1245,7 @@ fn build_pipelines(
             &[Some(Vertex::LAYOUT)],
             wgpu::PrimitiveTopology::TriangleList,
             depth,
+            entry,
         )
     };
     let line_vertex = wgpu::VertexBufferLayout {
@@ -1029,11 +1262,13 @@ fn build_pipelines(
         &[Some(line_vertex)],
         wgpu::PrimitiveTopology::LineList,
         DepthUse::Test,
+        "vs_main",
     );
     Pipelines {
-        scene: scene("scene", DepthUse::Write),
-        scene_tested: scene("scene tested", DepthUse::Test),
-        prepass: scene("depth prepass", DepthUse::PrepassOnly),
+        scene: scene("scene", DepthUse::Write, "vs_main"),
+        scene_tested: scene("scene tested", DepthUse::Test, "vs_main"),
+        prepass: scene("depth prepass", DepthUse::PrepassOnly, "vs_main"),
+        far: scene("far band", DepthUse::Write, "vs_far"),
         lines,
     }
 }

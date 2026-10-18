@@ -103,7 +103,7 @@ impl Default for StreamConfig {
             l2_radius_m: 1024.0,
             l2_mid_radius_m: 3072.0,
             l1_full_radius_m: 4096.0,
-            l1_far_radius_m: 12288.0,
+            l1_far_radius_m: 51200.0,
         }
     }
 }

@@ -460,3 +460,77 @@ fn frozen_culling_keeps_the_old_frustum_while_the_camera_turns_away() {
         .unwrap();
     assert_ne!(renderer.read_drawn_counts(&h.device).0, live);
 }
+
+#[test]
+fn far_instances_draw_like_the_meshed_primitives() {
+    use engine::chunkmesh::mesh_primitives;
+    use engine::farinst::far_instances;
+    use worldgen::cell::Axis;
+    use worldgen::prim::{FeatureKind, MaterialId, PrimFlags, Primitive, QAabb, QVec3, Shape};
+    let Some(h) = headless() else { return };
+    let size = (160, 120);
+    let cam = camera_at(I64Vec3::ZERO);
+    let prim = |shape, material| Primitive {
+        shape,
+        material: MaterialId(material),
+        kind: FeatureKind::TRUNK,
+        flags: PrimFlags::FAR_VISIBLE,
+    };
+    // Cell-local quanta (16 per metre), placed 40 m ahead of the camera.
+    let b = |lo: [i32; 3], hi: [i32; 3]| Shape::Box {
+        aabb: QAabb::new(
+            QVec3::new(lo[0], lo[1], lo[2]),
+            QVec3::new(hi[0], hi[1], hi[2]),
+        ),
+    };
+    let prims = [
+        prim(b([0, 0, 0], [320, 160, 320]), 0),
+        prim(b([480, 0, 0], [800, 480, 160]), 1),
+        prim(
+            Shape::cylinder(Axis::Y, QVec3::new(160, 320, 640), 480, 128),
+            4,
+        ),
+        prim(
+            Shape::cylinder(Axis::X, QVec3::new(480, 160, 640), 480, 96),
+            4,
+        ),
+        prim(
+            Shape::cylinder(Axis::Z, QVec3::new(1000, 160, 400), 480, 96),
+            5,
+        ),
+    ];
+    let origin = cam.pos.offset(Vec3::new(-25.0, -8.0, -60.0)).unwrap();
+    let mesh = mesh_primitives(&prims).0;
+    let params = FrameParams::default();
+
+    let mut meshed = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    meshed.set_scene(&h.device, &h.queue, &[(origin, mesh)]);
+    let a = h.render_with(&mut meshed, &cam, size, params, &[]).unwrap();
+
+    let mut instanced = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    instanced.upload_far_chunk(&h.queue, origin, &far_instances(&prims));
+    let f = h
+        .render_with(&mut instanced, &cam, size, params, &[])
+        .unwrap();
+    save_png(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/far-instanced.png"),
+        size.0,
+        size.1,
+        &f,
+    )
+    .unwrap();
+    save_png(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/far-meshed.png"),
+        size.0,
+        size.1,
+        &a,
+    )
+    .unwrap();
+    // Cylinders are polygons with a different side count, so only their rims may differ.
+    let (_, mean) = image_diff(&a, &f);
+    assert!(mean < 0.6, "mean difference {mean}");
+    assert!(
+        image_diff(&a, &vec![a[0]; a.len()]).1 > 1.0,
+        "scene should not be empty"
+    );
+}
