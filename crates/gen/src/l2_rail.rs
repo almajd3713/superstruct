@@ -38,13 +38,40 @@ pub struct EdgeStats {
     pub guarded: u32,
 }
 
+/// One run of drop cells along a walkable edge and the guard decision it drew.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EdgeRun {
+    /// Whether the run goes along x (its edge is at a fixed z).
+    pub along_x: bool,
+    /// Plan coordinate of the edge across the run.
+    pub fixed: Q,
+    /// Direction of the drop across the edge, -1 or 1.
+    pub outward: Q,
+    /// Height of the walkable top.
+    pub y: Q,
+    pub a: Q,
+    pub b: Q,
+    pub guarded: bool,
+}
+
 /// The railings for `prims` (the cell's window of L1 plus everything L2 added so far).
 pub fn railings(
     seed: WorldSeed,
     cell: CellKey,
     prims: &[Primitive],
 ) -> (Vec<Primitive>, EdgeStats) {
+    let (out, stats, _) = railings_with_runs(seed, cell, prims);
+    (out, stats)
+}
+
+/// [`railings`] with every edge run and its decision, guarded or not.
+pub fn railings_with_runs(
+    seed: WorldSeed,
+    cell: CellKey,
+    prims: &[Primitive],
+) -> (Vec<Primitive>, EdgeStats, Vec<EdgeRun>) {
     debug_assert_eq!(cell.level, Level::L2);
+    let mut runs: Vec<EdgeRun> = Vec::new();
     let mut rng = Rng::new(hash(seed.0, Level::L2, cell.coords, salt::EDGE_GUARD));
     let mut out = Vec::new();
     let mut stats = EdgeStats::default();
@@ -90,7 +117,7 @@ pub fn railings(
                         emit(
                             &mut rng,
                             &mut stats,
-                            &mut out,
+                            (&mut out, &mut runs),
                             (along_x, fixed, outward, y),
                             (s, e),
                         );
@@ -105,26 +132,36 @@ pub fn railings(
                 emit(
                     &mut rng,
                     &mut stats,
-                    &mut out,
+                    (&mut out, &mut runs),
                     (along_x, fixed, outward, y),
                     (s, e),
                 );
             }
         }
     }
-    (out, stats)
+    (out, stats, runs)
 }
 
 /// Draws the guard decision for one run of drop cells and adds its railing.
 fn emit(
     rng: &mut Rng,
     stats: &mut EdgeStats,
-    out: &mut Vec<Primitive>,
+    (out, runs): (&mut Vec<Primitive>, &mut Vec<EdgeRun>),
     (along_x, fixed, outward, y): (bool, Q, Q, Q),
     (a, b): (Q, Q),
 ) {
     stats.drops += 1;
-    if rng.chance(GUARDED) {
+    let guarded = rng.chance(GUARDED);
+    runs.push(EdgeRun {
+        along_x,
+        fixed,
+        outward,
+        y,
+        a,
+        b,
+        guarded,
+    });
+    if guarded {
         stats.guarded += 1;
         out.push(rail(along_x, fixed, outward, a, b, y));
     }

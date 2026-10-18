@@ -28,6 +28,7 @@ pub mod l3_plan;
 pub mod l3_solver;
 pub mod l3_tiles;
 pub mod l3_validate;
+pub mod l4;
 pub mod port;
 pub mod prim;
 pub mod regime;

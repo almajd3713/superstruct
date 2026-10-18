@@ -282,10 +282,11 @@ pub fn cable_bundle(length: f32, n: usize) -> Mesh {
     m
 }
 
-/// A door frame for a 1.4 m × 2.4 m opening in a wall of `PANEL_DEPTH`.
+/// A door frame for the 2 m × 2.75 m opening of an L3 door side (3 m above the storey line,
+/// less the 0.25 m floor), in a wall of `PANEL_DEPTH`. The origin is on the floor.
 pub fn door_frame() -> Mesh {
     let mut m = Mesh::default();
-    let (hw, h, t, d) = (0.7, 2.4, 0.12, PANEL_DEPTH);
+    let (hw, h, t, d) = (1.0, 2.75, 0.12, PANEL_DEPTH);
     bx(&mut m, [-hw - t, 0.0, -d], [-hw, h + t, 0.06], METAL);
     bx(&mut m, [hw, 0.0, -d], [hw + t, h + t, 0.06], METAL);
     bx(&mut m, [-hw, h, -d], [hw, h + t, 0.06], METAL);
@@ -484,7 +485,7 @@ mod tests {
     #[test]
     fn the_door_opening_is_clear() {
         let m = door_frame();
-        // Nothing stands in the opening (|x| < 0.7, 0.03 < y < 2.4) at the wall plane z = -0.1.
+        // Nothing stands in the opening (|x| < 1, 0.03 < y < 2.75).
         for tri in m.indices.chunks(3) {
             let c = tri
                 .iter()
@@ -492,7 +493,7 @@ mod tests {
                 .sum::<Vec3>()
                 / 3.0;
             assert!(
-                !(c.x.abs() < 0.69 && c.y > 0.04 && c.y < 2.39),
+                !(c.x.abs() < 0.99 && c.y > 0.04 && c.y < 2.74),
                 "frame intrudes at {c:?}"
             );
         }

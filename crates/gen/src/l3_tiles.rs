@@ -17,9 +17,9 @@ pub const STOREY: Q = 64;
 /// Wall thickness in quanta.
 /// Wall thickness. Two back-to-back walls leave a 10 Q gap in the floor plan, which is the least
 /// the walkability extractor keeps as a surface (`MIN_WIDTH`).
-const WALL: Q = 5;
+pub const WALL: Q = 5;
 /// Floor slab thickness.
-const FLOOR: Q = 4;
+pub const FLOOR: Q = 4;
 const DOOR: (Q, Q) = (48, 80);
 const DOOR_TOP: Q = 48;
 

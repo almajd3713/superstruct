@@ -301,7 +301,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 
 ### P4.2 L4 module kit (generated in code)
 - [x] **P4.2.1** Module mesh generators: wall panel variants, railing, grating floor, pipe (straight, bend), cable bundle, door frame, lamp, stair. *Done when:* a gallery screenshot has been inspected. (2026-10-18: `engine::kit`: wall panels in four variants, railing, grating floor, straight and bent pipe, cable bundle, door frame, lamp, stair; 8 unit tests; gallery rendered on Windows by `tests/render.rs::kit_gallery_renders` into `out/kit-gallery*.png` and inspected: all pieces read correctly. Pieces are plain meshes in their own frame; placement and instancing are P4.2.2 and P4.2.3.)
-- [ ] **P4.2.2** Module placement rules on L3 surfaces and edges, including railings from the P0.8.8 edge flags. *Done when:* guarded edges have railings and unguarded edges don't (test).
+- [x] **P4.2.2** Module placement rules on L3 surfaces and edges, including railings from the P0.8.8 edge flags. *Done when:* guarded edges have railings and unguarded edges don't (test). (2026-10-18: `worldgen::l4` with placements for panels, door frames, gratings, lamps, pipes, cables, and railings from the L2 edge runs; the test checks every guarded run has exactly one railing module and no unguarded run has one, over 80 L2 cells, plus per-slot rules over 60 blocks. Rules in `levels.md` §7. No `GEN_VERSION` bump: L1–L3 output is unchanged.)
 - [ ] **P4.2.3** Module instancing through the GPU-driven path. *Done when:* the near-band budget is met in a dense block.
 
 ### P4.3 Materials and stylization
