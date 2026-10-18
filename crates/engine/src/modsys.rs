@@ -278,6 +278,7 @@ impl ModuleState {
                     colour: [c.glow[0], c.glow[1], c.glow[2]],
                     intensity: LAMP_INTENSITY * c.glow[3] * f32::from(level) / 15.0,
                     radius: LAMP_RADIUS,
+                    spot: None,
                 });
             }
         }

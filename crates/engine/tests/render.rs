@@ -1367,6 +1367,7 @@ fn clustered_lights_match_brute_force_and_fit_the_budget() {
                     colour: [0.6 + 0.4 * next(), 0.6 + 0.4 * next(), 0.6 + 0.4 * next()],
                     intensity: 6.0,
                     radius: 9.0,
+                    spot: None,
                 }
             })
             .collect()
@@ -1497,4 +1498,139 @@ fn module_lamps_light_the_view_within_the_budget() {
     let _ = h.render_with(&mut renderer, &cam, size, dark, &[]).unwrap();
     // Strength zero keeps the lights but makes them black: intensity is zero.
     assert!(renderer.lights_active() > 0);
+}
+
+/// P5.1.3: the froxel fog. Without lights or volumes it matches the analytic height fog; fog
+/// volumes thicken it locally; a spot light draws a visible beam; and the pass costs under 2 ms
+/// at 1440p. Writes `out/fog-*.png`.
+#[test]
+#[allow(clippy::too_many_lines)] // one scenario read top to bottom
+fn froxel_fog_matches_analytic_and_shows_beams() {
+    use engine::gpu_timer::Zone;
+    use engine::lights::{Light, Spot};
+    use engine::volfog::FogVolume;
+    let Some(h) = headless() else { return };
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = cam.pos.offset(Vec3::new(0.0, 1.65, -54.0)).unwrap();
+    cam.yaw = std::f32::consts::PI;
+    let scene = demo_scene_at(I64Vec3::ZERO);
+    let foggy = FrameParams {
+        fog_density: 0.012,
+        fog_height_k: 0.01,
+        fog_color: [0.05, 0.06, 0.08],
+        ambient: [0.1, 0.1, 0.1],
+        light: 0.05,
+        ..FrameParams::default()
+    };
+    let size = (960, 540);
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out");
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    let frames = |r: &mut engine::renderer::Renderer, n: u32| {
+        let mut img = Vec::new();
+        for _ in 0..n {
+            img = h.render_with(r, &cam, size, foggy, &[]).unwrap();
+        }
+        img
+    };
+    let analytic = frames(&mut renderer, 1);
+    renderer.set_volumetric_fog(true);
+    let vol = frames(&mut renderer, 8);
+    let (max, mean) = image_diff(&analytic, &vol);
+    eprintln!("volumetric vs analytic: max {max}, mean {mean:.3}");
+    assert!(
+        mean < 3.0,
+        "volumetric fog should match the analytic look: mean {mean}"
+    );
+    save_png(&dir.join("fog-volumetric.png"), size.0, size.1, &vol).unwrap();
+
+    // A fog box in the middle of the scene hazes what is behind it.
+    let origin = |x: f32, y: f32, z: f32| {
+        WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0 + x, 512.0 + y, 512.0 + z)).unwrap()
+    };
+    renderer.set_fog_volumes(&[FogVolume {
+        centre: origin(0.0, 5.0, -30.0),
+        half: Vec3::new(45.0, 15.0, 45.0),
+        density: 0.06,
+    }]);
+    let boxed = frames(&mut renderer, 8);
+    let (_, box_mean) = image_diff(&vol, &boxed);
+    save_png(&dir.join("fog-volume.png"), size.0, size.1, &boxed).unwrap();
+    assert!(
+        box_mean > 3.0,
+        "the fog volume changes the picture: {box_mean}"
+    );
+    renderer.set_fog_volumes(&[FogVolume {
+        centre: origin(0.0, 3.0, -20.0),
+        half: Vec3::new(60.0, 12.0, 45.0),
+        density: 0.05,
+    }]);
+
+    // A spot light shining across the view: the beam is brighter than the haze beside it.
+    let beam = |on: bool| Light {
+        pos: origin(0.0, 3.0, 10.0),
+        colour: [1.0, 0.95, 0.8],
+        intensity: if on { 300.0 } else { 0.0 },
+        radius: 90.0,
+        spot: Some(Spot {
+            // Shining back along the view, so the beam is seen nearly head-on.
+            dir: Vec3::new(0.0, -0.04, -1.0),
+            inner_deg: 8.0,
+            outer_deg: 18.0,
+        }),
+    };
+    renderer.set_lights(&[beam(false)]);
+    let dark_fog = frames(&mut renderer, 8);
+    renderer.set_lights(&[beam(true)]);
+    renderer.set_fog_scattering(1.0, 0.5);
+    let lit_fog = frames(&mut renderer, 8);
+    save_png(&dir.join("fog-beam.png"), size.0, size.1, &lit_fog).unwrap();
+    let brighter = lit_fog
+        .chunks(4)
+        .zip(dark_fog.chunks(4))
+        .filter(|(a, b)| u32::from(a[0]) > u32::from(b[0]) + 25)
+        .count();
+    assert!(
+        brighter > 3000,
+        "the beam brightens {brighter} pixels of fog"
+    );
+
+    // Cost at 1440p with 1000 lights and a few volumes.
+    let big = (2560, 1440);
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, big);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    renderer.set_volumetric_fog(true);
+    let mut seed = 0x1234_5678_u32;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed >> 8) as f32 / (1 << 24) as f32
+    };
+    let lights: Vec<Light> = (0..1000)
+        .map(|_| Light {
+            pos: origin(next() * 120.0 - 60.0, next() * 12.0, next() * 120.0 - 60.0),
+            colour: [1.0, 0.9, 0.8],
+            intensity: 4.0,
+            radius: 9.0,
+            spot: None,
+        })
+        .collect();
+    renderer.set_lights(&lights);
+    renderer.set_light_budget(1000);
+    if let Some(times) = h.gpu_times(&mut renderer, &cam, big, foggy, 30) {
+        let ms = |zone| {
+            times
+                .iter()
+                .find(|(z, _)| *z == zone)
+                .map_or(0.0, |(_, v)| *v)
+        };
+        eprintln!(
+            "fog at 1440p with 1000 lights: {:.3} ms (light cull {:.3}, scene {:.3})",
+            ms(Zone::Fog),
+            ms(Zone::LightCull),
+            ms(Zone::Scene)
+        );
+        assert!(ms(Zone::Fog) < 2.0, "fog budget is 2 ms");
+    }
 }

@@ -21,10 +21,12 @@ pub enum Zone {
     Post = 8,
     /// Clustered light assignment.
     LightCull = 9,
+    /// Froxel fog injection.
+    Fog = 10,
 }
 
 impl Zone {
-    pub const ALL: [Zone; 10] = [
+    pub const ALL: [Zone; 11] = [
         Zone::Scene,
         Zone::Ui,
         Zone::Cull,
@@ -35,6 +37,7 @@ impl Zone {
         Zone::HorizonHalf,
         Zone::Post,
         Zone::LightCull,
+        Zone::Fog,
     ];
 
     pub fn name(self) -> &'static str {
@@ -49,6 +52,7 @@ impl Zone {
             Zone::HorizonHalf => "horizon half",
             Zone::Post => "post",
             Zone::LightCull => "light cull",
+            Zone::Fog => "fog",
         }
     }
 }

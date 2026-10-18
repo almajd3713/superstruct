@@ -17,8 +17,10 @@ struct Params {
 struct Light {
     // Camera-relative world position and radius.
     pos_radius: vec4<f32>,
-    // Linear colour times intensity in rgb.
+    // Linear colour times intensity in rgb, the spot's inner cosine in w.
     colour: vec4<f32>,
+    // Spot direction and outer cosine; below -1.5 means a plain point light.
+    dir_cone: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> p: Params;

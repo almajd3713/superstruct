@@ -200,6 +200,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         colour = mix(colour, vec3<f32>(0.05, 0.06, 0.07), g8 * 0.8);
     }
 
-    colour = apply_fog(colour, in.rel);
+    colour = apply_fog_vol(colour, in.rel, 1.0 / in.clip.w, in.clip.xy);
     return vec4<f32>(colour, 1.0);
 }

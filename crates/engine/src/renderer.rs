@@ -19,6 +19,7 @@ use crate::post::{PostPass, PostSettings};
 use crate::shaders::ShaderSources;
 use crate::suballoc::{Range, SubAllocator};
 use crate::vertex::Vertex;
+use crate::volfog::{FogAtmosphere, FogVolume, VolFog};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Reversed Z: 1 at the near plane, 0 at infinity, so "closer" is greater and clear is 0.
@@ -374,6 +375,7 @@ pub struct Renderer {
     modules: ModuleState,
     post: PostPass,
     lights: LightSystem,
+    volfog: VolFog,
     light_scratch: Vec<Light>,
     horizon: HorizonPass,
     world_seed: u64,
@@ -545,12 +547,14 @@ impl Renderer {
 
         let sources = ShaderSources::embedded();
         let lights = LightSystem::new(device, size, &sources.light_cull);
+        let volfog = VolFog::new(device, size, &sources.fog);
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene layout"),
             bind_group_layouts: &[
                 Some(&globals_bgl),
                 Some(&draws_bgl),
                 Some(&lights.render_bgl),
+                Some(&volfog.frag_bgl),
             ],
             immediate_size: 0,
         });
@@ -598,6 +602,7 @@ impl Renderer {
             modules,
             post,
             lights,
+            volfog,
             light_scratch: Vec::new(),
             horizon,
             world_seed: 0,
@@ -941,6 +946,22 @@ impl Renderer {
         self.lights.set_lights(lights);
     }
 
+    /// Turns the froxel volumetric fog on; off falls back to the analytic height fog.
+    pub fn set_volumetric_fog(&mut self, on: bool) {
+        self.volfog.enabled = on;
+    }
+
+    /// Extra fog boxes (at most 64) on top of the regime's height fog.
+    pub fn set_fog_volumes(&mut self, volumes: &[FogVolume]) {
+        self.volfog.set_volumes(volumes);
+    }
+
+    /// Fog tuning: how strongly lights scatter into it and how forward-peaked the scattering is.
+    pub fn set_fog_scattering(&mut self, light_gain: f32, anisotropy: f32) {
+        self.volfog.light_gain = light_gain;
+        self.volfog.anisotropy = anisotropy;
+    }
+
     /// The most lights any view uses; the nearest are kept (P5.1.2).
     pub fn set_light_budget(&mut self, budget: usize) {
         self.lights.budget = budget;
@@ -1023,6 +1044,11 @@ impl Renderer {
             self.shader_error = Some(msg.clone());
             return Err(msg);
         }
+        if let Err(msg) = self.volfog.reload(device, &sources.fog) {
+            tracing::error!("fog shader reload failed, keeping previous pipelines:\n{msg}");
+            self.shader_error = Some(msg.clone());
+            return Err(msg);
+        }
         if let Err(msg) = self.lights.reload(device, &sources.light_cull) {
             tracing::error!("light shader reload failed, keeping previous pipelines:\n{msg}");
             self.shader_error = Some(msg.clone());
@@ -1048,6 +1074,7 @@ impl Renderer {
             self.horizon.resize(device, size);
             self.post.resize(device, size);
             self.lights.resize(device, size);
+            self.volfog.resize(device, size);
         }
     }
 
@@ -1124,6 +1151,7 @@ impl Renderer {
         pass.set_bind_group(0, &self.globals_bg, &[]);
         pass.set_bind_group(1, &self.instances_bg, &[]);
         pass.set_bind_group(2, self.lights.render_bg(), &[]);
+        pass.set_bind_group(3, self.volfog.frag_bg(), &[]);
         let stride = std::mem::size_of::<IndirectArgs>() as u64;
         for run in &self.runs {
             let page = &self.pages[run.page];
@@ -1150,6 +1178,7 @@ impl Renderer {
         pass.set_bind_group(0, &self.globals_bg, &[]);
         pass.set_bind_group(1, &self.instances_bg, &[]);
         pass.set_bind_group(2, self.lights.render_bg(), &[]);
+        pass.set_bind_group(3, self.volfog.frag_bg(), &[]);
         self.modules
             .draw(pass, self.indirect_first_instance && !self.force_direct);
     }
@@ -1164,6 +1193,7 @@ impl Renderer {
         pass.set_bind_group(0, &self.globals_bg, &[]);
         pass.set_bind_group(1, &self.instances_bg, &[]);
         pass.set_bind_group(2, self.lights.render_bg(), &[]);
+        pass.set_bind_group(3, self.volfog.frag_bg(), &[]);
         pass.set_vertex_buffer(0, far.unit_vertices.slice(..));
         pass.set_index_buffer(far.unit_indices.slice(..), wgpu::IndexFormat::Uint32);
         if self.indirect_first_instance && !self.force_direct {
@@ -1303,6 +1333,20 @@ impl Renderer {
             camera.fov_y,
             &self.light_scratch,
             timer.and_then(|t| t.compute_pass_writes(Zone::LightCull)),
+        );
+        self.volfog.record(
+            queue,
+            encoder,
+            &camera.pos,
+            camera.view_rotation(),
+            camera.fov_y,
+            FogAtmosphere {
+                sigma: params.fog_density,
+                height_k: params.fog_height_k,
+                colour: params.fog_color,
+            },
+            &self.lights,
+            timer.and_then(|t| t.compute_pass_writes(Zone::Fog)),
         );
         self.far.prepare(queue, &camera.pos, &frustum);
         self.modules.prepare(queue, &camera.pos, &frustum);

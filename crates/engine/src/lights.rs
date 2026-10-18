@@ -4,7 +4,7 @@
 //! (`shaders/light_cull.wgsl`, `shaders/lights.wgsl`).
 
 use bytemuck::{Pod, Zeroable};
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use worldgen::coord::WorldPos;
 
 use crate::camera::camera_relative;
@@ -22,20 +22,34 @@ pub const NEAR: f32 = 0.1;
 pub const FAR: f32 = 250.0;
 const WORKGROUP: u32 = 64;
 
-/// A point light in world space. `intensity` scales `colour`; the light reaches `radius` metres.
+/// A cone for a spot light: it points along `dir` and fades from full at `inner_deg` to nothing
+/// at `outer_deg` off the axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Spot {
+    pub dir: Vec3,
+    pub inner_deg: f32,
+    pub outer_deg: f32,
+}
+
+/// A light in world space. `intensity` scales `colour`; the light reaches `radius` metres. A
+/// light with a `spot` shines only inside the cone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Light {
     pub pos: WorldPos,
     pub colour: [f32; 3],
     pub intensity: f32,
     pub radius: f32,
+    pub spot: Option<Spot>,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct GpuLight {
+pub struct GpuLight {
     pos_radius: [f32; 4],
+    /// Colour times intensity, and the inner cone cosine.
     colour: [f32; 4],
+    /// Cone direction and outer cosine; -2 for a point light.
+    dir_cone: [f32; 4],
 }
 
 #[repr(C)]
@@ -96,11 +110,11 @@ pub struct LightSystem {
     compute_bgl: wgpu::BindGroupLayout,
     view_pipeline: wgpu::ComputePipeline,
     cull_pipeline: wgpu::ComputePipeline,
-    params: wgpu::Buffer,
-    lights_buf: wgpu::Buffer,
+    pub params: wgpu::Buffer,
+    pub lights_buf: wgpu::Buffer,
     view_lights: wgpu::Buffer,
-    counts: wgpu::Buffer,
-    list: wgpu::Buffer,
+    pub counts: wgpu::Buffer,
+    pub list: wgpu::Buffer,
     compute_bg: wgpu::BindGroup,
     render_bg: wgpu::BindGroup,
     lights: Vec<Light>,
@@ -301,8 +315,12 @@ impl LightSystem {
                         l.colour[0] * l.intensity,
                         l.colour[1] * l.intensity,
                         l.colour[2] * l.intensity,
-                        0.0,
+                        l.spot.map_or(0.0, |s| s.inner_deg.to_radians().cos()),
                     ],
+                    dir_cone: l.spot.map_or([0.0, 0.0, 0.0, -2.0], |s| {
+                        let d = s.dir.normalize_or_zero();
+                        [d.x, d.y, d.z, s.outer_deg.to_radians().cos()]
+                    }),
                 },
             ));
         }

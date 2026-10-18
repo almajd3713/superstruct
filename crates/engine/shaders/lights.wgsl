@@ -13,6 +13,7 @@ struct LightParams {
 struct PointLight {
     pos_radius: vec4<f32>,
     colour: vec4<f32>,
+    dir_cone: vec4<f32>,
 };
 
 @group(2) @binding(0) var<uniform> light_params: LightParams;
@@ -30,8 +31,12 @@ fn light_term(l: PointLight, rel: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     }
     let d = sqrt(d2);
     let w = clamp(1.0 - pow(d / r, 4.0), 0.0, 1.0);
-    let atten = w * w / (d2 + 1.0);
-    let ndotl = max(dot(n, to / max(d, 1.0e-4)), 0.0);
+    var atten = w * w / (d2 + 1.0);
+    let dir = to / max(d, 1.0e-4);
+    if (l.dir_cone.w > -1.5) {
+        atten = atten * smoothstep(l.dir_cone.w, l.colour.w, dot(-dir, l.dir_cone.xyz));
+    }
+    let ndotl = max(dot(n, dir), 0.0);
     return l.colour.rgb * (atten * ndotl);
 }
 
