@@ -56,6 +56,7 @@ Set before launch (`scripts/win.sh run` forwards them):
 | `SUPERSTRUCT_DEBUG_BOXES=1` | Start with debug boxes on |
 | `SUPERSTRUCT_CELL=x,y,z` | Start beside that L2 cell |
 | `SUPERSTRUCT_SECTOR=x,y,z` (+ `SUPERSTRUCT_LOCAL=x,y,z`) | Teleport to a sector and local position |
+| `SUPERSTRUCT_YAW=<deg>`, `SUPERSTRUCT_PITCH=<deg>` | Start orientation with `SUPERSTRUCT_SECTOR` (yaw 0 looks along -z, 90 along -x, 180 along +z) |
 | `SUPERSTRUCT_WALK=1` | Start in walk mode (default is fly) |
 | `SUPERSTRUCT_AUTOFLY=<m/s>` | Fly level along the view at a constant speed |
 | `SUPERSTRUCT_TRAM`, `SUPERSTRUCT_HITCH` | Tram and frame-hitch diagnostics |

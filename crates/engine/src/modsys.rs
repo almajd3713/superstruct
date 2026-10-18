@@ -65,6 +65,9 @@ pub struct ModuleState {
     next_slot: u32,
     cell_scratch: Vec<[[f32; 4]; 2]>,
     pub args_scratch: Vec<IndirectArgs>,
+    /// When set, overrides every chunk's emissive colour and strength: the regime around the
+    /// camera lights the interiors it is in.
+    pub glow_override: Option<[f32; 4]>,
     /// Instances in the groups drawn last frame, for tests and the overlay.
     pub drawn_instances: u32,
 }
@@ -111,6 +114,7 @@ impl ModuleState {
             next_slot: 0,
             cell_scratch: Vec::new(),
             args_scratch: Vec::new(),
+            glow_override: None,
             drawn_instances: 0,
         }
     }
@@ -212,7 +216,8 @@ impl ModuleState {
         self.drawn_instances = 0;
         for c in &self.chunks {
             let o = camera_relative(&c.origin, cam);
-            self.cell_scratch[c.slot as usize] = [[o.x, o.y, o.z, 1.0], c.glow];
+            self.cell_scratch[c.slot as usize] =
+                [[o.x, o.y, o.z, 1.0], self.glow_override.unwrap_or(c.glow)];
         }
         for c in self.chunks.iter().filter(|c| c.visible) {
             let o = camera_relative(&c.origin, cam);
@@ -269,14 +274,15 @@ impl ModuleState {
     /// colour and strength. The caller applies the per-view budget.
     pub fn collect_lights(&self, out: &mut Vec<Light>) {
         for c in self.chunks.iter().filter(|c| c.visible) {
+            let glow = self.glow_override.unwrap_or(c.glow);
             for &(at, level) in &c.lamps {
                 let Ok(pos) = c.origin.offset(Vec3::from(at)) else {
                     continue;
                 };
                 out.push(Light {
                     pos,
-                    colour: [c.glow[0], c.glow[1], c.glow[2]],
-                    intensity: LAMP_INTENSITY * c.glow[3] * f32::from(level) / 15.0,
+                    colour: [glow[0], glow[1], glow[2]],
+                    intensity: LAMP_INTENSITY * glow[3] * f32::from(level) / 15.0,
                     radius: LAMP_RADIUS,
                     spot: None,
                 });

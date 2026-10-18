@@ -533,23 +533,27 @@ pub fn l3_blocks_of(
     let mut out = Vec::new();
     for k in 0..512i64 {
         let idx = I64Vec3::new(k % 8, k / 64, k / 8 % 8);
-        let lo = idx * i64::from(BLOCK);
-        let active = parent.plans.iter().any(|p| {
-            let a = &p.aabb;
-            let (hi, lo) = (lo + I64Vec3::splat(i64::from(BLOCK)), lo);
-            i64::from(a.min.x) < hi.x
-                && i64::from(a.max.x) > lo.x
-                && i64::from(a.min.y) < hi.y
-                && i64::from(a.max.y) > lo.y
-                && i64::from(a.min.z) < hi.z
-                && i64::from(a.max.z) > lo.z
-        });
-        if active {
-            let block = CellKey::new(Level::L3, parent_cell.coords * 8 + idx);
+        let block = CellKey::new(Level::L3, parent_cell.coords * 8 + idx);
+        if block_is_active(&parent, block) {
             out.push((block, l3_block_in(seed, &parent, block, false)));
         }
     }
     out
+}
+
+/// Whether `block` meets a mass of its parent, which is when it has anything to build.
+pub fn block_is_active(parent: &Parent, block: CellKey) -> bool {
+    let lo = block.coords.map(|v| floor_mod_pow2(v, 3)) * i64::from(BLOCK);
+    let hi = lo + I64Vec3::splat(i64::from(BLOCK));
+    parent.plans.iter().any(|p| {
+        let a = &p.aabb;
+        i64::from(a.min.x) < hi.x
+            && i64::from(a.max.x) > lo.x
+            && i64::from(a.min.y) < hi.y
+            && i64::from(a.max.y) > lo.y
+            && i64::from(a.min.z) < hi.z
+            && i64::from(a.max.z) > lo.z
+    })
 }
 
 /// The block `block` from a prebuilt parent context.

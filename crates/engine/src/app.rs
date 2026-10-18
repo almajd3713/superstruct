@@ -130,6 +130,7 @@ impl App {
         let gpu = Gpu::new(&window, s.vsync)?;
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
         renderer.set_volumetric_fog(true);
+        renderer.set_ao(crate::ao::AoMode::Analytic);
         if let Ok(list) = std::env::var("SUPERSTRUCT_POST") {
             renderer.set_post(crate::post::PostSettings::parse(&list));
         }
@@ -431,6 +432,19 @@ impl App {
                 Ok(p) => {
                     self.camera.pos = p;
                     self.prev_cam_pos = p;
+                    // `SUPERSTRUCT_YAW` / `SUPERSTRUCT_PITCH` in degrees: yaw 0 looks along -z,
+                    // 90 along -x, 180 along +z.
+                    let angle = |name: &str| {
+                        std::env::var(name)
+                            .ok()
+                            .and_then(|v| v.trim().parse::<f32>().ok())
+                    };
+                    if let Some(deg) = angle("SUPERSTRUCT_YAW") {
+                        self.camera.yaw = deg.to_radians();
+                    }
+                    if let Some(deg) = angle("SUPERSTRUCT_PITCH") {
+                        self.camera.pitch = deg.to_radians();
+                    }
                 }
                 Err(err) => error!("cannot teleport to sector {x} {y} {z}: {err}"),
             }
@@ -520,6 +534,18 @@ impl App {
             running
                 .renderer
                 .set_horizon_start(self.streamer.config().stream.l1_far_radius_m as f32);
+            {
+                // The regime around the camera lights the interiors it is in; a Blackout has
+                // no emissive colour, so every lamp and window goes dark.
+                let atm = worldgen::atmosphere::atmosphere_at(
+                    WorldSeed(self.settings.seed),
+                    &render_camera.pos,
+                );
+                let e = atm.emissive;
+                running
+                    .renderer
+                    .set_module_glow(Some([e.x, e.y, e.z, f32::from(atm.light > 0.0)]));
+            }
             running.renderer.render(
                 &running.gpu.queue,
                 &mut encoder,

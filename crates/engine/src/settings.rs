@@ -57,6 +57,8 @@ pub struct Settings {
     /// Band radii in metres; see `StreamConfig`.
     pub band_l2_m: f64,
     pub band_l2_mid_m: f64,
+    /// Interior (L3 block) radius.
+    pub band_l3_m: f64,
     pub band_l1_full_m: f64,
     pub band_l1_far_m: f64,
 }
@@ -74,6 +76,7 @@ impl Default for Settings {
             seed: 0,
             horizon: true,
             horizon_half_res: false,
+            band_l3_m: bands.l3_radius_m,
             band_l2_m: bands.l2_radius_m,
             band_l2_mid_m: bands.l2_mid_radius_m,
             band_l1_full_m: bands.l1_full_radius_m,
@@ -87,6 +90,7 @@ impl Settings {
     /// the one inside it).
     pub fn stream_config(&self) -> StreamConfig {
         StreamConfig {
+            l3_radius_m: self.band_l3_m,
             l2_radius_m: self.band_l2_m,
             l2_mid_radius_m: self.band_l2_mid_m,
             l1_full_radius_m: self.band_l1_full_m,
@@ -96,6 +100,7 @@ impl Settings {
     }
 
     pub fn set_stream_config(&mut self, cfg: &StreamConfig) {
+        self.band_l3_m = cfg.l3_radius_m;
         self.band_l2_m = cfg.l2_radius_m;
         self.band_l2_mid_m = cfg.l2_mid_radius_m;
         self.band_l1_full_m = cfg.l1_full_radius_m;

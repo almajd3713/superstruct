@@ -7,6 +7,7 @@ use glam::{Mat4, Vec3};
 use worldgen::coord::WorldPos;
 
 use crate::camera::{NEAR, camera_relative};
+use crate::renderer::ChunkHandle;
 
 /// Most boxes the analytic mode considers; the nearest to the camera win.
 pub const MAX_BOXES: usize = 256;
@@ -22,6 +23,9 @@ pub enum AoMode {
     /// Signed distance to the nearest of a buffer of boxes, sampled along the normal.
     Analytic,
 }
+
+/// The `(centre, half size)` boxes of one chunk, in metres relative to its origin.
+type ChunkBoxes = (ChunkHandle, WorldPos, Vec<(Vec3, Vec3)>);
 
 /// An axis-aligned box that occludes, in world space.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -58,6 +62,8 @@ pub struct AoPass {
     boxes_buf: wgpu::Buffer,
     view: wgpu::TextureView,
     boxes: Vec<AoBox>,
+    /// Boxes of streamed chunks: `(handle, origin, local (centre, half) in metres)`.
+    groups: Vec<ChunkBoxes>,
     size: (u32, u32),
     frame: u32,
 }
@@ -146,6 +152,7 @@ impl AoPass {
             }),
             view: create_view(device, size),
             boxes: Vec::new(),
+            groups: Vec::new(),
             size,
             frame: 0,
         }
@@ -174,6 +181,17 @@ impl AoPass {
         }
         self.pipeline = pipeline;
         Ok(())
+    }
+
+    /// Registers the boxes of one chunk; they go away with [`AoPass::remove_group`].
+    pub fn add_group(&mut self, handle: ChunkHandle, origin: WorldPos, boxes: Vec<(Vec3, Vec3)>) {
+        if !boxes.is_empty() {
+            self.groups.push((handle, origin, boxes));
+        }
+    }
+
+    pub fn remove_group(&mut self, handle: ChunkHandle) {
+        self.groups.retain(|g| g.0 != handle);
     }
 
     pub fn set_boxes(&mut self, boxes: &[AoBox]) {
@@ -207,6 +225,26 @@ impl AoPass {
                             half: [b.half.x, b.half.y, b.half.z, 0.0],
                         },
                     ));
+                }
+            }
+            for (_, origin, list) in &self.groups {
+                let base = camera_relative(origin, cam);
+                // A chunk is at most 64 m across, so a far base point means a far chunk.
+                if base.length() > BOX_REACH + 128.0 {
+                    continue;
+                }
+                for &(centre, half) in list {
+                    let c = base + centre;
+                    let d = c.length();
+                    if d - half.length() - self.radius < BOX_REACH {
+                        near.push((
+                            d,
+                            GpuBox {
+                                centre: [c.x, c.y, c.z, 0.0],
+                                half: [half.x, half.y, half.z, 0.0],
+                            },
+                        ));
+                    }
                 }
             }
             near.sort_by(|a, b| a.0.total_cmp(&b.0));

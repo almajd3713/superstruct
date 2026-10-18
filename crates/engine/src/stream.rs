@@ -5,6 +5,7 @@
 //!
 //! | Band | Chunk | Within |
 //! |---|---|---|
+//! | Interior | L3 block (rooms, modules, lights) | `l3_radius_m` |
 //! | Near | L2 cell, full | `l2_radius_m` |
 //! | Mid | L2 cell, envelope masses only | `l2_mid_radius_m` |
 //! | Near | L1 cell, full | `l1_full_radius_m` |
@@ -42,6 +43,14 @@ impl ChunkId {
         }
     }
 
+    /// An L3 block: the interior of the masses it meets.
+    pub const fn l3(coords: I64Vec3) -> Self {
+        Self {
+            key: CellKey::new(Level::L3, coords),
+            detail: Detail::Full,
+        }
+    }
+
     pub const fn l2_mid(coords: I64Vec3) -> Self {
         Self {
             key: CellKey::new(Level::L2, coords),
@@ -59,7 +68,7 @@ impl ChunkId {
     pub fn band(&self) -> Band {
         match (self.key.level, self.detail) {
             (Level::L2, Detail::Mid) => Band::Mid,
-            (Level::L2, _) => Band::Near,
+            (Level::L2 | Level::L3, _) => Band::Near,
             (_, Detail::Full) => Band::Mid,
             _ => Band::Far,
         }
@@ -92,6 +101,8 @@ pub enum Band {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StreamConfig {
+    /// L3 blocks (interiors) are wanted within this distance.
+    pub l3_radius_m: f64,
     pub l2_radius_m: f64,
     /// Beyond `l2_radius_m` and up to this, L2 cells draw their envelope masses only.
     pub l2_mid_radius_m: f64,
@@ -112,6 +123,7 @@ impl StreamConfig {
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {
+            l3_radius_m: 192.0,
             l2_radius_m: 1024.0,
             l2_mid_radius_m: 3072.0,
             l1_full_radius_m: 4096.0,
@@ -209,6 +221,11 @@ pub fn desired_set_with_probes(
             }
         }
     };
+    if cfg.l3_radius_m > 0.0 {
+        around(Level::L3, cfg.l3_radius_m, &mut |k, d, c| {
+            add(ChunkId::l3(k.coords), d, c);
+        });
+    }
     around(
         Level::L2,
         cfg.l2_mid_radius_m.max(cfg.l2_radius_m),
@@ -325,7 +342,10 @@ mod tests {
 
     #[test]
     fn crossing_a_cell_boundary_swaps_exactly_the_edge_cells() {
-        let cfg = StreamConfig::default();
+        let cfg = StreamConfig {
+            l3_radius_m: 0.0,
+            ..StreamConfig::default()
+        };
         // 511.5 m and 512.5 m along x: one L2 cell apart.
         let a = ids(&set(&cfg, &at([0, 0, 0], [511.5, 256.0, 256.0])));
         let b = ids(&set(&cfg, &at([0, 0, 0], [512.5, 256.0, 256.0])));

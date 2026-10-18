@@ -44,7 +44,18 @@ impl ChunkSink for RendererSink<'_> {
         };
         // Streamed chunks fade in; a bare upload (tests, tools) is drawn at once.
         self.renderer.begin_fade_in(handle);
-        (handle, bytes)
+        let extra = if chunk.modules.is_some() || !chunk.ao_boxes.is_empty() {
+            self.renderer.attach_chunk_extras(
+                self.queue,
+                handle,
+                chunk.origin,
+                chunk.modules.as_ref(),
+                chunk.ao_boxes.clone(),
+            )
+        } else {
+            0
+        };
+        (handle, bytes + extra)
     }
 
     fn remove(&mut self, handle: ChunkHandle) {
@@ -500,6 +511,7 @@ mod tests {
 
     fn small() -> StreamConfig {
         StreamConfig {
+            l3_radius_m: 0.0,
             l2_radius_m: 600.0,
             l2_mid_radius_m: 1536.0,
             l1_full_radius_m: 2048.0,

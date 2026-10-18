@@ -379,6 +379,8 @@ pub struct Renderer {
     volfog: VolFog,
     ao: AoPass,
     light_scratch: Vec<Light>,
+    /// Module chunks that live and die with a mesh chunk: `(mesh, modules)`.
+    module_links: Vec<(ChunkHandle, ChunkHandle)>,
     horizon: HorizonPass,
     world_seed: u64,
     /// Two-phase occlusion culling (needs the prepass and indirect draws).
@@ -609,6 +611,7 @@ impl Renderer {
             volfog,
             ao,
             light_scratch: Vec::new(),
+            module_links: Vec::new(),
             horizon,
             world_seed: 0,
             occlusion: true,
@@ -740,6 +743,11 @@ impl Renderer {
     }
 
     pub fn remove_chunk(&mut self, handle: ChunkHandle) {
+        self.ao.remove_group(handle);
+        if let Some(i) = self.module_links.iter().position(|l| l.0 == handle) {
+            let (_, modules) = self.module_links.swap_remove(i);
+            self.remove_chunk(modules);
+        }
         if let Some(i) = self.chunks.iter().position(|c| c.handle == handle) {
             let c = self.chunks.swap_remove(i);
             self.gpu_bytes -= c.bytes;
@@ -828,6 +836,25 @@ impl Renderer {
         let bytes = self.modules.upload(queue, handle, origin, batch);
         self.gpu_bytes += bytes;
         (handle, bytes)
+    }
+
+    /// Adds what an interior chunk carries besides its mesh: instanced modules (with their lamps)
+    /// and the boxes the AO measures. Both go away with `handle`. Returns the module bytes.
+    pub fn attach_chunk_extras(
+        &mut self,
+        queue: &wgpu::Queue,
+        handle: ChunkHandle,
+        origin: WorldPos,
+        modules: Option<&ModuleBatch>,
+        ao_boxes: Vec<(Vec3, Vec3)>,
+    ) -> u64 {
+        self.ao.add_group(handle, origin, ao_boxes);
+        let Some(batch) = modules else {
+            return 0;
+        };
+        let (mh, bytes) = self.upload_module_chunk(queue, origin, batch);
+        self.module_links.push((handle, mh));
+        bytes
     }
 
     /// Module instances drawn in the last prepared frame.
@@ -937,6 +964,9 @@ impl Renderer {
 
     /// Hidden chunks fade out; they stay resident.
     pub fn set_chunk_visible(&mut self, handle: ChunkHandle, visible: bool) {
+        if let Some(&(_, m)) = self.module_links.iter().find(|l| l.0 == handle) {
+            self.modules.set_visible(m, visible);
+        }
         if let Some(c) = self.chunks.iter_mut().find(|c| c.handle == handle) {
             c.visible = visible;
         } else if let Some(c) = self.far.chunks.iter_mut().find(|c| c.handle == handle) {
@@ -949,6 +979,12 @@ impl Renderer {
     /// Replaces the point lights; the clusters are rebuilt every frame from the nearest ones.
     pub fn set_lights(&mut self, lights: &[Light]) {
         self.lights.set_lights(lights);
+    }
+
+    /// Sets the emissive colour (linear) and strength of every module chunk, or `None` to use
+    /// each chunk's own.
+    pub fn set_module_glow(&mut self, glow: Option<[f32; 4]>) {
+        self.modules.glow_override = glow;
     }
 
     /// Selects the ambient-occlusion candidate (needs the depth prepass).

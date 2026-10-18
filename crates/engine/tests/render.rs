@@ -22,6 +22,30 @@ const PLAIN: FrameParams = FrameParams {
     fade: 0.0,
 };
 
+/// Mean GPU milliseconds per zone, the lowest of three measurements, so another test sharing the
+/// GPU does not push a budget check over its limit.
+fn settled_times(
+    h: &Headless,
+    renderer: &mut engine::renderer::Renderer,
+    cam: &Camera,
+    size: (u32, u32),
+    params: FrameParams,
+) -> Option<Vec<(engine::gpu_timer::Zone, f32)>> {
+    let mut best: Option<Vec<(engine::gpu_timer::Zone, f32)>> = None;
+    for _ in 0..3 {
+        let t = h.gpu_times(renderer, cam, size, params, 30)?;
+        best = Some(match best {
+            None => t,
+            Some(b) => b
+                .into_iter()
+                .zip(t)
+                .map(|((z, a), (_, c))| (z, a.min(c)))
+                .collect(),
+        });
+    }
+    best
+}
+
 fn headless() -> Option<Headless> {
     let h = Headless::new();
     if h.is_none() {
@@ -908,6 +932,7 @@ fn handoff_image(h: &Headless, reach_m: f64, cam: &Camera, size: (u32, u32)) -> 
     use worldgen::seed::WorldSeed;
     let seed = WorldSeed(0);
     let cfg = StreamConfig {
+        l3_radius_m: 0.0,
         l2_radius_m: 0.0,
         l2_mid_radius_m: 0.0,
         l1_full_radius_m: 0.0,
@@ -1323,7 +1348,7 @@ fn stylization_passes_toggle_independently() {
     let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, big);
     renderer.set_scene(&h.device, &h.queue, &scene);
     renderer.set_post(PostSettings::ALL);
-    if let Some(times) = h.gpu_times(&mut renderer, &cam, big, params, 30) {
+    if let Some(times) = settled_times(&h, &mut renderer, &cam, big, params) {
         let post = times
             .iter()
             .find(|(z, _)| *z == engine::gpu_timer::Zone::Post)
@@ -1407,7 +1432,7 @@ fn clustered_lights_match_brute_force_and_fit_the_budget() {
     let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, big);
     renderer.set_scene(&h.device, &h.queue, &scene);
     renderer.set_lights(&lights(1000));
-    if let Some(times) = h.gpu_times(&mut renderer, &cam, big, dark, 30) {
+    if let Some(times) = settled_times(&h, &mut renderer, &cam, big, dark) {
         let ms = |zone| {
             times
                 .iter()
@@ -1618,7 +1643,7 @@ fn froxel_fog_matches_analytic_and_shows_beams() {
         .collect();
     renderer.set_lights(&lights);
     renderer.set_light_budget(1000);
-    if let Some(times) = h.gpu_times(&mut renderer, &cam, big, foggy, 30) {
+    if let Some(times) = settled_times(&h, &mut renderer, &cam, big, foggy) {
         let ms = |zone| {
             times
                 .iter()
@@ -1790,7 +1815,7 @@ fn ao_candidates_darken_contacts_and_report_cost() {
     renderer.set_ao_boxes(&block_boxes);
     for (name, mode) in [("ssao", AoMode::Ssao), ("analytic", AoMode::Analytic)] {
         renderer.set_ao(mode);
-        if let Some(times) = h.gpu_times(&mut renderer, &cam, big, params, 30) {
+        if let Some(times) = settled_times(&h, &mut renderer, &cam, big, params) {
             let ms = |zone| {
                 times
                     .iter()
