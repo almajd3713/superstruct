@@ -32,6 +32,7 @@ pub mod meshpool;
 pub mod modsys;
 pub mod noise;
 pub mod overlay;
+pub mod post;
 pub mod primmesh;
 pub mod profile;
 pub mod readback;

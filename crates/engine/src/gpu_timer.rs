@@ -17,10 +17,12 @@ pub enum Zone {
     HorizonCache = 6,
     /// The half-resolution horizon march.
     HorizonHalf = 7,
+    /// The stylization pass; only recorded while a toggle is on.
+    Post = 8,
 }
 
 impl Zone {
-    pub const ALL: [Zone; 8] = [
+    pub const ALL: [Zone; 9] = [
         Zone::Scene,
         Zone::Ui,
         Zone::Cull,
@@ -29,6 +31,7 @@ impl Zone {
         Zone::Occlusion,
         Zone::HorizonCache,
         Zone::HorizonHalf,
+        Zone::Post,
     ];
 
     pub fn name(self) -> &'static str {
@@ -41,6 +44,7 @@ impl Zone {
             Zone::Occlusion => "occlusion",
             Zone::HorizonCache => "horizon cache",
             Zone::HorizonHalf => "horizon half",
+            Zone::Post => "post",
         }
     }
 }

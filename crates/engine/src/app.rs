@@ -129,6 +129,9 @@ impl App {
         );
         let gpu = Gpu::new(&window, s.vsync)?;
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
+        if let Ok(list) = std::env::var("SUPERSTRUCT_POST") {
+            renderer.set_post(crate::post::PostSettings::parse(&list));
+        }
         renderer.set_world_seed(self.settings.seed);
         renderer.set_horizon_enabled(self.settings.horizon);
         renderer.set_horizon_half_res(self.settings.horizon_half_res);
@@ -399,6 +402,12 @@ impl App {
         if self.input.pressed(Action::ToggleDebugLines) {
             self.debug_boxes = !self.debug_boxes;
         }
+        let mut post = running.renderer.post();
+        post.posterize ^= self.input.pressed(Action::TogglePosterize);
+        post.dither ^= self.input.pressed(Action::ToggleDither);
+        post.outlines ^= self.input.pressed(Action::ToggleOutlines);
+        post.grain ^= self.input.pressed(Action::ToggleGrain);
+        running.renderer.set_post(post);
         if self.input.pressed(Action::CycleVsync) {
             let next = running.gpu.vsync().next();
             running.gpu.set_vsync(next);

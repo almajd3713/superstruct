@@ -1234,3 +1234,101 @@ fn emissive_modules_are_visible_in_the_dark() {
         .unwrap();
     assert!(max_off < 80, "no glow at zero strength: {max_off}");
 }
+
+/// P4.3.3: each stylization prototype toggles on its own. With all off the image is the plain
+/// scene; each one changes it in its own way. Writes `out/post-*.png`.
+#[test]
+fn stylization_passes_toggle_independently() {
+    use engine::post::PostSettings;
+    let Some(h) = headless() else { return };
+    let size = (960, 540);
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = cam.pos.offset(Vec3::new(0.0, 1.65, -54.0)).unwrap();
+    cam.yaw = std::f32::consts::PI;
+    let scene = demo_scene_at(I64Vec3::ZERO);
+    let params = FrameParams::default();
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    let mut shot = |name: &str, s: PostSettings| {
+        renderer.set_post(s);
+        let img = h
+            .render_with(&mut renderer, &cam, size, params, &[])
+            .unwrap();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../out")
+            .join(format!("post-{name}.png"));
+        save_png(&path, size.0, size.1, &img).unwrap();
+        img
+    };
+    let plain = shot("off", PostSettings::default());
+    let again = shot("off-again", PostSettings::default());
+    assert_eq!(
+        plain, again,
+        "with everything off the render is deterministic"
+    );
+    let on = |f: fn(&mut PostSettings)| {
+        let mut s = PostSettings::default();
+        f(&mut s);
+        s
+    };
+    let poster = shot("posterize", on(|s| s.posterize = true));
+    let dither = shot("dither", on(|s| s.dither = true));
+    let ink = shot("outlines", on(|s| s.outlines = true));
+    let grain_a = shot("grain", on(|s| s.grain = true));
+    let grain_b = shot("grain-2", on(|s| s.grain = true));
+    let all = shot("all", PostSettings::ALL);
+
+    let colours = |img: &[u8]| {
+        img.chunks(4)
+            .map(|p| [p[0], p[1], p[2]])
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    };
+    // Posterize leaves few levels per channel; the plain scene has many more colours.
+    assert!(
+        colours(&poster) < colours(&plain) / 2,
+        "{} {}",
+        colours(&poster),
+        colours(&plain)
+    );
+    assert!(colours(&poster) <= 5 * 5 * 5, "{}", colours(&poster));
+    // Dither alone differs from the plain render and from the plain ladder (no pattern).
+    assert_ne!(dither, plain);
+    assert_ne!(dither, poster);
+    // Ink darkens pixels at edges and leaves flat areas alone.
+    let darker = ink
+        .chunks(4)
+        .zip(plain.chunks(4))
+        .filter(|(a, b)| u32::from(a[0]) + 60 < u32::from(b[0]))
+        .count();
+    let same = ink
+        .chunks(4)
+        .zip(plain.chunks(4))
+        .filter(|(a, b)| a == b)
+        .count();
+    assert!(darker > 500, "ink drew {darker} dark pixels");
+    assert!(
+        same > ink.len() / 4 / 2,
+        "ink left only {same} pixels alone"
+    );
+    // Grain moves from frame to frame.
+    assert_ne!(grain_a, grain_b);
+    assert_ne!(all, plain);
+    // Everything back off restores the plain scene exactly.
+    assert_eq!(shot("off-last", PostSettings::default()), plain);
+
+    // Cost of all four at 1440p, reported (the post zone has no budget of its own yet: the
+    // stylization and post share 1.5 ms in PLAN.md 11.4).
+    let big = (2560, 1440);
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, big);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    renderer.set_post(PostSettings::ALL);
+    if let Some(times) = h.gpu_times(&mut renderer, &cam, big, params, 30) {
+        let post = times
+            .iter()
+            .find(|(z, _)| *z == engine::gpu_timer::Zone::Post)
+            .map_or(0.0, |(_, ms)| *ms);
+        eprintln!("post zone, all four at 1440p: {post:.3} ms");
+        assert!(post < 1.5, "stylization budget is 1.5 ms: {post}");
+    }
+}

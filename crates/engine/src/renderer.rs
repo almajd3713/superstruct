@@ -14,6 +14,7 @@ use crate::kit::ModuleBatch;
 use crate::mesh::Mesh;
 use crate::modsys::ModuleState;
 use crate::noise;
+use crate::post::{PostPass, PostSettings};
 use crate::shaders::ShaderSources;
 use crate::suballoc::{Range, SubAllocator};
 use crate::vertex::Vertex;
@@ -370,6 +371,7 @@ pub struct Renderer {
     cull: CullPass,
     far: FarState,
     modules: ModuleState,
+    post: PostPass,
     horizon: HorizonPass,
     world_seed: u64,
     /// Two-phase occlusion culling (needs the prepass and indirect draws).
@@ -549,6 +551,7 @@ impl Renderer {
             immediate_size: 0,
         });
         let sources = ShaderSources::embedded();
+        let post = PostPass::new(device, format, size, &sources.post);
         let depth_view = create_depth(device, size.0, size.1);
         let hiz = HizPass::new(
             device,
@@ -585,6 +588,7 @@ impl Renderer {
             cull,
             far,
             modules,
+            post,
             horizon,
             world_seed: 0,
             occlusion: true,
@@ -922,6 +926,15 @@ impl Renderer {
         }
     }
 
+    /// Turns the stylization prototypes on or off (`post.rs`).
+    pub fn set_post(&mut self, settings: PostSettings) {
+        self.post.settings = settings;
+    }
+
+    pub fn post(&self) -> PostSettings {
+        self.post.settings
+    }
+
     /// Bytes of shared buffer pages allocated, used or not.
     pub fn page_bytes(&self) -> u64 {
         self.page_bytes
@@ -980,6 +993,11 @@ impl Renderer {
             self.shader_error = Some(msg.clone());
             return Err(msg);
         }
+        if let Err(msg) = self.post.reload(device, &sources.post) {
+            tracing::error!("post shader reload failed, keeping previous pipeline:\n{msg}");
+            self.shader_error = Some(msg.clone());
+            return Err(msg);
+        }
         self.pipelines = pipelines;
         self.shader_error = None;
         tracing::info!("shaders reloaded");
@@ -993,6 +1011,7 @@ impl Renderer {
             self.hiz.resize(device, &self.depth_view, size);
             self.cull.rebind_hiz(device, self.hiz.all_levels());
             self.horizon.resize(device, size);
+            self.post.resize(device, size);
         }
     }
 
@@ -1307,10 +1326,18 @@ impl Renderer {
         // Without the prepass the colour pass clears and writes depth itself; with it the depth
         // is already final and the colour pass only tests against it.
         let prepassed = self.prepass;
+        // The stylization pass reads colour and depth, so the scene goes to its own texture and
+        // depth is kept.
+        let styled = self.post.settings.any();
+        let scene_target = if styled {
+            self.post.colour_view()
+        } else {
+            target
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("main"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
+                view: scene_target,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -1331,7 +1358,11 @@ impl Renderer {
                     } else {
                         wgpu::LoadOp::Clear(DEPTH_CLEAR)
                     },
-                    store: wgpu::StoreOp::Discard,
+                    store: if styled {
+                        wgpu::StoreOp::Store
+                    } else {
+                        wgpu::StoreOp::Discard
+                    },
                 }),
                 stencil_ops: None,
             }),
@@ -1358,6 +1389,18 @@ impl Renderer {
         }
         if let Some(level) = self.debug_hiz {
             self.hiz.draw_debug(queue, &mut pass, level);
+        }
+        drop(pass);
+        if styled {
+            self.post.record(
+                queue,
+                encoder,
+                &self.depth_view,
+                target,
+                camera.fov_y,
+                aspect,
+                timer.and_then(|t| t.pass_writes(Zone::Post)),
+            );
         }
     }
 }

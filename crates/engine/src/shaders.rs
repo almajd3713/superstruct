@@ -12,6 +12,7 @@ const SHADE: &str = include_str!("../shaders/shade.wgsl");
 const HORIZON: &str = include_str!("../shaders/horizon.wgsl");
 const HORIZON_CACHE: &str = include_str!("../shaders/horizon_cache.wgsl");
 const HORIZON_MARCH: &str = include_str!("../shaders/horizon_march.wgsl");
+const POST: &str = include_str!("../shaders/post.wgsl");
 
 /// Fully composed WGSL for each pipeline.
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ pub struct ShaderSources {
     /// Generated tables, the L1 port and the cell-record compute entry.
     pub horizon_cache: String,
     pub horizon_march: String,
+    pub post: String,
 }
 
 fn compose(common: &str, body: &str) -> String {
@@ -42,6 +44,7 @@ impl ShaderSources {
             hiz: HIZ.to_owned(),
             horizon_cache: horizon_cache(HORIZON, HORIZON_CACHE),
             horizon_march: compose(&compose(COMMON, SHADE), HORIZON_MARCH),
+            post: POST.to_owned(),
         }
     }
 
@@ -66,6 +69,7 @@ impl ShaderSources {
                 &read("horizon_cache.wgsl", HORIZON_CACHE),
             ),
             horizon_march: compose(&shade, &read("horizon_march.wgsl", HORIZON_MARCH)),
+            post: read("post.wgsl", POST),
         }
     }
 }

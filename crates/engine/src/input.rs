@@ -28,6 +28,11 @@ pub enum Action {
     TeleportSanctuary,
     /// Calls a lift at an opening.
     Interact,
+    /// Stylization prototypes (P4.3.3).
+    TogglePosterize,
+    ToggleDither,
+    ToggleOutlines,
+    ToggleGrain,
 }
 
 /// A physical key or mouse button.
@@ -67,6 +72,10 @@ impl Default for Bindings {
             (K::F6, A::TeleportSanctuary),
             (K::F7, A::FreezeCulling),
             (K::KeyE, A::Interact),
+            (K::F8, A::TogglePosterize),
+            (K::F9, A::ToggleDither),
+            (K::F10, A::ToggleOutlines),
+            (K::KeyG, A::ToggleGrain),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),
