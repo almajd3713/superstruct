@@ -33,6 +33,7 @@ The bindings below are the defaults in `crates/engine/src/input.rs` (`Bindings::
 | F7 | Freeze culling (keeps the old frustum) |
 | F11 | Toggle fullscreen |
 | F12 | Screenshot to `out/` |
+| Tab | Toggle the altimeter and coordinates readout (absolute metres) |
 
 ## Stylization prototypes (P4.3.3)
 
@@ -53,6 +54,7 @@ Set before launch (`scripts/win.sh run` forwards them):
 | `SUPERSTRUCT_SETTINGS` | Settings file |
 | `SUPERSTRUCT_AUTOSHOT=<frames>` | Save a screenshot after that many frames, then exit |
 | `SUPERSTRUCT_OVERLAY=1` | Start with the overlay on |
+| `SUPERSTRUCT_READOUT=1` | Start with the altimeter readout on |
 | `SUPERSTRUCT_DEBUG_BOXES=1` | Start with debug boxes on |
 | `SUPERSTRUCT_CELL=x,y,z` | Start beside that L2 cell |
 | `SUPERSTRUCT_SECTOR=x,y,z` (+ `SUPERSTRUCT_LOCAL=x,y,z`) | Teleport to a sector and local position |

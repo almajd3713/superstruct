@@ -341,7 +341,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P5.3.5** Sanctuary sound bed. *Done when:* audible relief on entering.
 
 ### P5.4 Quiet tools
-- [ ] **P5.4.1** Altimeter and coordinates readout toggle (absurd numbers welcome). *Done when:* it toggles.
+- [x] **P5.4.1** Altimeter and coordinates readout toggle (absurd numbers welcome). *Done when:* it toggles. (2026-10-18: Tab toggles a quiet two-line readout, absolute altitude and x/z in whole metres, independent of the F1 overlay; `SUPERSTRUCT_READOUT=1` starts it on. Checked in a Windows screenshot.)
 - [ ] **P5.4.2** Droppable beacons, visible from distance through fog, persisted in the save file. *Done when:* they survive a restart.
 - [ ] **P5.4.3** Photo mode: free camera within a radius, HUD hidden, FOV and exposure controls. *Done when:* it works.
 

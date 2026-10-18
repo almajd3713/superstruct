@@ -34,6 +34,9 @@ pub struct Overlay {
     state: egui_winit::State,
     renderer: egui_wgpu::Renderer,
     pub visible: bool,
+    /// The quiet altimeter and coordinates readout, independent of the debug overlay.
+    pub readout: bool,
+    readout_id: egui::Id,
     frame_ms: VecDeque<f32>,
     prepared: Option<Prepared>,
     teleport_text: String,
@@ -70,6 +73,8 @@ impl Overlay {
             state,
             renderer,
             visible: false,
+            readout: false,
+            readout_id: egui::Id::unique("readout"),
             frame_ms: VecDeque::with_capacity(HISTORY),
             prepared: None,
             teleport_text: String::new(),
@@ -103,16 +108,18 @@ impl Overlay {
         info: &OverlayInfo<'_>,
     ) {
         self.prepared = None;
-        if !self.visible {
+        if !self.visible && !self.readout {
             return;
         }
         let input = self.state.take_egui_input(window);
         let frame_ms = &self.frame_ms;
         let (text, requests, status) = (&mut self.teleport_text, &mut self.requests, &self.status);
         let bands = (&mut self.band_request, &mut self.band_commit);
+        let shown = (self.visible, self.readout.then_some(self.readout_id));
         let mut output = self.ctx.run_ui(input, |ui| {
             draw(
                 ui,
+                shown,
                 frame_ms,
                 info,
                 (text, requests, status),
@@ -184,13 +191,56 @@ impl Overlay {
     }
 }
 
+/// Altitude and absolute position in whole metres, with thousands separators.
+pub fn readout_lines(sector: I64Vec3, local: Vec3) -> [String; 2] {
+    let metres = |s: i64, l: f32| group(s * 1024 + l.floor() as i64);
+    [
+        format!("altitude {} m", metres(sector.y, local.y)),
+        format!(
+            "x {} m   z {} m",
+            metres(sector.x, local.x),
+            metres(sector.z, local.z)
+        ),
+    ]
+}
+
+fn group(v: i64) -> String {
+    let digits = v.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    if v < 0 { format!("-{out}") } else { out }
+}
+
 fn draw(
     ui: &mut egui::Ui,
+    (visible, readout): (bool, Option<egui::Id>),
     frame_ms: &VecDeque<f32>,
     info: &OverlayInfo<'_>,
     (text, requests, status): (&mut String, &mut Vec<Command>, &str),
     bands: (&mut Option<StreamConfig>, &mut bool),
 ) {
+    if let Some(id) = readout {
+        egui::Area::new(id)
+            .anchor(egui::Align2::LEFT_BOTTOM, [16.0, -16.0])
+            .interactable(false)
+            .show(ui.ctx(), |ui| {
+                for line in readout_lines(info.sector, info.local) {
+                    ui.label(
+                        egui::RichText::new(line)
+                            .monospace()
+                            .color(egui::Color32::from_white_alpha(170)),
+                    );
+                }
+            });
+    }
+    if !visible {
+        return;
+    }
     egui::Window::new("debug")
         .title_bar(false)
         .resizable(false)
@@ -337,5 +387,20 @@ fn debug_commands(ui: &mut egui::Ui, text: &mut String, requests: &mut Vec<Comma
     });
     if !status.is_empty() {
         ui.monospace(status);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_readout_gives_absolute_metres_with_separators() {
+        let lines = readout_lines(I64Vec3::new(-46, 2, 1000), Vec3::new(404.7, 529.6, 0.0));
+        assert_eq!(lines[0], "altitude 2,577 m");
+        assert_eq!(lines[1], "x -46,700 m   z 1,024,000 m");
+        assert_eq!(group(0), "0");
+        assert_eq!(group(-999), "-999");
+        assert_eq!(group(1000), "1,000");
     }
 }

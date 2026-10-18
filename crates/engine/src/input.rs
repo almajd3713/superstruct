@@ -33,6 +33,8 @@ pub enum Action {
     ToggleDither,
     ToggleOutlines,
     ToggleGrain,
+    /// Altimeter and coordinates readout (P5.4.1).
+    ToggleReadout,
 }
 
 /// A physical key or mouse button.
@@ -76,6 +78,7 @@ impl Default for Bindings {
             (K::F9, A::ToggleDither),
             (K::F10, A::ToggleOutlines),
             (K::KeyG, A::ToggleGrain),
+            (K::Tab, A::ToggleReadout),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),

@@ -148,6 +148,7 @@ impl App {
         let overlay = Overlay::new(&gpu.device, gpu.config.format.remove_srgb_suffix(), &window);
         let mut overlay = overlay;
         overlay.visible = std::env::var_os("SUPERSTRUCT_OVERLAY").is_some();
+        overlay.readout = std::env::var_os("SUPERSTRUCT_READOUT").is_some();
         let timer = GpuTimer::new(
             &gpu.device,
             &gpu.queue,
@@ -393,6 +394,9 @@ impl App {
         };
         if self.input.pressed(Action::ToggleFullscreen) {
             toggle_fullscreen(&running.window);
+        }
+        if self.input.pressed(Action::ToggleReadout) {
+            running.overlay.readout = !running.overlay.readout;
         }
         if self.input.pressed(Action::ToggleOverlay) {
             running.overlay.visible = !running.overlay.visible;
