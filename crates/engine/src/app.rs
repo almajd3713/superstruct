@@ -105,6 +105,8 @@ impl App {
         );
         let gpu = Gpu::new(&window, s.vsync)?;
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
+        renderer.set_world_seed(self.settings.seed);
+        renderer.set_horizon_enabled(self.settings.horizon);
         self.place_camera();
         if !self.fly_mode {
             self.enter_walk_mode();
@@ -387,6 +389,9 @@ impl App {
                         label: Some("frame"),
                     });
             crate::zone!("record scene");
+            running
+                .renderer
+                .set_horizon_start(self.streamer.config().stream.l1_far_radius_m as f32);
             running.renderer.render(
                 &running.gpu.queue,
                 &mut encoder,

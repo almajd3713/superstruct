@@ -50,6 +50,8 @@ pub struct Settings {
     /// Radians of rotation per raw mouse count.
     pub mouse_sensitivity: f32,
     pub seed: u64,
+    /// Draw the ray-marched horizon beyond the far band.
+    pub horizon: bool,
     /// Band radii in metres; see `StreamConfig`.
     pub band_l2_m: f64,
     pub band_l2_mid_m: f64,
@@ -68,6 +70,7 @@ impl Default for Settings {
             fov_deg: 90.0,
             mouse_sensitivity: 0.0022,
             seed: 0,
+            horizon: true,
             band_l2_m: bands.l2_radius_m,
             band_l2_mid_m: bands.l2_mid_radius_m,
             band_l1_full_m: bands.l1_full_radius_m,

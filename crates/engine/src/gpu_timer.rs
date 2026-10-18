@@ -13,16 +13,19 @@ pub enum Zone {
     Prepass = 3,
     HiZ = 4,
     Occlusion = 5,
+    /// Refilling the horizon's cell records; written every frame the horizon is on.
+    HorizonCache = 6,
 }
 
 impl Zone {
-    pub const ALL: [Zone; 6] = [
+    pub const ALL: [Zone; 7] = [
         Zone::Scene,
         Zone::Ui,
         Zone::Cull,
         Zone::Prepass,
         Zone::HiZ,
         Zone::Occlusion,
+        Zone::HorizonCache,
     ];
 
     pub fn name(self) -> &'static str {
@@ -33,6 +36,7 @@ impl Zone {
             Zone::Prepass => "prepass",
             Zone::HiZ => "hiz",
             Zone::Occlusion => "occlusion",
+            Zone::HorizonCache => "horizon cache",
         }
     }
 }

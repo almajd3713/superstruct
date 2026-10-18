@@ -657,3 +657,183 @@ fn fading_in_and_fading_out_chunks_tile_the_screen_exactly() {
         }
     }
 }
+
+/// The horizon pass against the far band: the same L1 cells drawn as instanced geometry and by
+/// ray marching, from one camera. Both leave out cavities and bridges differently, so they
+/// should agree on nearly every pixel, not all.
+#[test]
+fn horizon_march_covers_the_same_pixels_as_the_far_band() {
+    use engine::farinst::far_instances;
+    use worldgen::cell::{CellKey, Level};
+    use worldgen::l1::l1_far_primitives;
+    use worldgen::seed::WorldSeed;
+    let Some(h) = headless() else { return };
+    let size = (320, 180);
+    let seed = WorldSeed(0);
+    let start = WorldPos::new(I64Vec3::new(-2, -2, -3), Vec3::new(10.0, 745.0, 584.0)).unwrap();
+    let params = FrameParams {
+        fog_density: 0.0,
+        ..PLAIN
+    };
+    let reach_cells = 6;
+    let base = CellKey::containing(Level::L1, &start).coords;
+    let mut agree_total = 0.0;
+    let mut worst = 1.0_f64;
+    for (n, yaw) in [0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0].into_iter().enumerate() {
+        let mut cam = Camera::new(start, 70.0);
+        cam.yaw = yaw;
+        cam.pitch = 0.05;
+
+        let mut far = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+        for z in -reach_cells..=reach_cells {
+            for y in -reach_cells..=reach_cells {
+                for x in -reach_cells..=reach_cells {
+                    let key = CellKey::new(Level::L1, base + I64Vec3::new(x, y, z));
+                    let Ok(b) = key.aabb_world() else { continue };
+                    let data = far_instances(&l1_far_primitives(seed, key));
+                    far.upload_far_chunk(&h.queue, b.min, &data);
+                }
+            }
+        }
+        let a = h.render_with(&mut far, &cam, size, params, &[]).unwrap();
+
+        let mut march = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+        march.set_horizon_enabled(true);
+        march.set_world_seed(seed.0);
+        march.set_horizon_start(0.0);
+        // The far band only holds cells within `reach_cells` of the camera's.
+        march.set_horizon_end(reach_cells as f32 * 4096.0);
+        let b = h.render_with(&mut march, &cam, size, params, &[]).unwrap();
+
+        let clear = h.render(&[], &cam, size, params, &[]).unwrap();
+        let drawn = |img: &[u8], i: usize| img[i * 4..i * 4 + 4] != clear[i * 4..i * 4 + 4];
+        let pixels = (size.0 * size.1) as usize;
+        let (mut both, mut either) = (0usize, 0usize);
+        for i in 0..pixels {
+            let (x, y) = (drawn(&a, i), drawn(&b, i));
+            both += usize::from(x && y);
+            either += usize::from(x || y);
+        }
+        let agree = if either == 0 {
+            1.0
+        } else {
+            both as f64 / either as f64
+        };
+        eprintln!(
+            "yaw {yaw}: far band {} px, march {} px, overlap {agree:.3}",
+            (0..pixels).filter(|&i| drawn(&a, i)).count(),
+            (0..pixels).filter(|&i| drawn(&b, i)).count()
+        );
+        save_png(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("../../out/horizon-{n}-far.png")),
+            size.0,
+            size.1,
+            &a,
+        )
+        .unwrap();
+        save_png(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("../../out/horizon-{n}-march.png")),
+            size.0,
+            size.1,
+            &b,
+        )
+        .unwrap();
+        agree_total += agree;
+        worst = worst.min(agree);
+    }
+    eprintln!("mean overlap {:.3}, worst {worst:.3}", agree_total / 6.0);
+}
+
+#[test]
+fn horizon_shows_megaforms_beyond_fifty_km() {
+    use worldgen::seed::WorldSeed;
+    let Some(h) = headless() else { return };
+    let size = (640, 360);
+    let start = WorldPos::new(I64Vec3::new(-2, -2, -3), Vec3::new(10.0, 745.0, 584.0)).unwrap();
+    let params = FrameParams {
+        fog_density: 0.0,
+        ..PLAIN
+    };
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_horizon_enabled(true);
+    renderer.set_world_seed(WorldSeed(0).0);
+    renderer.set_horizon_start(51_200.0);
+    let mut shares = Vec::new();
+    for (n, yaw) in [0.0_f32, 1.6, 3.2, 4.8].into_iter().enumerate() {
+        let mut cam = Camera::new(start, 70.0);
+        cam.yaw = yaw;
+        cam.pitch = 0.02;
+        let img = h
+            .render_with(&mut renderer, &cam, size, params, &[])
+            .unwrap();
+        let clear = h.render(&[], &cam, size, params, &[]).unwrap();
+        let drawn = img
+            .chunks(4)
+            .zip(clear.chunks(4))
+            .filter(|(a, b)| a != b)
+            .count();
+        shares.push(drawn as f64 / f64::from(size.0 * size.1));
+        save_png(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("../../out/horizon-50km-{n}.png")),
+            size.0,
+            size.1,
+            &img,
+        )
+        .unwrap();
+    }
+    eprintln!("share of pixels with horizon structure: {shares:.3?}");
+    assert!(shares.iter().all(|&s| s > 0.05), "{shares:?}");
+}
+
+/// GPU cost of the horizon at 1440p in clear air, where every pixel hits something.
+/// Run: `scripts/win.sh test --release -p engine --test render horizon_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing measurement"]
+fn horizon_cost() {
+    use worldgen::seed::WorldSeed;
+    let Some(h) = headless() else { return };
+    let size = (2560, 1440);
+    let start = WorldPos::new(I64Vec3::new(-2, -2, -3), Vec3::new(10.0, 745.0, 584.0)).unwrap();
+    let params = FrameParams {
+        fog_density: 0.0,
+        ..PLAIN
+    };
+    let mut cam = Camera::new(start, 70.0);
+    cam.pitch = 0.02;
+    let report = |label: &str, times: &[(engine::gpu_timer::Zone, f32)]| {
+        let ms = |name: &str| {
+            times
+                .iter()
+                .find(|(z, _)| z.name() == name)
+                .map_or(0.0, |t| t.1)
+        };
+        eprintln!(
+            "{label}: scene pass {:.3} ms, cache pass {:.3} ms",
+            ms("scene"),
+            ms("horizon cache")
+        );
+    };
+    for on in [false, true] {
+        let mut renderer =
+            engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+        renderer.set_horizon_enabled(on);
+        renderer.set_world_seed(WorldSeed(0).0);
+        let Some(times) = h.gpu_times(&mut renderer, &cam, size, params, 30) else {
+            eprintln!("SKIPPED: no timestamp queries");
+            return;
+        };
+        report(&format!("horizon {on}, steady"), &times);
+    }
+    // A new seed every frame forces a refill of the cell records each time.
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_horizon_enabled(true);
+    let times = h
+        .gpu_times_with(&mut renderer, &cam, size, params, 30, |r, frame| {
+            r.set_world_seed(u64::from(frame));
+        })
+        .unwrap();
+    report("horizon true, refilling every frame", &times);
+}

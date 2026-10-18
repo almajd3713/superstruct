@@ -8,6 +8,10 @@ const SCENE: &str = include_str!("../shaders/scene.wgsl");
 const LINES: &str = include_str!("../shaders/lines.wgsl");
 const CULL: &str = include_str!("../shaders/cull.wgsl");
 const HIZ: &str = include_str!("../shaders/hiz.wgsl");
+const SHADE: &str = include_str!("../shaders/shade.wgsl");
+const HORIZON: &str = include_str!("../shaders/horizon.wgsl");
+const HORIZON_CACHE: &str = include_str!("../shaders/horizon_cache.wgsl");
+const HORIZON_MARCH: &str = include_str!("../shaders/horizon_march.wgsl");
 
 /// Fully composed WGSL for each pipeline.
 #[derive(Debug, Clone)]
@@ -16,19 +20,28 @@ pub struct ShaderSources {
     pub lines: String,
     pub cull: String,
     pub hiz: String,
+    /// Generated tables, the L1 port and the cell-record compute entry.
+    pub horizon_cache: String,
+    pub horizon_march: String,
 }
 
 fn compose(common: &str, body: &str) -> String {
     format!("{common}\n{body}")
 }
 
+fn horizon_cache(port: &str, entry: &str) -> String {
+    format!("{}\n{port}\n{entry}", crate::horizon::prelude())
+}
+
 impl ShaderSources {
     pub fn embedded() -> Self {
         Self {
-            scene: compose(COMMON, SCENE),
+            scene: compose(&compose(COMMON, SHADE), SCENE),
             lines: compose(COMMON, LINES),
             cull: CULL.to_owned(),
             hiz: HIZ.to_owned(),
+            horizon_cache: horizon_cache(HORIZON, HORIZON_CACHE),
+            horizon_march: compose(&compose(COMMON, SHADE), HORIZON_MARCH),
         }
     }
 
@@ -42,11 +55,17 @@ impl ShaderSources {
             std::fs::read_to_string(dir.join(name)).unwrap_or_else(|_| fallback.to_owned())
         };
         let common = read("common.wgsl", COMMON);
+        let shade = compose(&common, &read("shade.wgsl", SHADE));
         Self {
-            scene: compose(&common, &read("scene.wgsl", SCENE)),
+            scene: compose(&shade, &read("scene.wgsl", SCENE)),
             lines: compose(&common, &read("lines.wgsl", LINES)),
             cull: read("cull.wgsl", CULL),
             hiz: read("hiz.wgsl", HIZ),
+            horizon_cache: horizon_cache(
+                &read("horizon.wgsl", HORIZON),
+                &read("horizon_cache.wgsl", HORIZON_CACHE),
+            ),
+            horizon_march: compose(&shade, &read("horizon_march.wgsl", HORIZON_MARCH)),
         }
     }
 }

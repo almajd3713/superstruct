@@ -18,6 +18,7 @@ pub mod gpu_timer;
 pub mod headless;
 pub mod hiz;
 pub mod horizon;
+pub mod horizon_pass;
 pub mod input;
 pub mod mesh;
 pub mod meshpool;

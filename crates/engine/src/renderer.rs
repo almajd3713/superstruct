@@ -9,6 +9,7 @@ use crate::cull::{CullParams, CullPass, Frustum};
 use crate::farinst::{FarData, FarInstance, UnitMeshes, unit_meshes};
 use crate::gpu_timer::{GpuTimer, Zone};
 use crate::hiz::HizPass;
+use crate::horizon_pass::HorizonPass;
 use crate::mesh::Mesh;
 use crate::noise;
 use crate::shaders::ShaderSources;
@@ -364,6 +365,8 @@ pub struct Renderer {
     instances_bg: wgpu::BindGroup,
     cull: CullPass,
     far: FarState,
+    horizon: HorizonPass,
+    world_seed: u64,
     /// Two-phase occlusion culling (needs the prepass and indirect draws).
     occlusion: bool,
     /// Some chunk is mid-fade, so the prepass needs its fragment stage.
@@ -549,6 +552,7 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        let horizon = HorizonPass::new(device, &sources, format, DEPTH_FORMAT, &globals_bgl);
         let cull = CullPass::new(
             device,
             &sources.cull,
@@ -566,6 +570,8 @@ impl Renderer {
             instances_bg: draws_bg,
             cull,
             far,
+            horizon,
+            world_seed: 0,
             occlusion: true,
             fading: false,
             fades_enabled: true,
@@ -780,6 +786,26 @@ impl Renderer {
         self.cull.read_counts(device)
     }
 
+    /// Turns the SDF horizon beyond the far band on or off.
+    pub fn set_horizon_enabled(&mut self, on: bool) {
+        self.horizon.enabled = on;
+    }
+
+    /// Where the horizon starts, metres from the camera (the far band's reach).
+    pub fn set_horizon_start(&mut self, metres: f32) {
+        self.horizon.t_start = metres;
+    }
+
+    /// Where the horizon stops marching, metres from the camera.
+    pub fn set_horizon_end(&mut self, metres: f32) {
+        self.horizon.t_end = metres;
+    }
+
+    /// The world seed the horizon rules run with.
+    pub fn set_world_seed(&mut self, seed: u64) {
+        self.world_seed = seed;
+    }
+
     /// Keeps culling against the current frustum while the camera moves on, so the culled set
     /// can be inspected from outside. Occlusion culling pauses meanwhile, since its pyramid
     /// belongs to the live view.
@@ -881,6 +907,11 @@ impl Renderer {
         if let Some(err) = pollster::block_on(scope.pop()) {
             let msg = err.to_string();
             tracing::error!("shader reload failed, keeping previous pipelines:\n{msg}");
+            self.shader_error = Some(msg.clone());
+            return Err(msg);
+        }
+        if let Err(msg) = self.horizon.reload(device, sources) {
+            tracing::error!("horizon shader reload failed, keeping previous pipelines:\n{msg}");
             self.shader_error = Some(msg.clone());
             return Err(msg);
         }
@@ -1139,6 +1170,15 @@ impl Renderer {
             None => Frustum::from_view_proj(view_proj),
         };
         self.far.prepare(queue, &camera.pos, &frustum);
+        self.horizon.prepare(
+            queue,
+            encoder,
+            &camera.pos,
+            view_proj.inverse(),
+            size,
+            self.world_seed,
+            timer.and_then(|t| t.compute_pass_writes(Zone::HorizonCache)),
+        );
         let two_phase = self.occlusion
             && self.frozen.is_none()
             && self.prepass
@@ -1226,6 +1266,7 @@ impl Renderer {
             timestamp_writes: timer.and_then(|t| t.pass_writes(Zone::Scene)),
             ..Default::default()
         });
+        self.horizon.draw(&mut pass, &self.globals_bg);
         let scene = if prepassed {
             &self.pipelines.scene_tested
         } else {

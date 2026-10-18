@@ -136,6 +136,20 @@ impl Headless {
         params: FrameParams,
         frames: u32,
     ) -> Option<Vec<(Zone, f32)>> {
+        self.gpu_times_with(renderer, camera, size, params, frames, |_, _| {})
+    }
+
+    /// Like [`Headless::gpu_times`], calling `before(renderer, frame)` ahead of every frame, for
+    /// measurements that need something to change each time.
+    pub fn gpu_times_with(
+        &self,
+        renderer: &mut Renderer,
+        camera: &Camera,
+        size: (u32, u32),
+        params: FrameParams,
+        frames: u32,
+        mut before: impl FnMut(&mut Renderer, u32),
+    ) -> Option<Vec<(Zone, f32)>> {
         if !self.timestamps {
             return None;
         }
@@ -159,6 +173,7 @@ impl Headless {
         let mut sums = vec![0.0_f32; Zone::ALL.len()];
         for frame in 0..warmup + frames {
             timer.begin_frame(&self.device);
+            before(renderer, frame);
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
