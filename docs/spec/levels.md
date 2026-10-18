@@ -416,6 +416,52 @@ Tethers (STR-03), drips (STR-04), spires (STR-05), kisses (STR-06), islands (STR
 - Their footprints keep out of the artery cells that carry the `Catwalk web` and `Lift trunk` types only when they are solid (arteries pass through light structures but not through dead machines).
 - A crust's **skin** (SURF-04) is a shell of at least 16 m with openings wider than 32 m (HOR-02). The shell is part of L1; L2 covers it to ≥ 90 % (the-web.md §11.2).
 
+### 4W.6.1 What fills a Between (PW.2.3: STR-03..11)
+
+*Code: `worldgen::l1_between`. Output: `WebPiece { tag, primitive }`, the tag being the registry ID, so the census counts what it finds (`web-report`, PW.2.11). Until the Web L1 is assembled (PW.2.5) these pieces are not yet part of `l1_cell`, and `GEN_VERSION` stays 6.*
+
+**Between runs.** For a column of the stack (a point of the plane perpendicular to the stack axis `a`), a **run** is a maximal stretch of Between along `a`, in world metres. `a` is Y for Flat, Tilted and Curved (Curved is Flat until wells exist) and X or Z for Vertical stacks.
+- Flat: the segments of `stack(h)` with the cell's own y offset. When the cell above (below) is also Flat, the last (first) segment merges with the first (last) of its neighbour, so a seam Between is one run of depth `D` and its key is that of the lower cell's last Between. Both cells compute the same run.
+- Tilted: the segments shifted by the integer `shift` of `regimes.md` §8.2 at the column centre, taken at the three copies `k ∈ {−1, 0, 1}` of the 32 768 m wrap. The ends of a column are embedded by `w/2 · s/64 + 8` m so that the oblique crust surface covers them.
+- Vertical: the same along X or Z, merging along the axis with a neighbour that is Vertical on the same axis.
+- A **run key** is `hash(seed, 0, home, BETWEEN_KEY)` absorbed with the index of the Between in its stack. All draws below come from `hash(seed, 1, (p, q, run key as i64), salt)` for a site `(p, q)` of the run's lattice, never from the cell, so every L1 cell that sees the site draws identically.
+- **Homes.** Every lattice pitch below divides 4096 m, so a site never crosses an L1 face across the stack and never crosses an L0 side face either. The home of a site is the L0 cell of the generating L1 cell, and a run comes only from that cell's stack (plus the merge above). Across an L0 side face the neighbour's own stack differs and nothing crosses: that is the section cliff (SURF-03).
+- **Run parameters.** A run carries everything its draws need, taken from the cell that owns its key (for a merged seam run, the lower cell): `fb = fill_between`, its kind and its flooding. Two cells that share a seam run therefore draw identically.
+
+**Sites.** A run of kind `K` has a lattice of pitch `P_K` in the plane, in world coordinates:
+
+| Kind | `P` | Content |
+|---|---|---|
+| Shallow (BTW-01) | 128 m | a forest: thin tethers (width 16–64 m) at the calibrated chance of the site draw |
+| Normal | 1024 m | the standard mix (below) |
+| Abyssal (BTW-02) | 2048 m | weights tether 200, island 50 and nothing else (the table below with the others at 0); nets at chance 0.1; underside lights ×2 |
+| Pillared (BTW-03) | `256 · 2^below(3)` m (256, 512 or 1024), drawn per run | a hypostyle: **every** site holds a tether of the run's one width `w ∈ {32, 48, 64, 96}` m (`w ≤ P/2`), centred on the lattice, nothing else |
+| Webbed (BTW-04) | 2048 m | no tethers; nets only: 2–4 stacked layers per site at chance 0.7; tubes allowed |
+
+A site's footprint is a square of its width inside its own lattice cell; the centre is jittered by a multiple of 16 m so that the footprint never leaves the lattice cell, so sites never overlap and a cell only reads the lattice cells that overlap it.
+
+The **site draw** (Normal and Abyssal), in this order: `e = below(1000)`, and the site exists iff `10·e < 1000·fb`, a chance of `min(1, fb / 19.9)`: `e · 199 < 10 000 · fb`. The constant is calibrated, not guessed: with every site present the width classes below fill 7.8 % of a Normal Between, so `fb / 255` is reached at `fb / 19.9`, and the built share follows `fill_between` across 2–20 (the test `built_fraction_tracks_fill_between`). Above 20 the lattice is full and the share saturates at about 8 % (Shallow 8.4 %), a little under the 10 % end of the target; then the type from `pick_weighted([450, 120, 120, 60, 80, 20])` (tether, drip, spire, kiss, island, machine; Abyssal `[200, 0, 0, 0, 50, 0]`); a machine needs `P ≥ 1024` and a Between of at least 8 units, otherwise it is a tether; then the width class (below), the section, the jitters in `s` and `t`, then the type's own draws. The forest uses `e · 196 < 10 000 · fb`, calibrated in the same way.
+
+**Tether (STR-03).** Width `w` from the classes 50–100, 100–200, 200–400, 400–800 m with weights 15, 25, 30, 30, a multiple of 2 m, at most `0.8 P`. Section: round (60 %), square (40 %). `w ≥ 120` and square: hollow with chance 0.3 (walls of thickness `max(8, w/12)`, four boxes, open at both ends of the run), and a hollow one holds a **ramp switchback**: flights of rise `(w − 2t)/4` alternating between two lanes of 6 m with a landing at each end, up to 40 flights per cell. It spans the run from one crust to the other (`lo..hi` of the run, extended into the crust by 8 m at both ends). Flooded runs add a lamp ring (an EMISSIVE thin cylinder, radius `w/2 + 1`, 2 m tall) every 128 m.
+
+**Drip (STR-04) and spire (STR-05).** A stack of `n = 4 + below(5)` tiers of square boxes. Total height `H = D · (30 + below(56)) / 100` (a spire from the lower crust, a drip from the upper crust). Tier `i` has width `w0 · (n − i) / n` rounded to 2 m with `w0 ∈ [100, 0.8 P]` (multiple of 2 m, same classes as a tether but capped), height `H / n`, and is centred on the site centre (offset by `±w0/12` from the tier before: `below(3) − 1` per tier). A tip needle (a cylinder of radius `max(1, w0/40)`, length `H/4`) ends it. The drip is the mirror image, hanging from the underside.
+
+**Kiss (STR-06).** One spire of height `m` and one drip of height `D − m`, `m = D · (40 + below(21)) / 100`, whose last tiers have the same width `t = max(8, w0 / 5)` and meet at the waist: a **waist box** of width `t`, 8 m tall, joins them, and a **waist stair** (a `StairRun` of 16 m rise over 32 m, 64 steps, 8 m wide) climbs beside it from the spire's last tier to the drip's.
+
+**Island (STR-07).** A stem (cylinder, radius `4 + below(21)` m) from the lower crust (70 %) or the upper crust (30 %, hanging) to a height `D · (40 + below(41)) / 100`, topped (or hung) by a platform box of width `120 + 2·below(191)` m (capped at `0.8 P`), thickness `10 + below(21)` m, plus `1 + below(3)` boxes of 8–24 m on it (sheds). The stem never reaches the other crust (that is what makes it stranded).
+
+**Dead machine (STR-10).** A horizontal cylinder (axis X or Z by a draw) of radius `100 + 2·below(101)` m and length `2.4 × radius` to `6 × radius`, standing on 4 legs (boxes of width `radius/6`) down to the lower crust (or hung from the upper by the same legs when the draw says so), with `2 + below(3)` flanges (radius +30, thickness 24) and a hub cap at each end. The machine sits in the middle third of the run. Its radius is capped at `0.35 · D`.
+
+**Tube (STR-08), run-level.** Per run: `t_n = below(3)` tubes (Normal), `below(2)` (Abyssal and Webbed), none otherwise. A tube is keyed by `(home, run, t)`: an axis (X or Z), the position on the other horizontal axis (a multiple of 64 m, in `[4096, 28672)` of the L0 cell), a height at `D · (20 + below(61)) / 100` above the lower crust, and its ends `a0 < a1` in the L0 cell (`a0` in `[2048, 16384)`, length `4096 + 64·below(128)`, capped inside the cell). It is a cylinder of radius `8 + below(23)` m with rings (radius +3, 4 m thick) every 256 m, stations (boxes `80 × 40 × 40` m) at the ends, and pylons (cylinders of radius 3 m) from the tube up to the upper crust every 1024 m. Half the tubes are **open gantries** instead: a rail box `6 × 3` m and a tram of `3 + below(6)` cars (boxes `30 × 8 × 8` m, material `TRAIN_LIGHT` on the window strip) spaced 40 m, at a position on the rail drawn from the key. L0-scale lines do not cross L0 faces (they end at their stations), so cells never need to agree on them.
+
+**Net (STR-09).** Patches on a lattice of 2048 m (in the plane), each a square of side `512 + 32·below(41)` m placed inside its lattice cell, at a height `D · (10 + below(81)) / 100`, with cables of radius 1 m along X and along Z every 32 m. Chance: Normal 0.25, Webbed 0.7 (2–4 layers, spaced `D / 6`), Abyssal 0.1.
+
+**Underside lights (STR-11).** On the underside of the upper crust of every run: a 64 m lattice of windows. A 256 m block draws a density `dens ∈ {0, 0, 2, 4, 8, 14} %`; a site draws a window if `below(100) < dens` (doubled in Abyssal, tripled when flooded). A window is an EMISSIVE box of 8 × 5 m across the stack and 1 m along it, hanging from the surface (`a ∈ [hi − 1, hi)`), at an offset of `4·below(14)` m in both directions inside its 64 m lattice cell. Only cells whose range holds the surface (`hi`) draw them (Tilted stacks test each site).
+
+All pieces are clipped to the cell (`§1.4`). Collision: tethers, drips, spires, islands, machines, tubes and pylons collide; cables, lamp rings, windows and nets do not. Flags: `FAR_VISIBLE` for anything wider than 24 m. Materials: CONCRETE for solids, METAL for machines, tubes and rails, PIPE for cables, EMISSIVE for windows and lamps, TRAIN_LIGHT for the tram windows. Features are keyed by the run, never by the cell, so a feature that crosses an L1 face is derived identically on both sides (invariant 4); the seam test in `l1_between` compares the solid on both sides of a face.
+
+**Budget.** A cell reads up to nine runs' lattices; the Normal case is 16 sites per run. The underside lights are the large item: at most 4096 candidate hashes per run and about 5 % of them emit. Meshing cost is measured when the Web L1 lands (PW.2.5).
+
 ### 4W.7 Salts and draw order
 
 Salts added in the L1 block (`0x0200–0x02FF`), append-only:
@@ -428,6 +474,12 @@ Salts added in the L1 block (`0x0200–0x02FF`), append-only:
 | `VOID_CELL` | `0x0213` | cell (L1) | halls, shafts, funnels |
 | `FILL_CORNER` | `0x0214` | lattice corner (L1) | fill noise |
 | `ARTERY` | `0x0215` | cell (L1) | walks, loops, ties |
+| `BETWEEN_KEY` | `0x0216` | cell (L0) with the Between index absorbed | identity of a run (§4W.6.1) |
+| `BETWEEN_SITE` | `0x0217` | `(p, q, run key)` (level 1) | the site draw |
+| `BETWEEN_LINE` | `0x0218` | `(t, 0, run key)`; `(−1, −1, run key)` for the count | tubes |
+| `BETWEEN_LIGHT` | `0x0219` | `(block p, block q, run key)` | density of a 256 m block of underside windows |
+| `BETWEEN_NET` | `0x021A` | `(p, q, run key)` | net patches |
+| `BETWEEN_WINDOW` | `0x021B` | `(p, q, run key)` | one underside window |
 | `LINE_L0` | `0x0120` | `(p, q, i)` (level 0) | Bore, Road, River lines |
 | `SPINE` | `0x0121` | ColumnKey (L0) | spine placement |
 | `WELL` | `0x0122` | cell (L0) | gravity well centres (`gravity.md`) |

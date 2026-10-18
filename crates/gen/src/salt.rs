@@ -52,6 +52,18 @@ salts! {
     CAVITY_BITE = 0x0208;
     /// Keyed by `LayerKey(L1, W = 4)`: tram lines per deck.
     TRAM_LINE = 0x0209;
+    /// Cell (L0) with the Between index absorbed: identity of a run (`levels.md` §4W.6.1).
+    BETWEEN_KEY = 0x0216;
+    /// `(p, q, run key)`: the site draw of a Between lattice.
+    BETWEEN_SITE = 0x0217;
+    /// `(run key, t, 0)`: transit tubes.
+    BETWEEN_LINE = 0x0218;
+    /// `(block p, block q, run key)`: density of a block of underside windows.
+    BETWEEN_LIGHT = 0x0219;
+    /// `(p, q, run key)`: a net patch.
+    BETWEEN_NET = 0x021A;
+    /// `(p, q, run key)`: one underside window.
+    BETWEEN_WINDOW = 0x021B;
 
     // L2 districts: 0x03xx
     MASS = 0x0301;

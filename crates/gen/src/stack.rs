@@ -266,6 +266,17 @@ impl Stack {
     }
 }
 
+/// How far a Tilted stack's strata are raised at plane position `(x, z)` (metres inside the L0
+/// cell): the plane through the cell's centre leaning by slope `s/64` towards heading `yaw`.
+pub fn tilt_shift(tilt: u8, yaw: u8, x: i64, z: i64) -> i64 {
+    let s = i64::from(TILT_SLOPE[usize::from(tilt)]);
+    let (a, b) = heading(yaw);
+    let (a, b) = (i64::from(a), i64::from(b));
+    let len = (a * a + b * b).isqrt();
+    let along = a * (x - HALF_M) + b * (z - HALF_M);
+    (s * along).div_euclid(64 * len)
+}
+
 /// `oct3` of `gravity.md` §2: `max(m∞, 4·S/7)`.
 pub fn oct3(r: I64Vec3) -> i64 {
     let a = r.abs();
@@ -281,14 +292,7 @@ pub fn u_units(geometry: StackGeometry, local_m: I64Vec3, well: Option<I64Vec3>)
         StackGeometry::Vertical { axis: 0 } => local_m.x.div_euclid(64),
         StackGeometry::Vertical { .. } => local_m.z.div_euclid(64),
         StackGeometry::Tilted { tilt, yaw } => {
-            // The plane through the cell's centre, leaning by slope `s/64` towards the heading.
-            let s = i64::from(TILT_SLOPE[usize::from(tilt)]);
-            let (a, b) = heading(yaw);
-            let (a, b) = (i64::from(a), i64::from(b));
-            let len = (a * a + b * b).isqrt();
-            let along = a * (local_m.x - HALF_M) + b * (local_m.z - HALF_M);
-            let shift = (s * along).div_euclid(64 * len);
-            (local_m.y - shift).div_euclid(64)
+            (local_m.y - tilt_shift(tilt, yaw, local_m.x, local_m.z)).div_euclid(64)
         }
         StackGeometry::Curved => match well {
             Some(w) => oct3(local_m - w).div_euclid(64),

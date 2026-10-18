@@ -229,6 +229,10 @@ impl FeatureKind {
     pub const SANCTUARY: Self = Self(10);
     pub const MISC: Self = Self(11);
     pub const TRAM: Self = Self(12);
+    /// Between content: tethers, drips, spires, islands, machines, tubes (STR-03..10).
+    pub const TETHER: Self = Self(13);
+    pub const CABLE: Self = Self(14);
+    pub const WINDOW: Self = Self(15);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
