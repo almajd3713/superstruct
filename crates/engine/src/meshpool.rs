@@ -4,6 +4,8 @@
 //! ([`MeshPool::retarget`]); a job already running is flagged stale and its result is dropped.
 
 use std::collections::HashMap;
+
+use crate::fasthash::FastMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -145,7 +147,7 @@ impl MeshPool {
     }
 
     /// Drops every queued or running job whose id is not in `wanted` and re-ranks the rest.
-    pub fn retarget(&self, wanted: &HashMap<ChunkId, f32>) {
+    pub fn retarget(&self, wanted: &FastMap<ChunkId, f32>) {
         let mut st = self.shared.lock();
         let before = st.queue.len();
         st.queue.retain(|id, _| wanted.contains_key(id));
@@ -387,7 +389,7 @@ mod tests {
         for (i, id) in ids.iter().enumerate() {
             pool.submit(*id, i as f32);
         }
-        let keep: HashMap<ChunkId, f32> = ids[18..].iter().map(|id| (*id, 0.0)).collect();
+        let keep: FastMap<ChunkId, f32> = ids[18..].iter().map(|id| (*id, 0.0)).collect();
         pool.retarget(&keep);
         while pool.stats().queued + pool.stats().running > 0 {
             thread::yield_now();

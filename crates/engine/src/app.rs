@@ -35,6 +35,9 @@ use crate::respawn::{Event, SafeSpot, Survival};
 use crate::settings::{Settings, VsyncMode};
 use crate::shaders::{ShaderSources, ShaderWatcher};
 use crate::streamer::{RendererSink, Streamer, StreamerConfig};
+use crate::tramauto::TramAuto;
+use crate::tramdraw::TramDraw;
+use crate::tramsys::{Riding, TramSystem};
 use crate::window::toggle_fullscreen;
 
 /// Simulation rate (PLAN.md §11).
@@ -71,6 +74,10 @@ struct App {
     survival: Survival,
     lifts: LiftSystem,
     lift_draw: LiftDraw,
+    trams: TramSystem,
+    tram_draw: TramDraw,
+    /// `SUPERSTRUCT_TRAM=auto`: a scripted ride for hitch captures.
+    tram_auto: Option<TramAuto>,
     lift_results_tx: crossbeam_channel::Sender<PlanResult>,
     lift_results_rx: crossbeam_channel::Receiver<PlanResult>,
     /// Presses seen since the last fixed step, consumed by the first step of a frame.
@@ -94,6 +101,10 @@ struct App {
     fps_frames: u32,
     /// Longest frame in the current one-second window, seconds.
     worst_frame: f64,
+    /// `SUPERSTRUCT_HITCH=<ms>`: log a breakdown of every frame that takes longer.
+    hitch_ms: Option<f64>,
+    /// Milliseconds spent this frame in the simulation, streamer update and the rest of draw.
+    parts_ms: [f64; 3],
     /// `SUPERSTRUCT_AUTOFLY=<m/s>`: fly level along the view at a constant speed, for captures.
     autofly: Option<f32>,
     frame_count: u64,
@@ -186,8 +197,24 @@ impl App {
             }
         } else {
             let steer = self.survival.controllable();
+            let mut flat = flat;
+            if let Some(auto) = &mut self.tram_auto {
+                let cmd = auto.step(&self.trams);
+                if let Some(feet) = cmd.teleport
+                    && let Ok(eye) = feet.offset(Vec3::Y * (EYE_HEIGHT + 0.05))
+                {
+                    self.walker.set_eye(eye);
+                    self.camera.pos = eye;
+                    self.prev_cam_pos = eye;
+                    self.survival = Survival::new(self.walker.pos);
+                    self.lifts.drop_all();
+                    self.trams.drop_all();
+                }
+                flat = cmd.wish;
+                self.quit |= cmd.finished;
+            }
             let input = MoveInput {
-                wish: if steer {
+                wish: if steer || self.tram_auto.is_some() {
                     flat.normalize_or_zero()
                 } else {
                     Vec3::ZERO
@@ -195,17 +222,22 @@ impl App {
                 run: steer && grabbed && self.input.held(Action::Sprint),
             };
             self.step_lifts(dt);
-            let world = self.streamer.collision();
-            if !self.lifts.holds_controller(&self.walker.pos) {
-                self.walker.step(dt, input, world);
+            let aboard = self.trams.aboard();
+            let world = Riding {
+                world: self.streamer.collision(),
+                force_ready: aboard,
+            };
+            if aboard || !self.lifts.holds_controller(&self.walker.pos) {
+                self.walker.step(dt, input, &world);
             }
             if let Event::Respawn(spot) =
                 self.survival
-                    .update(dt, &self.walker, self.camera.yaw, world)
+                    .update(dt, &self.walker, self.camera.yaw, self.streamer.collision())
                 && let Ok(eye) = spot.pos.offset(Vec3::Y * (EYE_HEIGHT + 0.05))
             {
                 self.walker.set_eye(eye);
                 self.lifts.drop_all();
+                self.trams.drop_all();
                 self.camera.yaw = spot.yaw;
                 self.camera.pitch = 0.0;
                 self.prev_cam_pos = eye;
@@ -226,6 +258,8 @@ impl App {
             controllable: self.survival.controllable(),
         };
         let input = std::mem::take(&mut self.lift_input);
+        self.trams.update(&mut self.walker, input.call);
+        self.streamer.set_probes(self.trams.probes());
         let requests = self
             .lifts
             .update(dt, &view, input, self.streamer.collision());
@@ -248,9 +282,9 @@ impl App {
                 }
             });
         }
-        self.streamer
-            .collision_mut()
-            .set_dynamic(self.lifts.solids().to_vec());
+        let mut solids = self.lifts.solids().to_vec();
+        solids.extend_from_slice(self.trams.solids());
+        self.streamer.collision_mut().set_dynamic(solids);
     }
 
     /// Starts requested debug commands (overlay buttons and F5/F6) and applies finished ones.
@@ -300,6 +334,8 @@ impl App {
                         self.prev_cam_pos = eye;
                         self.walker.set_eye(eye);
                         self.lifts.drop_all();
+                        self.trams.drop_all();
+                        self.trams.drop_all();
                         format!("teleported to sector {:?}", feet.sector().to_array())
                     }
                     Err(e) => e.to_string(),
@@ -427,6 +463,7 @@ impl App {
         if let Ok(p) = self.prev_cam_pos.offset(step * alpha) {
             render_camera.pos = p;
         }
+        let t_stream = Instant::now();
         self.streamer.update(
             &render_camera.pos,
             render_camera.forward(),
@@ -436,12 +473,22 @@ impl App {
                 queue: &running.gpu.queue,
             },
         );
+        self.parts_ms[1] = t_stream.elapsed().as_secs_f64() * 1000.0;
+        let t_draws = Instant::now();
         self.lift_draw.update(
             &mut running.renderer,
             &running.gpu.device,
             &running.gpu.queue,
             &self.lifts,
         );
+        self.tram_draw.update(
+            &mut running.renderer,
+            &running.gpu.device,
+            &running.gpu.queue,
+            &self.trams,
+            &render_camera.pos,
+        );
+        self.parts_ms[2] = t_draws.elapsed().as_secs_f64() * 1000.0;
         self.box_scratch.clear();
         if self.debug_boxes {
             cell_boxes(&render_camera.pos, &mut self.box_scratch);
@@ -557,6 +604,7 @@ impl App {
             self.lift_input.up |= self.input.pressed(Action::MoveUp);
             self.lift_input.down |= self.input.pressed(Action::MoveDown);
         }
+        let t_sim = Instant::now();
         self.accumulator += frame_time;
         crate::zone!("simulate");
         while self.accumulator >= SIM_DT {
@@ -564,6 +612,7 @@ impl App {
             self.move_player(SIM_DT as f32);
             self.accumulator -= SIM_DT;
         }
+        self.parts_ms[0] = t_sim.elapsed().as_secs_f64() * 1000.0;
         let alpha = (self.accumulator / SIM_DT) as f32;
         self.frame_count += 1;
         let autoshot = self.autoshot_after.is_some_and(|n| self.frame_count == n);
@@ -577,6 +626,18 @@ impl App {
             self.draw(alpha, frame_time, want_screenshot)
         };
         self.quit |= presented && autoshot;
+        let total_ms = now.elapsed().as_secs_f64() * 1000.0;
+        if self.hitch_ms.is_some_and(|limit| total_ms > limit) {
+            info!(
+                total = format!("{total_ms:.1}"),
+                sim = format!("{:.1}", self.parts_ms[0]),
+                streamer = format!("{:.1}", self.parts_ms[1]),
+                draws = format!("{:.1}", self.parts_ms[2]),
+                retarget = ?self.streamer.retarget_ms().map(|v| (v * 10.0).round() / 10.0),
+                parts = ?self.streamer.last_parts_ms().map(|v| (v * 10.0).round() / 10.0),
+                "slow frame"
+            );
+        }
 
         crate::profile::frame_mark();
         self.fps_frames += 1;
@@ -696,13 +757,18 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         survival: Survival::new(start),
         lifts: LiftSystem::new(WorldSeed(settings_seed)),
         lift_draw: LiftDraw::default(),
+        trams: TramSystem::new(WorldSeed(settings_seed)),
+        tram_draw: TramDraw::default(),
+        tram_auto: (std::env::var("SUPERSTRUCT_TRAM").as_deref() == Ok("auto"))
+            .then(|| TramAuto::new(WorldSeed(settings_seed))),
         lift_results_tx,
         lift_results_rx,
         lift_input: LiftInput::default(),
         debug_tx,
         debug_rx,
         sanctuary_pick: 0,
-        fly_mode: std::env::var_os("SUPERSTRUCT_WALK").is_none(),
+        fly_mode: std::env::var_os("SUPERSTRUCT_WALK").is_none()
+            && std::env::var_os("SUPERSTRUCT_TRAM").is_none(),
         fly_speed: 20.0,
         streamer: Streamer::new(
             StreamerConfig {
@@ -725,6 +791,10 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         fps_window_start: now,
         fps_frames: 0,
         worst_frame: 0.0,
+        hitch_ms: std::env::var("SUPERSTRUCT_HITCH")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        parts_ms: [0.0; 3],
         autofly: std::env::var("SUPERSTRUCT_AUTOFLY")
             .ok()
             .and_then(|v| v.parse().ok()),

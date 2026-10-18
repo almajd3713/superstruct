@@ -49,7 +49,7 @@ pub struct LineFrame {
 }
 
 impl Session {
-    fn new(line: TramLine) -> Option<Self> {
+    pub fn new(line: TramLine) -> Option<Self> {
         let first = CellKey::new(
             Level::L1,
             match line.axis {
@@ -465,6 +465,34 @@ impl TramSystem {
             return;
         }
     }
+}
+
+/// The first line of four cells found near the origin, for scripted rides.
+pub fn find_full_line(seed: WorldSeed) -> Option<TramLine> {
+    for ring in 0..4i64 {
+        for y in -ring..=ring {
+            for rz in -ring..=ring {
+                for rx in -ring..=ring {
+                    if rx.abs().max(rz.abs()).max(y.abs()) != ring {
+                        continue;
+                    }
+                    let layer = LayerKey {
+                        level: Level::L1,
+                        y,
+                        rx,
+                        rz,
+                    };
+                    if let Some(l) = tram_lines(seed, layer)
+                        .into_iter()
+                        .find(|l| l.cells.1 - l.cells.0 == 3)
+                    {
+                        return Some(l);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// The world plus forced readiness while riding.

@@ -138,11 +138,6 @@ fn distance_to_cell(cam: &WorldPos, key: CellKey) -> Option<f64> {
     Some(outside.length())
 }
 
-fn centre_offset(cam: &WorldPos, key: CellKey) -> Option<DVec3> {
-    let bounds = key.aabb_world().ok()?;
-    Some(bounds.min.delta(cam) + DVec3::splat(bounds.size_m as f64 * 0.5))
-}
-
 /// Chunks wanted around `cam`, priority-ordered by distance biased towards `view_dir`
 /// (cells ahead load before cells behind at the same distance). Output order is deterministic.
 pub fn desired_set(cfg: &StreamConfig, cam: &WorldPos, view_dir: Vec3, out: &mut Vec<Wanted>) {
@@ -170,10 +165,8 @@ pub fn desired_set_with_probes(
 ) {
     out.clear();
     let view = view_dir.as_dvec3().normalize_or_zero();
-    let mut add = |id: ChunkId, dist: f64| {
-        let ahead = centre_offset(cam, id.key)
-            .and_then(DVec3::try_normalize)
-            .map_or(0.0, |dir| dir.dot(view));
+    let mut add = |id: ChunkId, dist: f64, centre: DVec3| {
+        let ahead = centre.try_normalize().map_or(0.0, |dir| dir.dot(view));
         // Behind costs up to 50% extra distance.
         let priority = dist * (1.0 + 0.25 * (1.0 - ahead));
         out.push(Wanted {
@@ -181,15 +174,36 @@ pub fn desired_set_with_probes(
             priority: priority as f32,
         });
     };
-    let around = |level: Level, radius: f64, f: &mut dyn FnMut(CellKey, f64)| {
-        let centre = CellKey::containing(level, cam).coords;
+    // Cells are visited by integer offset from the camera's cell, with distances computed from
+    // the camera's position inside its own cell: no `WorldPos` arithmetic per cell, which keeps a
+    // re-rank over tens of thousands of cells cheap.
+    let around = |level: Level, radius: f64, f: &mut dyn FnMut(CellKey, f64, DVec3)| {
+        let centre_key = CellKey::containing(level, cam);
+        let Ok(bounds) = centre_key.aabb_world() else {
+            return;
+        };
+        let size = bounds.size_m as f64;
+        let local = -bounds.min.delta(cam);
         let n = (radius / level.size_m() as f64).ceil() as i64 + 1;
-        for z in -n..=n {
-            for y in -n..=n {
-                for x in -n..=n {
-                    let key = CellKey::new(level, centre + I64Vec3::new(x, y, z));
-                    if let Some(d) = distance_to_cell(cam, key).filter(|d| *d <= radius) {
-                        f(key, d);
+        let gap = |d: i64, l: f64| match d {
+            0 => 0.0,
+            d if d > 0 => d as f64 * size - l,
+            d => l - (d + 1) as f64 * size,
+        };
+        for dz in -n..=n {
+            for dy in -n..=n {
+                for dx in -n..=n {
+                    let key = CellKey::new(level, centre_key.coords + I64Vec3::new(dx, dy, dz));
+                    if !key.in_domain() {
+                        continue;
+                    }
+                    let d =
+                        DVec3::new(gap(dx, local.x), gap(dy, local.y), gap(dz, local.z)).length();
+                    if d <= radius {
+                        let centre = DVec3::new(dx as f64, dy as f64, dz as f64) * size
+                            + DVec3::splat(size * 0.5)
+                            - local;
+                        f(key, d, centre);
                     }
                 }
             }
@@ -198,22 +212,22 @@ pub fn desired_set_with_probes(
     around(
         Level::L2,
         cfg.l2_mid_radius_m.max(cfg.l2_radius_m),
-        &mut |k, d| {
+        &mut |k, d, c| {
             let id = if d <= cfg.l2_radius_m {
                 ChunkId::l2(k.coords)
             } else {
                 ChunkId::l2_mid(k.coords)
             };
-            add(id, d);
+            add(id, d, c);
         },
     );
-    around(Level::L1, cfg.l1_far_radius_m, &mut |k, d| {
+    around(Level::L1, cfg.l1_far_radius_m, &mut |k, d, c| {
         let detail = if d <= cfg.l1_full_radius_m {
             Detail::Full
         } else {
             Detail::Far
         };
-        add(ChunkId::l1(k.coords, detail), d);
+        add(ChunkId::l1(k.coords, detail), d, c);
     });
     if !probes.is_empty() {
         add_probes(probes, out);

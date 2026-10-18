@@ -3,6 +3,9 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::fasthash::FastMap;
+use std::time::Instant;
+
 use glam::Vec3;
 use worldgen::cell::{CellKey, Level};
 use worldgen::coord::WorldPos;
@@ -111,15 +114,19 @@ const RERANK_MOVE_PROBED_M: f64 = 256.0;
 pub struct Streamer {
     cfg: StreamerConfig,
     pool: MeshPool,
-    resident: HashMap<ChunkId, Resident>,
+    resident: FastMap<ChunkId, Resident>,
     /// Meshes the workers finished that still wait for upload budget.
     ready: VecDeque<ChunkMesh>,
     wanted: Vec<Wanted>,
-    wanted_map: HashMap<ChunkId, f32>,
+    wanted_map: FastMap<ChunkId, f32>,
     last_cell: Option<CellKey>,
     last_rank: u64,
     last_rank_pos: Option<WorldPos>,
     probes: Vec<Probe>,
+    /// Milliseconds of the last update: retarget, collect, upload, visibility, evict.
+    last_parts_ms: [f64; 5],
+    /// Milliseconds of the last retarget: desired set, wanted map, pool retarget, submit loop.
+    retarget_ms: [f64; 4],
     /// Visibility only depends on the wanted and resident sets, which change rarely.
     visibility_dirty: bool,
     frame: u64,
@@ -136,14 +143,16 @@ impl Streamer {
         Self {
             cfg,
             pool,
-            resident: HashMap::new(),
+            resident: FastMap::default(),
             ready: VecDeque::new(),
             wanted: Vec::new(),
-            wanted_map: HashMap::new(),
+            wanted_map: FastMap::default(),
             last_cell: None,
             last_rank: 0,
             last_rank_pos: None,
             probes: Vec::new(),
+            last_parts_ms: [0.0; 5],
+            retarget_ms: [0.0; 4],
             visibility_dirty: true,
             frame: 0,
             resident_bytes: 0,
@@ -202,6 +211,12 @@ impl Streamer {
             .last_rank_pos
             .is_none_or(|p| cam.delta(&p).length() >= self.rerank_distance());
         let loading = self.frame - self.last_rank >= RERANK_FRAMES && self.has_pending_work();
+        let mut mark = Instant::now();
+        let mut lap = |slot: usize, parts: &mut [f64; 5]| {
+            parts[slot] = mark.elapsed().as_secs_f64() * 1000.0;
+            mark = Instant::now();
+        };
+        let mut parts = [0.0; 5];
         if self.last_cell != Some(cell) || moved || loading {
             self.last_cell = Some(cell);
             self.last_rank = self.frame;
@@ -209,13 +224,19 @@ impl Streamer {
             self.visibility_dirty = true;
             self.retarget(cam, view_dir);
         }
+        lap(0, &mut parts);
         self.collect_finished();
+        lap(1, &mut parts);
         self.upload(sink);
+        lap(2, &mut parts);
         if self.visibility_dirty {
             self.visibility_dirty = false;
             self.refresh_visibility(sink);
         }
+        lap(3, &mut parts);
         self.evict(sink);
+        lap(4, &mut parts);
+        self.last_parts_ms = parts;
     }
 
     /// Wanted-set look-ahead from a known schedule; empty when not on one.
@@ -225,6 +246,14 @@ impl Streamer {
         }
         self.probes.clear();
         self.probes.extend_from_slice(probes);
+    }
+
+    pub fn retarget_ms(&self) -> [f64; 4] {
+        self.retarget_ms
+    }
+
+    pub fn last_parts_ms(&self) -> [f64; 5] {
+        self.last_parts_ms
     }
 
     fn rerank_distance(&self) -> f64 {
@@ -266,6 +295,7 @@ impl Streamer {
     }
 
     fn retarget(&mut self, cam: &WorldPos, view_dir: Vec3) {
+        let t = Instant::now();
         desired_set_with_probes(
             &self.cfg.stream,
             cam,
@@ -273,12 +303,16 @@ impl Streamer {
             &self.probes,
             &mut self.scratch,
         );
+        let t_set = t.elapsed().as_secs_f64() * 1000.0;
         std::mem::swap(&mut self.wanted, &mut self.scratch);
         self.wanted_map.clear();
         self.wanted_map
             .extend(self.wanted.iter().map(|w| (w.id, w.priority)));
+        let t_map = t.elapsed().as_secs_f64() * 1000.0;
         self.pool.retarget(&self.wanted_map);
-        let in_ready: HashSet<ChunkId> = self.ready.iter().map(|c| c.id).collect();
+        let t_pool = t.elapsed().as_secs_f64() * 1000.0;
+        let in_ready: HashSet<ChunkId, std::hash::BuildHasherDefault<crate::fasthash::FxHasher>> =
+            self.ready.iter().map(|c| c.id).collect();
         for w in &self.wanted {
             if let Some(r) = self.resident.get_mut(&w.id) {
                 r.last_wanted = self.frame;
@@ -288,6 +322,12 @@ impl Streamer {
         }
         let map = &self.wanted_map;
         self.ready.retain(|c| map.contains_key(&c.id));
+        self.retarget_ms = [
+            t_set,
+            t_map - t_set,
+            t_pool - t_map,
+            t.elapsed().as_secs_f64() * 1000.0 - t_pool,
+        ];
     }
 
     fn collect_finished(&mut self) {
@@ -360,21 +400,32 @@ impl Streamer {
     /// Wanted chunks draw. An unwanted one keeps drawing only while its cell's replacement detail
     /// is not resident yet, so a far-to-full swap leaves no hole.
     fn refresh_visibility(&mut self, sink: &mut dyn ChunkSink) {
-        let wanted_cells: HashMap<CellKey, bool> = {
-            let mut m: HashMap<CellKey, bool> = HashMap::new();
-            for w in &self.wanted {
-                let ready = self.resident.contains_key(&w.id);
-                let e = m.entry(w.id.key).or_insert(false);
-                *e |= ready;
-            }
-            m
+        let other_details = |d: Detail| match d {
+            Detail::Full => [Detail::Mid, Detail::Far],
+            Detail::Mid => [Detail::Full, Detail::Far],
+            Detail::Far => [Detail::Full, Detail::Mid],
         };
-        for (id, r) in &mut self.resident {
-            let visible = self.wanted_map.contains_key(id)
-                || wanted_cells
-                    .get(&id.key)
-                    .is_some_and(|replacement_ready| !replacement_ready);
+        let mut changes: Vec<(ChunkId, bool)> = Vec::new();
+        for (id, r) in &self.resident {
+            // Wanted, or its cell is wanted at another detail that is not resident yet.
+            let visible = self.wanted_map.contains_key(id) || {
+                let mut wanted_elsewhere = false;
+                let mut replacement_ready = false;
+                for d in other_details(id.detail) {
+                    let other = ChunkId { detail: d, ..*id };
+                    if self.wanted_map.contains_key(&other) {
+                        wanted_elsewhere = true;
+                        replacement_ready |= self.resident.contains_key(&other);
+                    }
+                }
+                wanted_elsewhere && !replacement_ready
+            };
             if visible != r.visible {
+                changes.push((*id, visible));
+            }
+        }
+        for (id, visible) in changes {
+            if let Some(r) = self.resident.get_mut(&id) {
                 r.visible = visible;
                 sink.set_visible(r.handle, visible);
             }
