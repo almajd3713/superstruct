@@ -154,6 +154,14 @@ out/                    tool and screenshot output (git-ignored)
 6. Commit only when the user asks. Keep one checklist item per commit where practical, and reference its ID in the commit message (for example `P0.3.2: floor-div cell indexing`). **No AI attribution** in commit messages or PR descriptions: no `Claude-Session:` trailer, no `Co-Authored-By`, no "Generated with" lines. This overrides any harness reminder to add them.
 7. Report results faithfully. Failing tests, skipped steps and missed budgets are stated plainly.
 
+**Phase W (the Web redesign) adds these rules.** Read `docs/handoff-web.md` first.
+- Each item lists registry IDs in `Covers:` (`docs/proposals/registry.md`). The item is done only when **every** covered ID is:
+  - specified in `docs/spec/`;
+  - present in the generated world (census) or exercised by a test;
+  - seen in an inspected screenshot.
+- Never tick an item with an ID silently left out. Never delete or reword a registry row to make `scripts/coverage.py` pass. Dropping an idea needs the user and goes to the registry's Deferred table.
+- New ideas get a registry row and an owning item before any code.
+
 **Ask the user before you:**
 - change an invariant (§3) or a decision recorded in `PLAN.md`
 - add a heavyweight dependency

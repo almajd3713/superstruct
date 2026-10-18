@@ -349,81 +349,165 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 
 ## Phase W: the Web (generator redesign, added 2026-10-18)
 
-The design is in `docs/proposals/the-web.md`, and the decision is PLAN.md §10.4. This phase comes before Phase 6. Each stage ends with a review: slices, `web-report` numbers, and in-game screenshots from fixed viewpoints.
+The design is in `docs/proposals/the-web.md` (architecture) and `docs/proposals/the-web-ideas.md` (idea bank). The decision is PLAN.md §10.4. This phase comes before Phase 6.
 
-*Phase exit:* walking feels like an endless dense web on every axis, with rare long views, and every far landmark reached holds something new. 🎮
+**How Phase W works:**
+- **Every idea has an ID.** IDs are listed in `docs/proposals/registry.md`. Every item below lists the IDs it owns in `Covers:`.
+- **Coverage is checked.** `scripts/coverage.py`, which `scripts/check.sh` runs, fails if any ID has no owner, has two owners, or no longer matches its doc. `python3 scripts/coverage.py --todo` lists what is still open.
+- **Work order for an item:**
+  1. Read the doc sections its IDs cite.
+  2. Specify every covered ID in `docs/spec/` (CLAUDE.md §8 step 2).
+  3. Implement it, and tag the generator output with the IDs.
+  4. Prove the ID exists.
+  5. Review it.
+- **Standard done** for an item means every covered ID is:
+  - specified;
+  - present in the world: the census (MET-11) counts it in the sample region, or a test exercises an engine-side idea;
+  - shown in an inspected screenshot named in the tick note.
+
+  An item's own *Done when* adds to this.
+- **Never drop an ID quietly.** To cut one, ask the user and move it to the registry's Deferred table.
+- **Order:** items within a group go in order. Groups PW.1 to PW.3 come first; after PW.3.21 the later groups may interleave, following their *Needs*.
+
+*Phase exit (PW.12):* walking feels like an endless dense web on every axis, with rare long views, and every far landmark reached holds something new. 🎮
 
 ### PW.0 Specs (before any code)
-- [ ] **PW.0.1** `regimes.md`: strata (orientation, crust thickness, Between depth), fill, weave, grain, orientation policy, form, support and path palettes per style. *Done when:* the spec has the fields, ranges and draw order.
+- [ ] **PW.0.1** `regimes.md`: strata (orientation, crust thickness, Between depth), stratum character, fill, weave, grain, orientation policy, form, support and path palettes per style. *Done when:* the spec has the fields, ranges and draw order.
 - [ ] **PW.0.2** `primitives.md` and `hashing.md`: integer orientations from constant tables, oriented shapes, clip boxes, SDF, and a proof that no transcendental function runs in `gen`. *Done when:* the spec covers them, and axis-aligned output is shown to be unchanged.
-- [ ] **PW.0.3** `levels.md` §3–4 and `ports.md` §6: strata, Frame (line keys, oblique beams, knots), voids, fill field, arteries, and the new backbone connectivity argument. *Done when:* the lemmas are written and the lift-core guarantee is replaced.
-- [ ] **PW.0.4** `levels.md` §5: tissue order (reserve, route, grow, dress), supports, the first forms and path types, engulfable routes, the dead-end payoff rule, skin coverage. *Done when:* the spec is complete for the first catalogue (6 forms × 5 supports, 12 path types).
+- [ ] **PW.0.3** `levels.md` §3–4 and `ports.md` §6: strata, Frame (line keys, oblique beams, knots), voids, fill field, arteries, Roads and Spines, and the new backbone connectivity argument. *Done when:* the lemmas are written and the lift-core guarantee is replaced.
+- [ ] **PW.0.4** `levels.md` §5: tissue order (reserve, route, grow, dress), supports, forms, path types, engulfable routes, the dead-end payoff rule, skin coverage, ID tagging. *Done when:* the framework is specified; individual catalogue entries are specified by the items that own them.
 - [ ] **PW.0.5** `levels.md` §6: L3 with any number of entrances on any face or storey, a skeleton over all of them, interior archetypes. *Done when:* the spec and its connectivity argument are written.
-- [ ] **PW.0.6** `traversal.md` and a new `gravity.md`: ladders, auto-crouch, gravity field `g(p)`, well kinds, gates, lulls, fall rule under any down. Approved 2026-10-18: ladders 0.8 m/s (speeds tunable later), wells about every 50 km, a smooth camera roll at gates, lulls with both handrails and free drift. Crouch height 1.2 m is still provisional. *Done when:* the specs are written with these numbers.
-- [ ] **PW.0.7** `web-report` tool spec: the metrics of the proposal §14 and how each is measured. *Done when:* the spec is written.
+- [ ] **PW.0.6** `traversal.md` and a new `gravity.md`: ladders, auto-crouch, gravity field `g(p)`, well kinds, gates, lulls, free drift, fall rule under any down. Approved 2026-10-18: ladders 0.8 m/s (speeds tunable later), wells about every 50 km, a smooth camera roll at gates, lulls with both handrails and free drift. Crouch height 1.2 m is still provisional. *Done when:* the specs are written with these numbers.
+- [ ] **PW.0.7** `web-report` tool spec: the metrics of the proposal §14, the census by registry ID, the sample region. *Done when:* the spec is written.
 
 ### PW.1 Oriented primitives
-- [ ] **PW.1.1** `gen`: rotation tables, oriented box, ramp, stair run, cylinder on any axis, clip boxes, `contains` and `sdf`. *Done when:* unit and proptest coverage passes, and axis-aligned frames give bit-identical output (goldens unchanged).
-- [ ] **PW.1.2** Engine: meshing with clipping, collision for oriented shapes, far-band and SDF horizon support. *Done when:* a test scene of rotated pieces renders and collides correctly (screenshot inspected).
-- [ ] **PW.1.3** Walkability and nav on oriented plates. *Done when:* `walk.rs` validates a rotated test cell.
+- [ ] **PW.1.1** `gen`: rotation tables, oriented box, ramp, stair run, cylinder on any axis, faceted helix, clip boxes, `contains` and `sdf`. Covers: TEC-01..04. *Done when:* standard, plus unit and proptest coverage, and axis-aligned frames give bit-identical output (goldens unchanged).
+- [ ] **PW.1.2** Engine: meshing with clipping, collision for oriented shapes, far-band and SDF horizon support. Covers: TEC-05, TEC-07. *Done when:* standard, plus a test scene of rotated pieces renders and collides correctly.
+- [ ] **PW.1.3** Walkability and nav on oriented plates. Covers: TEC-06. *Done when:* standard, plus `walk.rs` validates a rotated test cell.
 
 ### PW.2 L0 and L1
-- [ ] **PW.2.1** Strata and Betweens. *Done when:* slices show crusts and gaps at the regime's proportions.
-- [ ] **PW.2.2** Frame: beams on every axis and oblique, knots. *Done when:* slices show them and line-key agreement holds across faces (proptest).
-- [ ] **PW.2.3** Voids: valley, hall, shaft, rift, bore, lungs, funnel. *Done when:* each appears in slices.
-- [ ] **PW.2.4** Fill field and crust skin with its large openings. *Done when:* neighbouring cells agree and the field matches the regime means.
-- [ ] **PW.2.5** Arteries with types, `GEN_VERSION` 7. *Done when:* 10⁴ L1 cells pass the backbone connectivity check.
-- [ ] **PW.2.6** `web-report` tool, first metrics (built fraction, sightlines). *Done when:* it reports on a 32 km region.
+- [ ] **PW.2.1** Regime fields and orientation policies. Covers: REG-01..04, ORI-12..16. *Done when:* standard.
+- [ ] **PW.2.2** Strata and the Between kinds. Covers: STR-01..02, BTW-01..08. *Done when:* standard, plus slices show crusts and gaps at the regime's proportions.
+- [ ] **PW.2.3** What fills a Between. Covers: STR-03..11. *Done when:* standard.
+- [ ] **PW.2.4** Crust surfaces and the skin with its large openings. Covers: SURF-01..04, HOR-02. *Done when:* standard.
+- [ ] **PW.2.5** Frame: line-keyed beams on every axis and oblique, beam kinds, knots. Covers: FRM-01..14. *Done when:* standard, plus line-key agreement across faces (proptest).
+- [ ] **PW.2.6** Voids at km scale. Covers: VOID-01..14. *Done when:* standard.
+- [ ] **PW.2.7** Fill field. Covers: FILL-01. *Done when:* standard, plus neighbouring cells agree and the field matches the regime means.
+- [ ] **PW.2.8** Arteries: walks, fallback, tree and loops, replacing the lift core. `GEN_VERSION` 7. Covers: ART-01..03, ART-13. *Done when:* standard, plus 10⁴ L1 cells pass the backbone connectivity check.
+- [ ] **PW.2.9** Artery types. Covers: ART-04..12. *Done when:* standard.
+- [ ] **PW.2.10** Stratum character. Covers: SC-01..11. *Done when:* standard, plus slices through 5 strata show clearly different recipes.
+- [ ] **PW.2.11** `web-report` tool: metrics and census. Covers: MET-01..11. *Done when:* it reports every metric and the census on a 32 km region.
 
 ### PW.3 L2 tissue
-- [ ] **PW.3.1** Routes on the slot lattice from ports, artery ends and anchors. *Done when:* every cell connects all its ports (10⁴ cells).
-- [ ] **PW.3.2** Supports and the first 6 forms, accretion to the fill density. *Done when:* built fraction is within ±10 % of the field and skin coverage ≥ 90 %.
-- [ ] **PW.3.3** Path types (first 12), modifiers, engulfed routes as structure ports. *Done when:* ≥ 8 distinct types per km on bot walks.
-- [ ] **PW.3.4** Set pieces and the dead-end payoff rule. *Done when:* the validator finds 0 unpaid dead ends.
-- [ ] **PW.3.5** Grains: one yaw per L1 cell, then per L2 cell, with collision wedges. *Done when:* slices and screenshots show grains meeting.
-- [ ] **PW.3.6** Stream the new L1/L2 into the game. *Done when:* 🎮 the user walks it and reviews.
+- [ ] **PW.3.1** Tissue order and routes on the slot lattice. Covers: TIS-01..05. *Done when:* standard, plus every cell connects all its ports (10⁴ cells).
+- [ ] **PW.3.2** Accretion and the eleven supports. Covers: TIS-06, SUP-01..11. *Done when:* standard, plus built fraction within ±10 % of the field and skin coverage ≥ 90 %.
+- [ ] **PW.3.3** Support variants, first half. Covers: SV-01..13. *Done when:* standard.
+- [ ] **PW.3.4** Support variants, second half. Covers: SV-14..26. *Done when:* standard.
+- [ ] **PW.3.5** Forms: slab tower to cluster. Covers: FORM-01..08. *Done when:* standard.
+- [ ] **PW.3.6** Forms: drum to rotunda. Covers: FORM-09..16. *Done when:* standard.
+- [ ] **PW.3.7** Forms at angles: twisted to cone. Covers: FORM-17..23. *Needs:* PW.1. *Done when:* standard.
+- [ ] **PW.3.8** Mutations. Covers: MUT-01..15. *Done when:* standard.
+- [ ] **PW.3.9** Horizontal paths, first half. Covers: PH-01..10. *Done when:* standard.
+- [ ] **PW.3.10** Horizontal paths, second half. Covers: PH-11..20. *Done when:* standard.
+- [ ] **PW.3.11** Vertical paths, first half. Covers: PV-01..10. *Done when:* standard.
+- [ ] **PW.3.12** Vertical paths, second half. Covers: PV-11..19. *Done when:* standard.
+- [ ] **PW.3.13** Thresholds. Covers: THR-01..09. *Done when:* standard.
+- [ ] **PW.3.14** Path modifiers. Covers: MOD-01..09. *Done when:* standard.
+- [ ] **PW.3.15** L1 hubs. Covers: HUB-01..11. *Done when:* standard.
+- [ ] **PW.3.16** Set pieces, first half. Covers: SET-01..08. *Done when:* standard.
+- [ ] **PW.3.17** Set pieces, second half. Covers: SET-09..16. *Done when:* standard.
+- [ ] **PW.3.18** Dead-end payoff rule and legibility. Covers: RULE-01..02. *Done when:* standard, plus the validator finds 0 unpaid dead ends.
+- [ ] **PW.3.19** Local and near breathing space. Covers: LOC-01..06, NEAR-01..05. *Done when:* standard.
+- [ ] **PW.3.20** Grains, slants, curves, radial and off-grid layouts. Covers: ORI-01..11. *Needs:* PW.1. *Done when:* standard.
+- [ ] **PW.3.21** Stream the new L1/L2 into the game. Covers none (plumbing). *Done when:* 🎮 the user walks it and reviews.
 
 ### PW.4 L3 interiors
-- [ ] **PW.4.1** Multi-entrance plans. *Done when:* every entrance of every mass reaches every other (10⁴ blocks).
-- [ ] **PW.4.2** Interior archetypes and the new corridor kinds. *Done when:* reviewed in game.
+- [ ] **PW.4.1** Multi-entrance plans; inverted and sideways forms keep normal floors. Covers: L3-01..03, L3-21. *Done when:* standard, plus every entrance of every mass reaches every other (10⁴ blocks).
+- [ ] **PW.4.2** Interior archetypes. Covers: L3-04..13. *Done when:* standard.
+- [ ] **PW.4.3** Corridor kinds. Covers: L3-14..20. *Done when:* standard.
+- [ ] **PW.4.4** Interiors batch 2, first half. Covers: INT-01..10. *Done when:* standard.
+- [ ] **PW.4.5** Interiors batch 2, second half. Covers: INT-11..19. *Done when:* standard.
 
 ### PW.5 Climbing
-- [ ] **PW.5.1** Ladder mechanic (attach, climb, dismount, rests). *Done when:* controller tests pass and 🎮 it feels right.
-- [ ] **PW.5.2** Auto-crouch in low ducts. *Done when:* controller tests pass.
-- [ ] **PW.5.3** Ladder families in the generator and the kit. *Done when:* reviewed in game.
+- [ ] **PW.5.1** Ladder mechanic: attach, climb, dismount, no falls, speed, rests. Covers: CLB-01..06. *Done when:* standard, plus controller tests, and 🎮 it feels right.
+- [ ] **PW.5.2** Auto-crouch in low ducts. Covers: CLB-07. *Done when:* standard, plus controller tests.
+- [ ] **PW.5.3** Ladder families, first half. Covers: LAD-01..08. *Done when:* standard.
+- [ ] **PW.5.4** Ladder families, second half. Covers: LAD-09..15. *Needs:* PW.6.3 for LAD-14, PW.6.8 for LAD-15. *Done when:* standard.
 
 ### PW.6 Gravity wells
-- [ ] **PW.6.1** `g(p)` field from keyed wells. *Done when:* pure-function tests pass.
-- [ ] **PW.6.2** Controller, respawn, lifts and camera on a local up; gravity gates. *Done when:* tests pass walking on all six faces of a test block.
-- [ ] **PW.6.3** First well: a line well with radial tissue. *Done when:* 🎮 the user walks round it.
-- [ ] **PW.6.4** Remaining well kinds (point, shell, tube, plane, twin, seam, fold, damaged, tidal). *Done when:* each is reviewed.
+- [ ] **PW.6.1** `g(p)` field from keyed wells. Covers: GRV-12. *Done when:* standard, plus pure-function tests.
+- [ ] **PW.6.2** Controller, respawn, lifts and camera on a local up; fall rule. Covers: GRV-11, GRV-13. *Done when:* standard, plus tests walking on all six faces of a test block.
+- [ ] **PW.6.3** Gravity gates and their varieties. Covers: GRV-04..08. *Done when:* standard.
+- [ ] **PW.6.4** Structures and strata respond to the field; gradients. Covers: GRV-01..03, GRV-09. *Done when:* standard.
+- [ ] **PW.6.5** First well: the line well. Covers: WELL-03. *Done when:* standard, plus 🎮 the user walks round it.
+- [ ] **PW.6.6** Point and shell wells. Covers: WELL-01..02. *Done when:* standard.
+- [ ] **PW.6.7** Tube and plane wells. Covers: WELL-04..05. *Done when:* standard.
+- [ ] **PW.6.8** Twin wells, lulls and free drift. Covers: WELL-06, GRV-10, GRV-14. *Done when:* standard, plus 🎮 drifting reviewed.
+- [ ] **PW.6.9** Seam and fold. Covers: WELL-07..08. *Done when:* standard.
+- [ ] **PW.6.10** Damaged and tidal wells. Covers: WELL-09..10. *Done when:* standard.
 
-### PW.7 Far field
-- [ ] **PW.7.1** Far bands and SDF horizon for frame, crust surfaces, tethers and envelopes, with matching window lights. *Done when:* the far-vs-near silhouette test passes at 5 km against 300 m.
-- [ ] **PW.7.2** Knot landmarks: far signatures and hubs. *Done when:* every knot has both, and a teleport tour is reviewed.
-- [ ] **PW.7.3** Performance pass on Windows against PLAN.md §11.4. *Done when:* numbers are recorded.
+### PW.7 Far field and the horizon promise
+- [ ] **PW.7.1** Far bands and SDF horizon for frame, crust surfaces, tethers and envelopes, with matching lights; far-vs-near test. Covers: HOR-01, HOR-03..06. *Done when:* standard, plus the far-vs-near silhouette test passes at 5 km against 300 m.
+- [ ] **PW.7.2** Knot landmarks: far signatures, hubs, routes, spacing. Covers: HOR-07..10. *Done when:* standard, plus a teleport tour is reviewed.
+- [ ] **PW.7.3** How often views come; shortcuts from overlooks. Covers: HOR-11..14. *Done when:* standard, plus MET-04 and MET-05 within target.
+- [ ] **PW.7.4** Performance pass on Windows against PLAN.md §11.4. Covers: HOR-15. *Done when:* numbers recorded.
 
-### PW.8 Kit
-- [ ] **PW.8.1** Exterior kit: windows, ledges, ribs, undersides, cables, lamps, glyphs, masts. *Done when:* reviewed in game.
-- [ ] **PW.8.2** Rebuild the infinite staircase: open flights, railings, landing beams, core; helical variant. *Done when:* reviewed in game.
+### PW.8 Kit and the staircase
+- [ ] **PW.8.1** Exterior kit, first half. Covers: KIT-01..08. *Done when:* standard.
+- [ ] **PW.8.2** Exterior kit, second half. Covers: KIT-09..15. *Done when:* standard.
+- [ ] **PW.8.3** Rebuild the infinite staircase. Covers: STAIR-01..04. *Done when:* standard.
 
-### PW.9 Widen the catalogues
-- [ ] **PW.9.1** The rest of the forms, supports, paths, places and rare events of the proposal and the idea bank, regime by regime. *Done when:* each regime is reviewed.
+### PW.9 Rare events
+- [ ] **PW.9.1** Inverted district to hollow trunk. Covers: RARE-01..05. *Done when:* standard.
+- [ ] **PW.9.2** Builder site to planetoid. Covers: RARE-06..10. *Needs:* PW.6.6 for RARE-10. *Done when:* standard.
+- [ ] **PW.9.3** Möbius corridor to quiet lull. Covers: RARE-11..14. *Needs:* PW.6.8, PW.6.9. *Done when:* standard.
 
-### PW.10 Grand systems (from `the-web-ideas.md` §19)
-- [ ] **PW.10.1** Eras by absolute depth, spec and generator. *Done when:* slices through 100 km of depth show the era bands and seams.
-- [ ] **PW.10.2** Great Roads, Spines and Rivers on L0 line keys, in the connectivity argument. *Done when:* a bot follows a Road across 3 L0 cells.
-- [ ] **PW.10.3** Quarters at L1. *Done when:* reviewed in game.
-- [ ] **PW.10.4** City script and place names. *Done when:* names are deterministic per seed and a glyph sheet is reviewed.
-- [ ] **PW.10.5** Wonders: catalogue spec, then the first three (Cenotaph, Dam, Stair). *Done when:* each is seen from 40 km and walked.
-- [ ] **PW.10.6** World-clock movers: moving bridges, the Wheel, Lamp Sun day, orbiters. *Done when:* they agree across restarts at the same world time.
-- [ ] **PW.10.7** Builders: scheduled construction geometry, movement, riding. *Done when:* a Builder places a beam that is then walkable, and the far view matches.
-- [ ] **PW.10.8** Weightless and low gravity: drift verb, currents, featherfall shafts, the Archipelago. *Done when:* 🎮 reviewed.
-- [ ] **PW.10.9** Wake lights and chalk, saved. *Done when:* your trail is visible from an overlook after a restart.
-- [ ] **PW.10.10** Scope with gaze-mark; Atlas. *Done when:* reviewed.
-- [ ] **PW.10.11** Weather: fog sea, rain, dust, wind, steam, frost. *Done when:* reviewed.
-- [ ] **PW.10.12** Generated maps and the Miniature. *Done when:* a map room shows the real surrounding region.
-- [ ] **PW.10.13** Anamorphic payoffs. *Done when:* the symbol resolves from its focal point (screenshot).
+### PW.10 Grand systems and the idea bank
+- [ ] **PW.10.1** Great Roads, Rail Abyss and Cable Highway on L0 line keys. Covers: RD-01..08. *Done when:* standard, plus a bot follows a Road across 3 L0 cells.
+- [ ] **PW.10.2** Spines. Covers: SPN-01..04. *Done when:* standard.
+- [ ] **PW.10.3** Rivers. Covers: RIV-01..04. *Done when:* standard.
+- [ ] **PW.10.4** Quarters, first half. Covers: QTR-01..08. *Done when:* standard.
+- [ ] **PW.10.5** Quarters, second half. Covers: QTR-09..16. *Done when:* standard.
+- [ ] **PW.10.6** The City's script and place names. Covers: MUL-01, TOOL-05. *Done when:* standard, plus a glyph sheet is reviewed.
+- [ ] **PW.10.7** Hub uniqueness rule. Covers: MUL-02. *Done when:* standard, plus a test over 100 km.
+- [ ] **PW.10.8** Wonders: Cenotaph to Organ. Covers: WON-01..06. *Done when:* standard, plus each is seen from 40 km and walked.
+- [ ] **PW.10.9** Wonders: Lamp Sun to Cistern. Covers: WON-07..12. *Done when:* as PW.10.8.
+- [ ] **PW.10.10** Wonders: Drop to Furnace Heart. Covers: WON-13..18. *Needs:* PW.10.14 for WON-13. *Done when:* as PW.10.8.
+- [ ] **PW.10.11** Wonders: Antenna to Gate. Covers: WON-19..24. *Needs:* PW.10.34 for WON-24. *Done when:* as PW.10.8.
+- [ ] **PW.10.12** World-clock movers: moving bridges, drawbridges, turning lifts, gravity-gate trams. Covers: SYS-01, P2-26..29. *Done when:* standard, plus they agree across restarts at the same world time.
+- [ ] **PW.10.13** Builders: construction schedules, movement, riding, docks. Covers: BLD-01..05, P2-30. *Done when:* standard, plus a Builder places a beam that is then walkable, and the far view matches.
+- [ ] **PW.10.14** Weightless and low gravity. Covers: WGT-01..09. *Needs:* PW.6.8. *Done when:* standard, plus 🎮 reviewed.
+- [ ] **PW.10.15** Machines that notice you. Covers: NOT-01..04. *Done when:* standard.
+- [ ] **PW.10.16** Wake lights and chalk, saved. Covers: WAKE-01..02, TOOL-08. *Done when:* standard, plus your trail is visible from an overlook after a restart.
+- [ ] **PW.10.17** Scope, gaze-mark, telescope rooms. Covers: TOOL-01..03. *Done when:* standard.
+- [ ] **PW.10.18** Atlas and listening. Covers: TOOL-04, TOOL-06..07. *Done when:* standard.
+- [ ] **PW.10.19** Weather, first half. Covers: WX-01..06. *Done when:* standard.
+- [ ] **PW.10.20** Weather, second half. Covers: WX-07..11. *Done when:* standard.
+- [ ] **PW.10.21** Light, first half. Covers: LGT-01..06. *Done when:* standard.
+- [ ] **PW.10.22** Light, second half. Covers: LGT-07..11. *Done when:* standard.
+- [ ] **PW.10.23** Small life and far walkers. Covers: LIFE-01..05. *Done when:* standard.
+- [ ] **PW.10.24** Overgrowth. Covers: GROW-01..05. *Done when:* standard.
+- [ ] **PW.10.25** Forms batch 2: capsule tower to viaduct. Covers: F2-01..08. *Done when:* standard.
+- [ ] **PW.10.26** Forms batch 2: megaframe to monster building. Covers: F2-09..16. *Done when:* standard.
+- [ ] **PW.10.27** Forms batch 2: battleship island to lattice ghost. Covers: F2-17..24. *Done when:* standard.
+- [ ] **PW.10.28** Paths batch 2, horizontal. Covers: P2-01..12. *Done when:* standard.
+- [ ] **PW.10.29** Paths batch 2, vertical. Covers: P2-13..25. *Done when:* standard.
+- [ ] **PW.10.30** Payoffs batch 2, first half (with generated maps). Covers: PAY-01..05. *Done when:* standard, plus an anamorphic symbol resolves from its focal point, and a map room shows the real region.
+- [ ] **PW.10.31** Payoffs batch 2, second half. Covers: PAY-06..10. *Done when:* standard.
+- [ ] **PW.10.32** Strange regions: Library to Field of Doors. Covers: STG-01..05. *Done when:* standard.
+- [ ] **PW.10.33** Strange regions: Labyrinth to Miniature. Covers: STG-06..10. *Done when:* standard.
+- [ ] **PW.10.34** Strange regions: Far Lands, Rampart, Builder frontier. Covers: STG-11..13. *Done when:* standard.
+- [ ] **PW.10.35** Sanctuaries batch 2, first half. Covers: SAN-01..07. *Done when:* standard.
+- [ ] **PW.10.36** Sanctuaries batch 2, second half; earned sanctuaries. Covers: SAN-08..13. *Done when:* standard.
+- [ ] **PW.10.37** Journeys, end to end. Covers: RIDE-01..10. *Needs:* the systems each ride uses. *Done when:* each journey is taken once in game and noted.
+
+### PW.11 Sound design (with P5.3, deferred by the user)
+- [ ] **PW.11.1** Breath, horns, stress, wind organs, the Organ. Covers: SND-01..05. *Needs:* P5.3.1. *Done when:* standard (audible in a capture).
+- [ ] **PW.11.2** Bells, choir, chimes, silence zones. Covers: SND-06..09. *Needs:* P5.3.1. *Done when:* standard (audible in a capture).
+
+### PW.12 Phase exit
+- [ ] **PW.12.1** The principles hold: every `web-report` target of the proposal §14 is met on 3 seeds, and combinations stay filtered. Covers: PRN-01..08. *Done when:* the numbers are recorded in `docs/playtests/web.md`.
+- [ ] **PW.12.2** 🎮 Phase W playtest by the user. Covers none (review gate). *Done when:* notes written in `docs/playtests/web.md`.
 
 ---
 

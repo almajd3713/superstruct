@@ -1,27 +1,29 @@
 # The Web: idea bank (iteration 3)
 
-*Companion to `the-web.md`, 2026-10-18. That file is the architecture; this one is the catalogue of what goes in it. Every entry is a **family**: it gets parameters, variants and mutations, and combines with eras, quarters, regimes, grains and gravity. Each says where it is generated (L0–L5, or engine). Scope stays the same: walking, climbing, drifting and looking, with no combat, inventory or quests.*
+*Companion to `the-web.md`, 2026-10-18. That file is the architecture; this one is the catalogue of what goes in it. Every entry is a **family**: it gets parameters, variants and mutations, and combines with stratum characters, quarters, regimes, grains and gravity. Each says where it is generated (L0–L5, or engine). Scope stays the same: walking, climbing, drifting and looking, with no combat, inventory or quests.*
 
 ---
 
-## 1. Deep time: the vertical axis means something
+## 1. Stratum character: every layer is a different world
 
-Absolute depth sets the **era** of a stratum, with noise so the bands are never clean. **Going down is going back in time. Going up is going towards the unfinished.** Every vertical journey becomes a journey through the City's history, and the absurd altimeter numbers start to mean something.
+*Revised 2026-10-18: the user dropped "eras" (eight asset languages are too much). Layers still differ strongly, but only by recombining the shared catalogue, with no new asset sets.*
 
-| Era (top to bottom) | Language | Light | Scale |
-|---|---|---|---|
-| **Raw** (highest) | Bare frames, scaffold, unclad floors, cranes, Builders at work, sparks | Work lamps, welding flashes | Huge, half empty |
-| **New** | Clean grey panels, glazed skybridges, lit signage nobody reads | Even and cold | Regular, gridded |
-| **Concrete** | Brutalist slabs, coffers, ramps, board-marked walls | Sparse sodium | Heavy |
-| **Iron** | Rivets, trusses, gasometer frames, chains, gantries | Sepia, furnace glow | Lattice |
-| **Warren** | Kowloon accretion, capsules, cables everywhere, human traces | Scattered warm windows | Small, dense |
-| **Ceramic** | Smooth white seamless forms, curved corridors, no seams; the Netsphere era | Glowing walls, no lamps | Unsettlingly clean |
-| **Fossil** | Older buildings swallowed inside newer mass: stairs into walls, tram cars inside pillars, façades inside halls | Very dark | Mixed |
-| **Cyclopean** (deepest) | Monolithic blocks hundreds of metres across, few openings, giant steps no human was meant for | Almost none; your own beacons matter here | Inhuman |
+Each stratum draws its **character** once, from its key, and every cell in it inherits it. A character is a recipe over things that already exist:
+- 2–4 **dominant quarters** (§4);
+- weights over **forms, supports and path types**, with a few boosted and a few banned;
+- **grain** and orientation policy (§7 of the-web.md): one stratum calm and axis-aligned, the next shattered;
+- **scale** (×½ to ×4 on the tissue);
+- **fill** within the crust range;
+- **material and palette** weights;
+- **light level** and lamp density;
+- **mutation** weights: one stratum mostly ruined, another mostly lit, another overgrown.
 
-- **Era seams:** where one era sits on another, you see the newer one built over the older. Raw scaffold stands on concrete roofs. Warren capsules cling to iron trusses. A ceramic corridor punches through a cyclopean block.
-- **Section cliffs** show the eras stacked like rock strata. A section cliff is a geology lesson made of buildings.
-- **Generated** at L0 from absolute y bands plus noise. It feeds every palette below it.
+**Crossing a Between lands you somewhere noticeably different**: a stratum of rack canyons and crawl ducts under cold light, then one of piled warrens and ladders lit warm, then one of huge calm halls and grand stairs in the dark. The absurd altimeter numbers still mean something, because each stratum you cross is a new place.
+
+- **Stratum seams:** where two crusts meet a tether or a Spine, their characters meet. One stratum's forms grow onto the other's.
+- **Swallowed:** a mutation, not an era. An older structure stands engulfed inside newer mass: stairs into walls, a tram car inside a pillar, a façade inside a hall.
+- **Section cliffs** show the characters stacked like rock strata.
+- **Generated** at L0 from the stratum key. It feeds every palette below it.
 
 ## 2. Wonders: one per regime, visible for 50 km
 
@@ -64,7 +66,7 @@ These are linear features keyed by L0 lines. They run for hundreds of kilometres
   - a stair that never ends;
   - stations at every crust surface.
 
-  It is the main way to make deep-time journeys.
+  It is the main way to travel between strata.
 - **River:** a pipe bundle 300–800 m wide, running hundreds of km with walkways on top and inside. It hums. Variants: the hot river (steam and glow), the dead river (cold and silent), the broken river (sections fallen into a Between, with a detour around them).
 - **Rail Abyss:** a tram line across a Between on a single beam with no crust in sight, so the ride is pure void.
 - **Cable Highway:** a gondola line slung 20 km across a Between, with swaying cabins and towers on tethers.
@@ -172,7 +174,7 @@ These are journeys that take a long time on purpose. Each is a zen set piece, an
 
 | Journey | Duration | What you see |
 |---|---|---|
-| Spine lift | 20–40 min | Crust, Between, crust, Between: eras changing past the car's grille |
+| Spine lift | 20–40 min | Crust, Between, crust, Between: stratum characters changing past the car's grille |
 | Featherfall descent down the Drop | 15 min | Rings of light rising past you, strata, a fog sea below |
 | Tram across a Rail Abyss | 5 min | Nothing but void, then a crust wall rushing in |
 | Gondola on the Cable Highway | 25 min | A swaying cabin, tethers sliding past, the Lamp Sun's day going by |
@@ -233,17 +235,17 @@ The free drift verb (decided) opens a whole layer of the world.
 
 ## 11. Light
 
-- **Lighthouses:** knot towers with slow rotating beams visible for 20 km. They are wayfinding in the dark eras, and each has its own rhythm, so you know which one you are looking at.
+- **Lighthouses:** knot towers with slow rotating beams visible for 20 km. They are wayfinding in dark strata, and each has its own rhythm, so you know which one you are looking at.
 - **Searchlights** sweeping a Between from crust edges, slow and indifferent.
-- **Light rivers:** pulses running along conduits and cables like data, kilometres long, in the Ceramic era.
+- **Light rivers:** pulses running along conduits and cables like data, kilometres long, in strata whose character favours them.
 - **Aurora sheets:** emissive curtains hanging in a Between, rippling.
 - **Window weather:** whole districts' windows turning on and off in slow waves.
 - **The Lamp Sun's day** (§2.7), and smaller lamp suns over halls.
 - **Furnace glow** lighting fog from below.
 - **God rays** through a perforated crust from a lamp sun above.
-- **Blackout eras**, where your beacons and the wake lights (§13.3) are the only light.
+- **Blackout strata**, where your beacons and the wake lights (§13.3) are the only light.
 - **Emergency light:** red lamps along evacuation routes in Bastion quarters, leading somewhere.
-- **Neon glyph signage** in the New era, unreadable, buzzing.
+- **Neon glyph signage**, unreadable, buzzing.
 
 ## 12. Weather and air
 
@@ -282,7 +284,7 @@ Sensors and old automation, not life:
 
 ### 13.3 Wake lights
 
-Dead lights wake as you pass and stay lit for hours of real time. This is engine state, saved like beacons. From a Between overlook you can look back and see **your own trail** across the crust, a thread of light where you walked. It is a quiet record of the journey, and in the dark eras it is beautiful.
+Dead lights wake as you pass and stay lit for hours of real time. This is engine state, saved like beacons. From a Between overlook you can look back and see **your own trail** across the crust, a thread of light where you walked. It is a quiet record of the journey, and in dark strata it is beautiful.
 
 ### 13.4 Small life
 
@@ -299,7 +301,7 @@ Very rarely, a single lantern light on a distant catwalk, moving at walking spee
 
 ### 13.6 Overgrowth
 
-Biome patches: moss on north faces, hanging roots in wells, pale fungus that glows in the Fossil era, vines in Hydroponic quarters, a whole tree of pipes that is actually a tree.
+Biome patches: moss on north faces, hanging roots in wells, pale fungus that glows in the darkest strata, vines in Hydroponic quarters, a whole tree of pipes that is actually a tree.
 
 ## 14. Quiet tools, batch 2
 
@@ -312,7 +314,7 @@ A held zoom that makes the horizon promise tangible. Look at a far structure and
 Named places, auto-recorded on arrival:
 - **What is recorded:** knots, Wonders, Roads, sanctuaries and payoffs.
 - **The names:** each name is in the City's glyph script, with a transliteration (`ka-reth vuun`), generated from the place's hash. Every place has a name, and the name is the same for everyone with the seed.
-- **The pages:** the Atlas shows each recorded place as a page with the glyph, the altitude, the era and a photo if you took one. It is a journal without quests.
+- **The pages:** the Atlas shows each recorded place as a page with the glyph, the altitude, the stratum and a photo if you took one. It is a journal without quests.
 
 ### 14.3 Listening
 
@@ -330,11 +332,11 @@ Draw a mark on a wall, an arrow or a glyph, saved like beacons. Leave your own t
 ### 15.1 Combination
 
 ```
-eras (8)  ×  quarters (16)  ×  regimes (5+)  ×  grains (5)  ×  gravity (11 including none)
+stratum characters  ×  quarters (16)  ×  regimes (5+)  ×  grains (5)  ×  gravity (11 including none)
   × forms (40+)  ×  supports (11)  ×  mutations (14)  ×  paths (80+)  ×  modifiers (9 axes)
 ```
 
-Not every combination is allowed, but even with heavy filtering this gives millions of distinct neighbourhoods. A form in the Iron era of a Foundry quarter under a line well's gravity is not the same thing as that form in a Ceramic Hospital.
+Not every combination is allowed, but even with heavy filtering this gives millions of distinct neighbourhoods. A form in a dim, ruined Foundry stratum under a line well's gravity is not the same thing as that form in a bright, calm Hospital stratum.
 
 ### 15.2 The City's script
 
@@ -342,7 +344,7 @@ A procedural glyph alphabet, fixed per seed, built from strokes on a grid. It is
 
 ### 15.3 Uniqueness rule for hubs
 
-Each knot hub combines a set piece, its quarter, its era and one **rare feature** drawn from a long list (a Wonder fragment, a collection, a lit room, a bell, a mural, a telescope). No two hubs within 30 km share the same combination. That is what "you will find something new there" means in practice.
+Each knot hub combines a set piece, its quarter, its stratum's character and one **rare feature** drawn from a long list (a Wonder fragment, a collection, a lit room, a bell, a mural, a telescope). No two hubs within 30 km share the same combination. That is what "you will find something new there" means in practice.
 
 ## 16. Strange regions, batch 2
 
@@ -356,10 +358,10 @@ Each knot hub combines a set piece, its quarter, its era and one **rare feature*
 8. **Silent district:** no machines, no hum, no movers. The absence is the experience.
 9. **The Slow district:** everything moves, slowly. Bridges rotate, floors rise and fall over minutes, rooms reconfigure on a cycle. All of it is deterministic, from the world clock.
 10. **The Miniature:** a model of the surrounding 10 km at 1:100 on a table in a hall, accurate because the generator made it from its own data. You can find your own position on it.
-11. **The Far Lands:** beyond ±10⁶ km on any axis, the eras deepen beyond Cyclopean, the scale grows, and the script changes. Absurd coordinates become a destination.
+11. **The Far Lands:** beyond ±10⁶ km on any axis, stratum characters drift to extremes of scale, darkness and grain, and the script changes. Absurd coordinates become a destination.
 12. **The Rampart:** the Megastructure wall of BLAME!. An almost impenetrable wall 5 km thick that separates super-regions every ~300 km. It is seen from 50 km away as the edge of the world. Crossing it happens only at rare Gates (§2.24) or through the Drop.
 13. **Shattered grain**, **Möbius corridor**, **section cliff**, **quiet lull**, **planetoid** (from the-web.md §12).
-14. **Builder frontier:** at the top of the Raw era, the edge where the City is still being made. Construction lights to the horizon. There is no top; there is only the frontier.
+14. **Builder frontier:** a stratum still under construction, the edge where the City is still being made. Construction lights to the horizon. There is no top; there is only the frontier.
 
 ## 17. Sanctuaries, batch 2
 
@@ -397,7 +399,7 @@ These are new systems on top of `the-web.md`, in rough order of importance. They
 
 | System | Level | Notes |
 |---|---|---|
-| Eras by absolute depth | L0 | Feeds every palette; a spec section in `regimes.md` |
+| Stratum character | L0 | A recipe over the shared catalogue per stratum; a spec section in `regimes.md` |
 | Wonders | L0 | A catalogue of unique far landmarks with routes and hubs; far-band objects |
 | Great Roads, Spines, Rivers | L0 line keys | Super-arteries; the connectivity argument extends to them |
 | Quarters | L1 | Palette bias per neighbourhood |

@@ -566,6 +566,8 @@ A `web-report` tool (extending `slice --report`) gives numbers to tune against b
 | Dead ends without a payoff | 0 |
 | Nav nodes with three or more links | ≥ 40 % |
 
+**Census.** Every catalogue entry is tagged in the generator output with its ID from `docs/proposals/registry.md`. Then `web-report --census` counts how many instances of each ID appear over a fixed sample region. A checklist item can therefore prove that its ideas exist in the world, not only in the code.
+
 ## 15. Order of work
 
 Each step ends with a review: slices, report numbers, and in-game screenshots from fixed viewpoints.
@@ -598,7 +600,7 @@ Each step ends with a review: slices, report numbers, and in-game screenshots fr
 ## 16. Iteration 3: the idea bank
 
 `docs/proposals/the-web-ideas.md` adds:
-- **Deep time:** absolute depth sets the era, so going down goes back in history and going up approaches the Builder frontier.
+- **Stratum character:** every stratum draws its own recipe from the shared catalogue (quarters, forms, paths, grain, scale, light, mutations), so crossing a Between lands you somewhere different without new asset sets. This replaces the "eras" of the first draft, which the user dropped as too asset-heavy.
 - **Wonders:** about 24 unique far landmarks, one per 30–100 km.
 - **Large-scale routes:** Great Roads, Spines and Rivers at L0 scale.
 - **Neighbourhoods:** 16 quarters.
