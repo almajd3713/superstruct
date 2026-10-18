@@ -1055,3 +1055,108 @@ fn kit_gallery_renders() {
         assert!(img.chunks(4).any(|p| p[0] > 40), "{name} is black");
     }
 }
+
+/// P4.2.3: the densest of a sample of real L3 blocks, meshed from its primitives and decorated by
+/// instanced L4 modules, at 1440p from inside it. Writes `out/l4-block*.png`, prints the cost
+/// and checks the geometry budget of PLAN.md §11.4.
+#[test]
+fn l4_modules_in_a_dense_block_meet_the_geometry_budget() {
+    use engine::kit::expand;
+    use worldgen::cell::{CellKey, Level};
+    use worldgen::l2_port::L1Cache;
+    use worldgen::l3::{l3_block_with, l3_blocks_of, l3_parent};
+    use worldgen::l4::{ModuleKind, block_modules};
+    use worldgen::seed::WorldSeed;
+
+    let Some(h) = headless() else { return };
+    let seed = WorldSeed(0x0423);
+    let cache = L1Cache::default();
+    // The sampled block with the most modules.
+    let mut best: Option<(usize, CellKey, worldgen::l3::L3Block)> = None;
+    'scan: for x in -30..30i64 {
+        let l1 = CellKey::new(Level::L1, I64Vec3::new(x, x % 4, 2 * x % 7));
+        for k in (0..512i64).step_by(5) {
+            let cell = CellKey::new(
+                Level::L2,
+                l1.coords * 8 + I64Vec3::new(k % 8, k / 64, k / 8 % 8),
+            );
+            if l3_blocks_of(seed, &cache, cell).is_empty() {
+                continue;
+            }
+            let parent = l3_parent(seed, &cache, cell);
+            for (key, _) in l3_blocks_of(seed, &cache, cell) {
+                let b = l3_block_with(seed, &parent, key);
+                let n = block_modules(seed, key, &b).len();
+                if best.as_ref().is_none_or(|(m, _, _)| n > *m) {
+                    best = Some((n, key, b));
+                }
+            }
+            if best.as_ref().is_some_and(|(n, _, _)| *n > 3000) {
+                break 'scan;
+            }
+        }
+    }
+    let (n_modules, key, block) = best.unwrap();
+    let modules = block_modules(seed, key, &block);
+    let batch = expand(&modules);
+    let mut prims = Mesh::default();
+    for p in &block.out.primitives {
+        engine::primmesh::add_primitive(&mut prims, p);
+    }
+    eprintln!(
+        "block {key:?}: {n_modules} modules -> {} instances ({} KB), {} primitives -> {} vertices",
+        batch.len(),
+        batch.bytes() / 1024,
+        block.out.primitives.len(),
+        prims.vertices.len()
+    );
+
+    let origin = WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0)).unwrap();
+    let size = (2560, 1440);
+    let params = FrameParams {
+        light: 0.35,
+        ..FrameParams::default()
+    };
+    // Stand in the first lit room slot, at eye height above its floor.
+    let lamp = modules
+        .iter()
+        .find(|m| m.kind == ModuleKind::Lamp)
+        .expect("a lit slot");
+    let eye = Vec3::new(
+        lamp.pos.x as f32 / 16.0,
+        lamp.pos.y as f32 / 16.0 - 4.0 + 0.25 + 1.65,
+        lamp.pos.z as f32 / 16.0,
+    );
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0) + eye).unwrap();
+
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_scene(&h.device, &h.queue, &[(origin, prims)]);
+    let base = h.gpu_times(&mut renderer, &cam, size, params, 30);
+    let (handle, bytes) = renderer.upload_module_chunk(&h.queue, origin, &batch);
+    assert!(bytes > 0 && renderer.chunk_count() >= 2);
+    let with = h.gpu_times(&mut renderer, &cam, size, params, 30);
+    let img = h
+        .render_with(&mut renderer, &cam, size, params, &[])
+        .unwrap();
+    assert!(renderer.module_instances_drawn() > 0, "nothing was drawn");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/l4-block.png");
+    save_png(&path, size.0, size.1, &img).unwrap();
+    renderer.remove_chunk(handle);
+    assert!(renderer.gpu_bytes() > 0);
+
+    if let (Some(base), Some(with)) = (base, with) {
+        let scene = |t: &[(engine::gpu_timer::Zone, f32)]| {
+            t.iter()
+                .find(|(z, _)| *z == engine::gpu_timer::Zone::Scene)
+                .map_or(0.0, |(_, ms)| *ms)
+        };
+        eprintln!(
+            "scene GPU ms: block meshes only {:.3}, with {} module instances {:.3}",
+            scene(&base),
+            batch.len(),
+            scene(&with)
+        );
+        assert!(scene(&with) < 6.0, "geometry budget is 6 ms");
+    }
+}

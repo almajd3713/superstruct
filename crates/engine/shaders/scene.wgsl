@@ -27,6 +27,16 @@ struct FarInstance {
 // Camera-relative origin of each far cell, rewritten every frame.
 @group(1) @binding(2) var<storage, read> far_cells: array<vec4<f32>>;
 
+// L4 modules: a position in the owning chunk's frame and the quarter turn about +Y in bits 0-1;
+// the chunk's cell slot is in bits 2-17.
+struct ModInstance {
+    pos: vec3<f32>,
+    packed: u32,
+};
+
+@group(1) @binding(3) var<storage, read> mod_instances: array<ModInstance>;
+@group(1) @binding(4) var<storage, read> mod_cells: array<vec4<f32>>;
+
 struct VsIn {
     @builtin(instance_index) draw: u32,
     @location(0) position: vec3<f32>,
@@ -98,6 +108,35 @@ fn vs_far(in: FarIn) -> VsOut {
     out.normal = n;
     out.material = inst.attrs & 0xffffu;
     out.fade = far_cells[inst.cell].w;
+    return out;
+}
+
+// Kit pieces: the shared mesh turned by the instance's quarter turn and moved into place.
+@vertex
+fn vs_module(in: VsIn) -> VsOut {
+    var out: VsOut;
+    let inst = mod_instances[in.draw];
+    let turns = inst.packed & 3u;
+    var p = in.position;
+    var n = oct_decode(in.normal_oct);
+    // A rotation about +Y by turns * 90 degrees.
+    if (turns == 1u) {
+        p = vec3<f32>(p.z, p.y, -p.x);
+        n = vec3<f32>(n.z, n.y, -n.x);
+    } else if (turns == 2u) {
+        p = vec3<f32>(-p.x, p.y, -p.z);
+        n = vec3<f32>(-n.x, n.y, -n.z);
+    } else if (turns == 3u) {
+        p = vec3<f32>(-p.z, p.y, p.x);
+        n = vec3<f32>(-n.z, n.y, n.x);
+    }
+    let cell = mod_cells[(inst.packed >> 2u) & 0xffffu];
+    let rel = cell.xyz + inst.pos + p;
+    out.rel = rel;
+    out.clip = globals.view_proj * vec4<f32>(rel, 1.0);
+    out.normal = n;
+    out.material = in.material.x;
+    out.fade = cell.w;
     return out;
 }
 

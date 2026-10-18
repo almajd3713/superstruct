@@ -10,7 +10,9 @@ use crate::farinst::{FarData, FarInstance, UnitMeshes, unit_meshes};
 use crate::gpu_timer::{GpuTimer, Zone};
 use crate::hiz::HizPass;
 use crate::horizon_pass::HorizonPass;
+use crate::kit::ModuleBatch;
 use crate::mesh::Mesh;
+use crate::modsys::ModuleState;
 use crate::noise;
 use crate::shaders::ShaderSources;
 use crate::suballoc::{Range, SubAllocator};
@@ -365,6 +367,7 @@ pub struct Renderer {
     instances_bg: wgpu::BindGroup,
     cull: CullPass,
     far: FarState,
+    modules: ModuleState,
     horizon: HorizonPass,
     world_seed: u64,
     /// Two-phase occlusion culling (needs the prepass and indirect draws).
@@ -493,7 +496,7 @@ impl Renderer {
         });
         let draws_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("draws bgl"),
-            entries: &[0, 1, 2].map(|binding| wgpu::BindGroupLayoutEntry {
+            entries: &[0, 1, 2, 3, 4].map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
@@ -505,6 +508,7 @@ impl Renderer {
             }),
         });
         let far = FarState::new(device);
+        let modules = ModuleState::new(device);
         let draws_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("draws bg"),
             layout: &draws_bgl,
@@ -520,6 +524,14 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: far.cells.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: modules.instances.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: modules.cells.as_entire_binding(),
                 },
             ],
         });
@@ -570,6 +582,7 @@ impl Renderer {
             instances_bg: draws_bg,
             cull,
             far,
+            modules,
             horizon,
             world_seed: 0,
             occlusion: true,
@@ -708,6 +721,8 @@ impl Renderer {
             p.vertices.free(c.vertices);
             p.indices.free(c.indices);
             self.free_slots.push(c.slot);
+        } else if let Some(bytes) = self.modules.remove(handle) {
+            self.gpu_bytes -= bytes;
         } else if let Some(i) = self.far.chunks.iter().position(|c| c.handle == handle) {
             let c = self.far.chunks.swap_remove(i);
             self.gpu_bytes -= c.bytes;
@@ -775,6 +790,25 @@ impl Renderer {
         (handle, bytes)
     }
 
+    /// Uploads the L4 module instances of one chunk. Empty batches get a handle and no draw.
+    pub fn upload_module_chunk(
+        &mut self,
+        queue: &wgpu::Queue,
+        origin: WorldPos,
+        batch: &ModuleBatch,
+    ) -> (ChunkHandle, u64) {
+        let handle = ChunkHandle(self.next_handle);
+        self.next_handle += 1;
+        let bytes = self.modules.upload(queue, handle, origin, batch);
+        self.gpu_bytes += bytes;
+        (handle, bytes)
+    }
+
+    /// Module instances drawn in the last prepared frame.
+    pub fn module_instances_drawn(&self) -> u32 {
+        self.modules.drawn_instances
+    }
+
     /// Switches between the indirect path and the direct fallback, which must look the same.
     pub fn set_force_direct(&mut self, on: bool) {
         self.force_direct = on;
@@ -835,6 +869,8 @@ impl Renderer {
     pub fn set_chunk_origin(&mut self, handle: ChunkHandle, origin: WorldPos) {
         if let Some(c) = self.chunks.iter_mut().find(|c| c.handle == handle) {
             c.origin = origin;
+        } else {
+            self.modules.set_origin(handle, origin);
         }
     }
 
@@ -879,6 +915,8 @@ impl Renderer {
             c.visible = visible;
         } else if let Some(c) = self.far.chunks.iter_mut().find(|c| c.handle == handle) {
             c.visible = visible;
+        } else {
+            self.modules.set_visible(handle, visible);
         }
     }
 
@@ -893,7 +931,7 @@ impl Renderer {
     }
 
     pub fn chunk_count(&self) -> usize {
-        self.chunks.len() + self.far.chunks.len()
+        self.chunks.len() + self.far.chunks.len() + self.modules.chunks.len()
     }
 
     /// The last shader compile error, cleared by the next successful reload.
@@ -1045,6 +1083,18 @@ impl Renderer {
         }
     }
 
+    /// Draws the visible module instances with the shared kit mesh.
+    fn draw_modules(&self, pass: &mut wgpu::RenderPass<'_>) {
+        if self.modules.is_empty() {
+            return;
+        }
+        pass.set_pipeline(&self.pipelines.modules);
+        pass.set_bind_group(0, &self.globals_bg, &[]);
+        pass.set_bind_group(1, &self.instances_bg, &[]);
+        self.modules
+            .draw(pass, self.indirect_first_instance && !self.force_direct);
+    }
+
     /// Draws the visible far cells, after the near geometry so depth testing trims the overdraw.
     fn draw_far(&self, pass: &mut wgpu::RenderPass<'_>) {
         let far = &self.far;
@@ -1183,6 +1233,7 @@ impl Renderer {
             None => Frustum::from_view_proj(view_proj),
         };
         self.far.prepare(queue, &camera.pos, &frustum);
+        self.modules.prepare(queue, &camera.pos, &frustum);
         self.horizon.prepare(
             queue,
             encoder,
@@ -1294,6 +1345,7 @@ impl Renderer {
         if two_phase {
             self.draw_chunks(&mut pass, scene, DrawSet::B);
         }
+        self.draw_modules(&mut pass);
         self.draw_far(&mut pass);
         if !self.lines_scratch.is_empty() {
             pass.set_pipeline(&self.pipelines.lines);
@@ -1422,6 +1474,8 @@ struct Pipelines {
     prepass_fade: wgpu::RenderPipeline,
     /// Far-band instances scaled out of the shared unit meshes; writes depth itself.
     far: wgpu::RenderPipeline,
+    /// L4 kit pieces instanced from the shared kit mesh.
+    modules: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
 }
 
@@ -1467,6 +1521,7 @@ fn build_pipelines(
         prepass: scene("depth prepass", DepthUse::PrepassOnly, "vs_main"),
         prepass_fade: scene("depth prepass fade", DepthUse::PrepassFade, "vs_main"),
         far: scene("far band", DepthUse::Write, "vs_far"),
+        modules: scene("modules", DepthUse::Write, "vs_module"),
         lines,
     }
 }

@@ -28,6 +28,7 @@ pub mod liftplan;
 pub mod liftsys;
 pub mod mesh;
 pub mod meshpool;
+pub mod modsys;
 pub mod noise;
 pub mod overlay;
 pub mod primmesh;

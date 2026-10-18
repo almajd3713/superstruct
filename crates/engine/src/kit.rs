@@ -3,7 +3,12 @@
 //! in metres: +Y up, the visible face towards +Z, the origin on the floor at the middle of the
 //! piece's base. Placement rules move pieces with [`Mesh::add_transformed`].
 
-#![allow(clippy::cast_sign_loss, clippy::cast_precision_loss)] // small counts from metre lengths
+#![allow(
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::cast_possible_truncation
+)] // small counts from metre lengths
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
@@ -347,6 +352,215 @@ pub fn stair(rise_total: f32) -> Mesh {
         }
     }
     m
+}
+
+/// The pieces that get instanced, each with fixed dimensions. Variable lengths are tiled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Piece {
+    WallPlain,
+    WallRibbed,
+    WallVent,
+    WallWindow,
+    /// 2 m of railing.
+    Railing,
+    /// A slot's grating overlay: 118 quanta square.
+    Grating,
+    DoorFrame,
+    Lamp,
+    /// 8 m of pipe, radius 0.25 m.
+    Pipe,
+    /// 8 m of cable bundle.
+    Cable,
+}
+
+impl Piece {
+    pub const ALL: [Piece; 10] = [
+        Piece::WallPlain,
+        Piece::WallRibbed,
+        Piece::WallVent,
+        Piece::WallWindow,
+        Piece::Railing,
+        Piece::Grating,
+        Piece::DoorFrame,
+        Piece::Lamp,
+        Piece::Pipe,
+        Piece::Cable,
+    ];
+
+    pub fn mesh(self) -> Mesh {
+        match self {
+            Piece::WallPlain => wall_panel(0),
+            Piece::WallRibbed => wall_panel(1),
+            Piece::WallVent => wall_panel(2),
+            Piece::WallWindow => wall_panel(3),
+            Piece::Railing => railing(RAILING_TILE),
+            Piece::Grating => grating_floor(GRATING_SIDE, GRATING_SIDE),
+            Piece::DoorFrame => door_frame(),
+            Piece::Lamp => lamp(),
+            Piece::Pipe => pipe_straight(8.0, 0.25),
+            Piece::Cable => cable_bundle(8.0, 5),
+        }
+    }
+}
+
+pub const RAILING_TILE: f32 = 2.0;
+/// 118 quanta, a slot between its walls.
+pub const GRATING_SIDE: f32 = 118.0 / 16.0;
+
+/// Where a piece's triangles sit in the shared kit mesh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PieceRange {
+    pub first_index: u32,
+    pub index_count: u32,
+    pub base_vertex: i32,
+}
+
+/// Every instanced piece in one mesh, so a frame binds one vertex and one index buffer.
+#[derive(Debug, Clone)]
+pub struct KitSet {
+    pub mesh: Mesh,
+    pub ranges: Vec<PieceRange>,
+}
+
+impl KitSet {
+    pub fn new() -> Self {
+        let mut mesh = Mesh::default();
+        let mut ranges = Vec::new();
+        for piece in Piece::ALL {
+            let m = piece.mesh();
+            ranges.push(PieceRange {
+                first_index: mesh.indices.len() as u32,
+                index_count: m.indices.len() as u32,
+                base_vertex: mesh.vertices.len() as i32,
+            });
+            mesh.vertices.extend_from_slice(&m.vertices);
+            mesh.indices.extend_from_slice(&m.indices);
+        }
+        Self { mesh, ranges }
+    }
+
+    pub fn range(&self, piece: Piece) -> PieceRange {
+        self.ranges[Piece::ALL.iter().position(|&p| p == piece).unwrap_or(0)]
+    }
+}
+
+impl Default for KitSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// One placed piece, 16 bytes, mirrored by `ModInstance` in `scene.wgsl`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ModuleInstance {
+    /// Base-middle of the piece in the chunk's frame, metres.
+    pub pos: [f32; 3],
+    /// Bits 0-1 the quarter turns about +Y; bits 2-17 the chunk's cell slot, filled in on upload.
+    pub packed: u32,
+}
+
+/// The instances of one chunk, grouped by piece.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleBatch {
+    pub by_piece: Vec<Vec<ModuleInstance>>,
+}
+
+impl ModuleBatch {
+    pub fn new() -> Self {
+        Self {
+            by_piece: vec![Vec::new(); Piece::ALL.len()],
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_piece.iter().map(Vec::len).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn bytes(&self) -> u64 {
+        (self.len() * std::mem::size_of::<ModuleInstance>()) as u64
+    }
+
+    fn push(&mut self, piece: Piece, pos: [f32; 3], facing: u8) {
+        let k = Piece::ALL.iter().position(|&p| p == piece).unwrap_or(0);
+        self.by_piece[k].push(ModuleInstance {
+            pos,
+            packed: u32::from(facing & 3),
+        });
+    }
+
+    /// Bounding sphere of every instance's base point plus a piece's reach, as centre and radius.
+    pub fn bounding_sphere(&self) -> [f32; 4] {
+        let mut lo = Vec3::splat(f32::MAX);
+        let mut hi = Vec3::splat(f32::MIN);
+        for i in self.by_piece.iter().flatten() {
+            lo = lo.min(Vec3::from(i.pos));
+            hi = hi.max(Vec3::from(i.pos));
+        }
+        if self.is_empty() {
+            return [0.0; 4];
+        }
+        // The largest piece is 8 m long.
+        let reach = 8.0;
+        let c = (lo + hi) * 0.5;
+        let r = (hi - lo).length() * 0.5 + reach;
+        [c.x, c.y, c.z, r]
+    }
+}
+
+/// Turns placements into instances. Long railings, pipes and cables are tiled with their fixed
+/// pieces; positions go from quanta to metres.
+pub fn expand(modules: &[worldgen::l4::Module]) -> ModuleBatch {
+    use worldgen::l4::ModuleKind;
+    let mut batch = ModuleBatch::new();
+    let q = |v: i32| v as f32 / 16.0;
+    for m in modules {
+        let pos = [q(m.pos.x), q(m.pos.y), q(m.pos.z)];
+        match m.kind {
+            ModuleKind::WallPanel => {
+                let piece = [
+                    Piece::WallPlain,
+                    Piece::WallRibbed,
+                    Piece::WallVent,
+                    Piece::WallWindow,
+                ][usize::from(m.variant) % 4];
+                batch.push(piece, pos, m.facing);
+            }
+            ModuleKind::DoorFrame => batch.push(Piece::DoorFrame, pos, m.facing),
+            ModuleKind::Lamp => batch.push(Piece::Lamp, pos, m.facing),
+            ModuleKind::Grating => batch.push(Piece::Grating, pos, m.facing),
+            ModuleKind::Railing | ModuleKind::Pipe | ModuleKind::Cable => {
+                let (piece, tile) = match m.kind {
+                    ModuleKind::Railing => (Piece::Railing, RAILING_TILE),
+                    ModuleKind::Pipe => (Piece::Pipe, 8.0),
+                    _ => (Piece::Cable, 8.0),
+                };
+                let len = q(m.len);
+                let n = (len / tile).ceil().max(1.0) as usize;
+                // The pieces are centred on their origin along local x, which the facing turns
+                // onto +x (0, 2) or onto z (1, 3).
+                let dir = match m.facing & 3 {
+                    0 => Vec3::X,
+                    1 => Vec3::NEG_Z,
+                    2 => Vec3::NEG_X,
+                    _ => Vec3::Z,
+                };
+                let start = Vec3::from(pos) - dir * (len / 2.0);
+                for i in 0..n {
+                    // The last tile is pulled back so the run ends where it should.
+                    let centre = (tile * (i as f32 + 0.5))
+                        .min(len - tile / 2.0)
+                        .max(tile / 2.0);
+                    batch.push(piece, (start + dir * centre.min(len)).to_array(), m.facing);
+                }
+            }
+        }
+    }
+    batch
 }
 
 /// Every piece with its name, in the order of the gallery.
