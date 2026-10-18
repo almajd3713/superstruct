@@ -195,6 +195,18 @@ fn march(o: vec3<f32>, d_in: vec3<f32>) -> Hit {
     return NO_HIT;
 }
 
+// True when fog along this ray already hides all but a sliver (under 0.4%) of anything beyond
+// `t`. Fog only thickens with distance, so the surfaces the march could find would be
+// invisible anyway, and the clear colour is the fog colour. Same path formula as `apply_fog`.
+fn fogged_out(dir: vec3<f32>, t: f32) -> bool {
+    let kh = clamp(globals.fog.a * dir.y * t, -12.0, 12.0);
+    var path = t;
+    if (abs(kh) > 1.0e-4) {
+        path = t * (1.0 - exp(-kh)) / kh;
+    }
+    return 1.0 - exp(-globals.params.x * path) > 0.996;
+}
+
 @vertex
 fn vs_full(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     let p = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
@@ -212,6 +224,9 @@ fn fs_march(@builtin(position) frag: vec4<f32>) -> FsOut {
     let ndc = vec2<f32>(frag.x / hz.screen.x * 2.0 - 1.0, 1.0 - frag.y / hz.screen.y * 2.0);
     let pn = hz.inv_view_proj * vec4<f32>(ndc, 1.0, 1.0);
     let dir = normalize(pn.xyz / pn.w);
+    if (fogged_out(dir, hz.t_start)) {
+        discard;
+    }
     let o = vec3<f32>(f32(hz.half) * CELL_M) + hz.cam_local;
     let hit = march(o, dir);
     if (hit.t >= 1.0e29) {
@@ -240,9 +255,14 @@ fn fs_march_half(@builtin(position) frag: vec4<f32>) -> HalfOut {
     let ndc = vec2<f32>(screen_xy.x / hz.screen.x * 2.0 - 1.0, 1.0 - screen_xy.y / hz.screen.y * 2.0);
     let pn = hz.inv_view_proj * vec4<f32>(ndc, 1.0, 1.0);
     let dir = normalize(pn.xyz / pn.w);
+    var out: HalfOut;
+    if (fogged_out(dir, hz.t_start)) {
+        out.colour = vec4<f32>(0.0);
+        out.depth = 0.0;
+        return out;
+    }
     let o = vec3<f32>(f32(hz.half) * CELL_M) + hz.cam_local;
     let hit = march(o, dir);
-    var out: HalfOut;
     if (hit.t >= 1.0e29) {
         out.colour = vec4<f32>(0.0);
         out.depth = 0.0;

@@ -973,3 +973,25 @@ fn moving_the_handoff_radius_does_not_change_the_picture() {
         assert!(mean < 2.0, "mean difference {mean}");
     }
 }
+
+#[test]
+fn fully_fogged_horizon_pixels_are_skipped() {
+    use worldgen::seed::WorldSeed;
+    let Some(h) = headless() else { return };
+    let size = (160, 90);
+    let start = WorldPos::new(I64Vec3::new(-2, -2, -3), Vec3::new(10.0, 745.0, 584.0)).unwrap();
+    let cam = Camera::new(start, 70.0);
+    // 0.0008 per metre over 51 km: nothing beyond the horizon's start can show.
+    let params = FrameParams {
+        fog_density: 0.0008,
+        ..PLAIN
+    };
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_horizon_enabled(true);
+    renderer.set_world_seed(WorldSeed(0).0);
+    let with = h
+        .render_with(&mut renderer, &cam, size, params, &[])
+        .unwrap();
+    let without = h.render(&[], &cam, size, params, &[]).unwrap();
+    assert_eq!(image_diff(&with, &without), (0, 0.0));
+}
