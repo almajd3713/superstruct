@@ -247,7 +247,7 @@ This implements cell-level connectivity (CLAUDE.md §3.5, `ports.md`):
 ### 5.5 Sanctuary (from the L1 `Zone`)
 
 - The chosen L2 cell realizes the sanctuary zone on the deck top it lies on: an enclosed room with `WARM` material, at least one port-connected entrance and one opening facing outward.
-- The cell's metadata flags it. Interiors and props come in Phase 5.
+- The cell's metadata flags it. **As implemented** (`worldgen::sanctuary_room`, P5.2.1): a 24 × 24 m room 4 m inside the zone (so the door always opens onto deck), `WARM`, 6 m high with a 0.5 m roof; the door (3 × 2.75 m) is on a side drawn from `SANCTUARY_ROOM`, and a 12 m wide opening (sill 1 m, top 4 m) faces the opposite way. Props are L4 modules (`l4::sanctuary_modules`): two benches, four plants, two warm lamps.
 
 ### 5.6 Vista `[VISTA]`
 

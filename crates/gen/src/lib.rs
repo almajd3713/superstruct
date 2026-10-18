@@ -35,6 +35,7 @@ pub mod regime;
 pub mod rng;
 pub mod salt;
 pub mod sanctuary;
+pub mod sanctuary_room;
 pub mod sdf;
 pub mod seed;
 pub mod tram;
@@ -43,4 +44,4 @@ pub mod walk;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 4;
+pub const GEN_VERSION: u32 = 5;

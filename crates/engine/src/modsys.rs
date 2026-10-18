@@ -20,6 +20,8 @@ pub const MOD_MAX_INSTANCES: u32 = 1 << 20;
 /// A full-brightness lamp: strength and reach of its point light.
 const LAMP_INTENSITY: f32 = 5.0;
 const LAMP_RADIUS: f32 = 9.0;
+/// Linear colour of sanctuary lamps.
+const WARM_LIGHT: [f32; 3] = [1.0, 0.55, 0.22];
 /// The cell slot lives in bits 2..18 of an instance.
 const SLOT_SHIFT: u32 = 2;
 
@@ -47,7 +49,7 @@ pub struct ModChunk {
     /// Chunk-local bounding sphere.
     bounds: [f32; 4],
     glow: [f32; 4],
-    lamps: Vec<([f32; 3], u8)>,
+    lamps: Vec<([f32; 3], u8, bool)>,
     bytes: u64,
     visible: bool,
 }
@@ -275,14 +277,19 @@ impl ModuleState {
     pub fn collect_lights(&self, out: &mut Vec<Light>) {
         for c in self.chunks.iter().filter(|c| c.visible) {
             let glow = self.glow_override.unwrap_or(c.glow);
-            for &(at, level) in &c.lamps {
+            for &(at, level, warm) in &c.lamps {
                 let Ok(pos) = c.origin.offset(Vec3::from(at)) else {
                     continue;
                 };
                 out.push(Light {
                     pos,
-                    colour: [glow[0], glow[1], glow[2]],
-                    intensity: LAMP_INTENSITY * glow[3] * f32::from(level) / 15.0,
+                    colour: if warm {
+                        WARM_LIGHT
+                    } else {
+                        [glow[0], glow[1], glow[2]]
+                    },
+                    intensity: LAMP_INTENSITY * if warm { 1.0 } else { glow[3] } * f32::from(level)
+                        / 15.0,
                     radius: LAMP_RADIUS,
                     spot: None,
                 });

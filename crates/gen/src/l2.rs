@@ -156,6 +156,9 @@ pub fn l2_build_stats(
     }
 
     copy_sanctuary(&parent, origin, &mut out);
+    if let Some(room) = crate::sanctuary_room::room_of(seed, &out) {
+        out.primitives.extend(room.primitives());
+    }
 
     if let Some(v) = vista(seed, cell, parent_key, &parent, origin, &corridors) {
         out.primitives.push(v.balcony);

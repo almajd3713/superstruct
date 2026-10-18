@@ -53,6 +53,8 @@ salts! {
     TRUNK_MASS = 0x0308;
     /// Keyed by `CellKey(L2)`: mass entrances.
     MASS_ENTRANCE = 0x0309;
+    /// Keyed by `CellKey(L2)`: which side of a sanctuary room holds the door.
+    SANCTUARY_ROOM = 0x030A;
 
     // L3 blocks: 0x04xx
     L3_RETRY = 0x0401;

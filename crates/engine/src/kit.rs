@@ -23,6 +23,7 @@ const METAL: u16 = MaterialId::METAL.0;
 const GRATING: u16 = MaterialId::GRATING.0;
 const EMISSIVE: u16 = MaterialId::EMISSIVE.0;
 const PIPE: u16 = MaterialId::PIPE.0;
+const WARM: u16 = MaterialId::WARM.0;
 
 /// Module slot: 8 m wide, 4 m storey.
 pub const SLOT_W: f32 = 8.0;
@@ -317,6 +318,35 @@ pub fn lamp() -> Mesh {
     m
 }
 
+/// The lamp with a warm glow.
+pub fn lamp_warm() -> Mesh {
+    let mut m = Mesh::default();
+    bx(&mut m, [-0.45, -0.1, -0.2], [0.45, 0.0, 0.2], METAL);
+    bx(&mut m, [-0.4, -0.13, -0.15], [0.4, -0.1, 0.15], WARM);
+    m
+}
+
+/// A bench 2.4 m long and 0.5 m deep, seat at 0.45 m, back towards -Z.
+pub fn bench() -> Mesh {
+    let mut m = Mesh::default();
+    bx(&mut m, [-1.2, 0.4, -0.25], [1.2, 0.47, 0.25], WARM);
+    bx(&mut m, [-1.2, 0.47, -0.27], [1.2, 0.95, -0.2], WARM);
+    for x in [-1.1f32, 1.0] {
+        bx(&mut m, [x, 0.0, -0.22], [x + 0.1, 0.4, 0.22], METAL);
+    }
+    m
+}
+
+/// A potted plant 1.4 m tall: a concrete pot and stacked leaf masses.
+pub fn plant() -> Mesh {
+    let mut m = Mesh::default();
+    bx(&mut m, [-0.3, 0.0, -0.3], [0.3, 0.5, 0.3], CONCRETE);
+    bx(&mut m, [-0.04, 0.5, -0.04], [0.04, 0.9, 0.04], METAL);
+    bx(&mut m, [-0.45, 0.8, -0.45], [0.45, 1.1, 0.45], WARM);
+    bx(&mut m, [-0.3, 1.1, -0.3], [0.3, 1.4, 0.3], WARM);
+    m
+}
+
 /// A straight stair run 1.2 m wide that climbs `rise_total` metres along +Z from the origin, steps
 /// as boxes between two stringers.
 pub fn stair(rise_total: f32) -> Mesh {
@@ -371,10 +401,14 @@ pub enum Piece {
     Pipe,
     /// 8 m of cable bundle.
     Cable,
+    /// A lamp whose light is warm, whatever the regime.
+    LampWarm,
+    Bench,
+    Plant,
 }
 
 impl Piece {
-    pub const ALL: [Piece; 10] = [
+    pub const ALL: [Piece; 13] = [
         Piece::WallPlain,
         Piece::WallRibbed,
         Piece::WallVent,
@@ -385,6 +419,9 @@ impl Piece {
         Piece::Lamp,
         Piece::Pipe,
         Piece::Cable,
+        Piece::LampWarm,
+        Piece::Bench,
+        Piece::Plant,
     ];
 
     pub fn mesh(self) -> Mesh {
@@ -399,6 +436,9 @@ impl Piece {
             Piece::Lamp => lamp(),
             Piece::Pipe => pipe_straight(8.0, 0.25),
             Piece::Cable => cable_bundle(8.0, 5),
+            Piece::LampWarm => lamp_warm(),
+            Piece::Bench => bench(),
+            Piece::Plant => plant(),
         }
     }
 }
@@ -469,7 +509,7 @@ pub struct ModuleBatch {
     /// emissive colour (`atmosphere_at`) and its light level.
     pub glow: [f32; 4],
     /// Lit lamps: position in the chunk's frame and brightness 1 to 15. They become point lights.
-    pub lamps: Vec<([f32; 3], u8)>,
+    pub lamps: Vec<([f32; 3], u8, bool)>,
 }
 
 /// Bits of `ModuleInstance::packed` that carry the brightness.
@@ -544,12 +584,18 @@ pub fn expand(modules: &[worldgen::l4::Module]) -> ModuleBatch {
             }
             ModuleKind::DoorFrame => batch.push(Piece::DoorFrame, pos, m.facing, m.glow),
             ModuleKind::Lamp => {
-                batch.push(Piece::Lamp, pos, m.facing, m.glow);
+                let warm = m.variant == 1;
+                let piece = if warm { Piece::LampWarm } else { Piece::Lamp };
+                batch.push(piece, pos, m.facing, m.glow);
                 if m.glow > 0 {
                     // Just under the fixture.
-                    batch.lamps.push(([pos[0], pos[1] - 0.4, pos[2]], m.glow));
+                    batch
+                        .lamps
+                        .push(([pos[0], pos[1] - 0.4, pos[2]], m.glow, warm));
                 }
             }
+            ModuleKind::Bench => batch.push(Piece::Bench, pos, m.facing, m.glow),
+            ModuleKind::Plant => batch.push(Piece::Plant, pos, m.facing, m.glow),
             ModuleKind::Grating => batch.push(Piece::Grating, pos, m.facing, m.glow),
             ModuleKind::Railing | ModuleKind::Pipe | ModuleKind::Cable => {
                 let (piece, tile) = match m.kind {

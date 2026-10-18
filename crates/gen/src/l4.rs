@@ -42,6 +42,10 @@ pub enum ModuleKind {
     Pipe,
     /// A cable bundle of `len` along the piece's x, centred on `pos`.
     Cable,
+    /// A bench 2.4 m long, seat facing `facing`.
+    Bench,
+    /// A potted plant standing on `pos`.
+    Plant,
 }
 
 /// A placed kit piece. Positions are in quanta in the frame of the cell the placement came from
@@ -227,6 +231,58 @@ fn pipes_and_cables(prims: &[Primitive], out: &mut Vec<Module>) {
             out.push(m);
         }
     }
+}
+
+/// Props of a sanctuary room: two benches facing the vista opening, a plant in each corner and
+/// two warm lamps (`Lamp` with variant 1). Positions are in the L2 cell's frame.
+pub fn sanctuary_modules(room: &crate::sanctuary_room::Room) -> Vec<Module> {
+    let f = room.floor;
+    let y = f.min.y;
+    let [cx, cz] = room.centre();
+    // Unit step towards the vista wall, and across it.
+    let (out_x, out_z): (Q, Q) = match room.window_side() {
+        0 => (0, -1),
+        1 => (1, 0),
+        2 => (0, 1),
+        _ => (-1, 0),
+    };
+    let (side_x, side_z) = (out_z.abs(), out_x.abs());
+    let at = |along: Q, across: Q| {
+        [
+            cx + out_x * along + side_x * across,
+            cz + out_z * along + side_z * across,
+        ]
+    };
+    let facing = [2, 1, 0, 3][usize::from(room.window_side())];
+    let mut out = Vec::new();
+    for across in [-4 * 16, 4 * 16] {
+        let p = at(6 * 16, across);
+        out.push(module(ModuleKind::Bench, [p[0], y, p[1]], facing));
+    }
+    for (sx, sz) in [(-1, -1), (-1, 1), (1, -1), (1, 1)] {
+        let px = if sx < 0 {
+            f.min.x + 2 * 16
+        } else {
+            f.max.x - 2 * 16
+        };
+        let pz = if sz < 0 {
+            f.min.z + 2 * 16
+        } else {
+            f.max.z - 2 * 16
+        };
+        out.push(module(ModuleKind::Plant, [px, y, pz], 0));
+    }
+    for across in [-5 * 16, 5 * 16] {
+        let p = at(0, across);
+        let mut m = module(
+            ModuleKind::Lamp,
+            [p[0], y + crate::sanctuary_room::HEIGHT, p[1]],
+            0,
+        );
+        m.variant = 1;
+        out.push(m);
+    }
+    out
 }
 
 /// Railing modules for the railing boxes of an L2 cell, in primitive order. The boxes keep

@@ -490,7 +490,10 @@ fn build(
         }
         (Level::L2, _) => {
             let (out, _) = l2_build(seed, cache, id.key);
-            let rails = railing_modules(&out.primitives);
+            let mut rails = railing_modules(&out.primitives);
+            if let Some(room) = worldgen::sanctuary_room::room_of(seed, &out) {
+                rails.extend(worldgen::l4::sanctuary_modules(&room));
+            }
             if !rails.is_empty() {
                 modules = Some(expand(&rails));
             }
@@ -705,6 +708,49 @@ mod tests {
                     if shown == 4 {
                         break 'scan;
                     }
+                }
+            }
+        }
+    }
+
+    /// Prints standpoints 8 m outside the doors of sanctuary rooms, looking at the door.
+    #[test]
+    #[ignore = "diagnostic"]
+    fn print_sanctuary_viewpoints() {
+        let seed = WorldSeed(0);
+        let cache = L1Cache::default();
+        let mut shown = 0;
+        for x in -6..6i64 {
+            for k in 0..512i64 {
+                let key = CellKey::new(
+                    Level::L2,
+                    I64Vec3::new(x * 8 + k % 8, k / 64, (x % 3) * 8 + k / 8 % 8),
+                );
+                let out = worldgen::l2::l2_cell_in(seed, &cache, key);
+                let Some(room) = worldgen::sanctuary_room::room_of(seed, &out) else {
+                    continue;
+                };
+                let f = room.floor;
+                let [cx, cz] = room.centre();
+                let m = |v: i32| f64::from(v) / 16.0;
+                let (px, pz) = match room.door_side {
+                    0 => (m(cx), m(f.min.z) - 8.0),
+                    2 => (m(cx), m(f.max.z) + 8.0),
+                    1 => (m(f.max.x) + 8.0, m(cz)),
+                    _ => (m(f.min.x) - 8.0, m(cz)),
+                };
+                let origin = key.coords.as_dvec3() * 512.0;
+                let p = origin + glam::DVec3::new(px, m(f.min.y) + 1.65, pz);
+                let sector = (p / 1024.0).floor();
+                let local = p - sector * 1024.0;
+                let yaw = [180, 90, 0, 270][usize::from(room.door_side)];
+                println!(
+                    "door {}: SUPERSTRUCT_SECTOR={},{},{} SUPERSTRUCT_LOCAL={:.1},{:.1},{:.1} SUPERSTRUCT_YAW={yaw}",
+                    room.door_side, sector.x, sector.y, sector.z, local.x, local.y, local.z
+                );
+                shown += 1;
+                if shown == 4 {
+                    return;
                 }
             }
         }
