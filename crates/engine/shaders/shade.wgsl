@@ -9,6 +9,12 @@ fn material_albedo(id: u32) -> vec3<f32> {
 // Lighting before fog: a Lambert sun plus ambient, tinted by the regime's light, with a little
 // sheen on glossy materials and the emissive share of the base tone added back unlit.
 fn lit_colour(n: vec3<f32>, material: u32) -> vec3<f32> {
+    return lit_glow(n, material, vec3<f32>(1.0));
+}
+
+// `lit_colour` with the emissive share shown in `glow` instead of the base tone, so a chunk can
+// dim, tint or switch off its emissive parts.
+fn lit_glow(n: vec3<f32>, material: u32, glow: vec3<f32>) -> vec3<f32> {
     let slot = min(material, 15u);
     let albedo = globals.materials[slot].rgb;
     let emissive = globals.materials[slot].a;
@@ -19,7 +25,8 @@ fn lit_colour(n: vec3<f32>, material: u32) -> vec3<f32> {
     let tint = globals.ambient.rgb / 0.27;
     let sheen = gloss * gloss * pow(lambert, 6.0);
     let shade = 0.22 + 0.1 * n.y + 3.0 * globals.ambient.a * (lambert + sheen);
-    return mix(albedo * tint * shade, albedo, emissive);
+    // A switched-off emissive part keeps a faint tone instead of turning black.
+    return mix(albedo * tint * shade, albedo * max(glow, vec3<f32>(0.06)), emissive);
 }
 
 // Fog and the death fade, for a surface point `rel` metres from the camera.

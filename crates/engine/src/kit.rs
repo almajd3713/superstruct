@@ -456,7 +456,8 @@ impl Default for KitSet {
 pub struct ModuleInstance {
     /// Base-middle of the piece in the chunk's frame, metres.
     pub pos: [f32; 3],
-    /// Bits 0-1 the quarter turns about +Y; bits 2-17 the chunk's cell slot, filled in on upload.
+    /// Bits 0-1 the quarter turns about +Y; bits 2-17 the chunk's cell slot, filled in on upload;
+    /// bits 18-21 the brightness of the emissive parts, 0 to 15.
     pub packed: u32,
 }
 
@@ -464,12 +465,20 @@ pub struct ModuleInstance {
 #[derive(Debug, Clone, Default)]
 pub struct ModuleBatch {
     pub by_piece: Vec<Vec<ModuleInstance>>,
+    /// Colour and strength of full-brightness emissive parts in this chunk, linear: the regime's
+    /// emissive colour (`atmosphere_at`) and its light level.
+    pub glow: [f32; 4],
 }
+
+/// Bits of `ModuleInstance::packed` that carry the brightness.
+pub const GLOW_SHIFT: u32 = 18;
+pub const GLOW_MASK: u32 = 0xf << GLOW_SHIFT;
 
 impl ModuleBatch {
     pub fn new() -> Self {
         Self {
             by_piece: vec![Vec::new(); Piece::ALL.len()],
+            glow: [1.0, 0.95, 0.85, 1.0],
         }
     }
 
@@ -485,11 +494,11 @@ impl ModuleBatch {
         (self.len() * std::mem::size_of::<ModuleInstance>()) as u64
     }
 
-    fn push(&mut self, piece: Piece, pos: [f32; 3], facing: u8) {
+    fn push(&mut self, piece: Piece, pos: [f32; 3], facing: u8, glow: u8) {
         let k = Piece::ALL.iter().position(|&p| p == piece).unwrap_or(0);
         self.by_piece[k].push(ModuleInstance {
             pos,
-            packed: u32::from(facing & 3),
+            packed: u32::from(facing & 3) | (u32::from(glow.min(15)) << GLOW_SHIFT),
         });
     }
 
@@ -528,11 +537,11 @@ pub fn expand(modules: &[worldgen::l4::Module]) -> ModuleBatch {
                     Piece::WallVent,
                     Piece::WallWindow,
                 ][usize::from(m.variant) % 4];
-                batch.push(piece, pos, m.facing);
+                batch.push(piece, pos, m.facing, m.glow);
             }
-            ModuleKind::DoorFrame => batch.push(Piece::DoorFrame, pos, m.facing),
-            ModuleKind::Lamp => batch.push(Piece::Lamp, pos, m.facing),
-            ModuleKind::Grating => batch.push(Piece::Grating, pos, m.facing),
+            ModuleKind::DoorFrame => batch.push(Piece::DoorFrame, pos, m.facing, m.glow),
+            ModuleKind::Lamp => batch.push(Piece::Lamp, pos, m.facing, m.glow),
+            ModuleKind::Grating => batch.push(Piece::Grating, pos, m.facing, m.glow),
             ModuleKind::Railing | ModuleKind::Pipe | ModuleKind::Cable => {
                 let (piece, tile) = match m.kind {
                     ModuleKind::Railing => (Piece::Railing, RAILING_TILE),
@@ -555,7 +564,12 @@ pub fn expand(modules: &[worldgen::l4::Module]) -> ModuleBatch {
                     let centre = (tile * (i as f32 + 0.5))
                         .min(len - tile / 2.0)
                         .max(tile / 2.0);
-                    batch.push(piece, (start + dir * centre.min(len)).to_array(), m.facing);
+                    batch.push(
+                        piece,
+                        (start + dir * centre.min(len)).to_array(),
+                        m.facing,
+                        m.glow,
+                    );
                 }
             }
         }

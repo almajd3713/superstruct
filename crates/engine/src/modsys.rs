@@ -9,7 +9,7 @@ use worldgen::coord::WorldPos;
 
 use crate::camera::camera_relative;
 use crate::cull::Frustum;
-use crate::kit::{KitSet, ModuleBatch, ModuleInstance, Piece};
+use crate::kit::{GLOW_MASK, KitSet, ModuleBatch, ModuleInstance, Piece};
 use crate::renderer::ChunkHandle;
 use crate::suballoc::{Range, SubAllocator};
 
@@ -42,6 +42,7 @@ pub struct ModChunk {
     groups: Vec<Group>,
     /// Chunk-local bounding sphere.
     bounds: [f32; 4],
+    glow: [f32; 4],
     bytes: u64,
     visible: bool,
 }
@@ -57,7 +58,7 @@ pub struct ModuleState {
     pub chunks: Vec<ModChunk>,
     free_slots: Vec<u32>,
     next_slot: u32,
-    cell_scratch: Vec<[f32; 4]>,
+    cell_scratch: Vec<[[f32; 4]; 2]>,
     pub args_scratch: Vec<IndirectArgs>,
     /// Instances in the groups drawn last frame, for tests and the overlay.
     pub drawn_instances: u32,
@@ -81,7 +82,8 @@ impl ModuleState {
                 u64::from(MOD_MAX_INSTANCES) * std::mem::size_of::<ModuleInstance>() as u64,
                 storage,
             ),
-            cells: buf("module cells", (MOD_MAX_CELLS * 16) as u64, storage),
+            // Two vec4 per cell: origin and fade, then the emissive colour and strength.
+            cells: buf("module cells", (MOD_MAX_CELLS * 32) as u64, storage),
             args: buf(
                 "module args",
                 (MOD_MAX_CELLS * Piece::ALL.len() * std::mem::size_of::<IndirectArgs>()) as u64,
@@ -145,7 +147,7 @@ impl ModuleState {
             });
             all.extend(list.iter().map(|i| ModuleInstance {
                 pos: i.pos,
-                packed: (i.packed & 3) | (slot << SLOT_SHIFT),
+                packed: (i.packed & (3 | GLOW_MASK)) | (slot << SLOT_SHIFT),
             }));
         }
         queue.write_buffer(
@@ -160,6 +162,7 @@ impl ModuleState {
             slot,
             groups,
             bounds: batch.bounding_sphere(),
+            glow: batch.glow,
             bytes,
             visible: true,
         });
@@ -198,11 +201,12 @@ impl ModuleState {
     pub fn prepare(&mut self, queue: &wgpu::Queue, cam: &WorldPos, frustum: &Frustum) {
         self.args_scratch.clear();
         self.cell_scratch.clear();
-        self.cell_scratch.resize(self.next_slot as usize, [0.0; 4]);
+        self.cell_scratch
+            .resize(self.next_slot as usize, [[0.0; 4]; 2]);
         self.drawn_instances = 0;
         for c in &self.chunks {
             let o = camera_relative(&c.origin, cam);
-            self.cell_scratch[c.slot as usize] = [o.x, o.y, o.z, 1.0];
+            self.cell_scratch[c.slot as usize] = [[o.x, o.y, o.z, 1.0], c.glow];
         }
         for c in self.chunks.iter().filter(|c| c.visible) {
             let o = camera_relative(&c.origin, cam);

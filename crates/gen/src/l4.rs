@@ -9,14 +9,18 @@
 
 #![allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // slot indices are below 16
 
-use crate::cell::{Axis, CellKey, Level};
+use crate::cell::{Axis, CellKey, Level, floor_div_pow2};
 use crate::hash::hash;
 use crate::l3::{L3Block, SlotClass, VESTIBULE};
 use crate::l3_tiles::{self as tiles, D, FLOOR, Family, SLOT, STOREY, W, WALL};
 use crate::prim::{FeatureKind, Primitive, Q, QVec3, Shape};
+use crate::regime::regime;
 use crate::rng::Rng;
 use crate::salt;
 use crate::seed::WorldSeed;
+
+/// Full brightness.
+pub const GLOW_MAX: u8 = 15;
 
 /// Wall panel variants; the draw maps to them with plain walls the most common.
 pub const PANEL_VARIANTS: u8 = 4;
@@ -52,6 +56,9 @@ pub struct Module {
     pub len: Q,
     pub width: Q,
     pub variant: u8,
+    /// Brightness of the piece's emissive parts, 0 (dead) to 15, already scaled by the block's
+    /// regime: a Blackout block has every module dark. Pieces without emissive parts carry 15.
+    pub glow: u8,
 }
 
 fn module(kind: ModuleKind, pos: [Q; 3], facing: u8) -> Module {
@@ -62,6 +69,7 @@ fn module(kind: ModuleKind, pos: [Q; 3], facing: u8) -> Module {
         len: 0,
         width: 0,
         variant: 0,
+        glow: GLOW_MAX,
     }
 }
 
@@ -87,6 +95,8 @@ pub fn block_modules(seed: WorldSeed, block: CellKey, l3: &L3Block) -> Vec<Modul
     debug_assert_eq!(block.level, Level::L3);
     let mut out = Vec::new();
     let b = block.coords;
+    // A Blackout block suppresses every emissive part (`regimes.md` §5).
+    let lit_regime = regime(seed, b.map(|v| floor_div_pow2(v, 9))).light > 0;
     for (i, slot) in l3.layout.slots.iter().enumerate() {
         if slot.class != SlotClass::Core || slot.sealed || slot.tile == u16::MAX {
             continue;
@@ -100,8 +110,15 @@ pub fn block_modules(seed: WorldSeed, block: CellKey, l3: &L3Block) -> Vec<Modul
             b.z * 8 + z as i64,
         );
         let mut rng = Rng::new(hash(seed.0, Level::L4, l4, salt::MODULE));
-        let draws: [u64; 8] = std::array::from_fn(|_| rng.below(8));
+        let draws: [u64; 18] = std::array::from_fn(|_| rng.below(8));
         let draw = |side: usize| draws[(t % 2) * 4 + side];
+        // Window brightness per side, then the lamp of each slot of the cell.
+        let window_glow = |side: usize| 5 + (draws[10 + (t % 2) * 4 + side] * 2).min(10) as u8;
+        let lamp_glow = match draws[8 + t % 2] {
+            0..=4 => GLOW_MAX,
+            5 | 6 => 7,
+            _ => 0,
+        };
 
         let vestibule = slot.tile == VESTIBULE;
         let info = (!vestibule).then(|| tiles::table()[usize::from(slot.tile)]);
@@ -117,11 +134,16 @@ pub fn block_modules(seed: WorldSeed, block: CellKey, l3: &L3Block) -> Vec<Modul
                             6 => 2,
                             _ => 3,
                         };
+                        if m.variant == 3 {
+                            m.glow = if lit_regime { window_glow(side) } else { 0 };
+                        }
                         out.push(m);
                     }
                     D => {
                         let p = [p[0], p[1] + FLOOR, p[2]];
-                        out.push(module(ModuleKind::DoorFrame, p, SIDE_FACING[side]));
+                        let mut m = module(ModuleKind::DoorFrame, p, SIDE_FACING[side]);
+                        m.glow = if lit_regime { GLOW_MAX } else { 0 };
+                        out.push(m);
                     }
                     _ => {}
                 }
@@ -148,7 +170,7 @@ pub fn block_modules(seed: WorldSeed, block: CellKey, l3: &L3Block) -> Vec<Modul
         let lit =
             vestibule || info.is_some_and(|i| matches!(i.family, Family::Room | Family::Corridor));
         if lit {
-            out.push(module(
+            let mut m = module(
                 ModuleKind::Lamp,
                 [
                     xq * SLOT + SLOT / 2,
@@ -156,7 +178,9 @@ pub fn block_modules(seed: WorldSeed, block: CellKey, l3: &L3Block) -> Vec<Modul
                     zq * SLOT + SLOT / 2,
                 ],
                 0,
-            ));
+            );
+            m.glow = if lit_regime { lamp_glow } else { 0 };
+            out.push(m);
         }
     }
     pipes_and_cables(&l3.out.primitives, &mut out);
@@ -403,6 +427,24 @@ mod tests {
                 assert_eq!(grates, usize::from(flat), "{key:?} slot {i}");
             }
         }
+        // Emissive parts vary in brightness: some lamps are dim or dead, windows are never dark
+        // in a lit regime, and nothing exceeds the scale.
+        let all: Vec<Module> = blocks
+            .iter()
+            .flat_map(|(k, b)| block_modules(SEED, *k, b))
+            .collect();
+        assert!(all.iter().all(|m| m.glow <= GLOW_MAX));
+        let lamps: Vec<u8> = all
+            .iter()
+            .filter(|m| m.kind == ModuleKind::Lamp)
+            .map(|m| m.glow)
+            .collect();
+        assert!(lamps.contains(&GLOW_MAX) && lamps.contains(&0) && lamps.contains(&7));
+        assert!(
+            all.iter()
+                .filter(|m| m.kind == ModuleKind::WallPanel && m.variant == 3)
+                .all(|m| (5..=15).contains(&m.glow))
+        );
         for kind in ["WallPanel", "DoorFrame", "Grating", "Lamp"] {
             assert!(counts.get(kind).copied().unwrap_or(0) > 20, "{counts:?}");
         }

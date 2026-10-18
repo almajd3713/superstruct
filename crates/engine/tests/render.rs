@@ -1160,3 +1160,77 @@ fn l4_modules_in_a_dense_block_meet_the_geometry_budget() {
         assert!(scene(&with) < 6.0, "geometry budget is 6 ms");
     }
 }
+
+/// P4.3.2: emissive module parts (lamps, window strips, door lights) show in a dark scene, scale
+/// with their brightness level, and go dark when the chunk's emissive strength is zero.
+#[test]
+fn emissive_modules_are_visible_in_the_dark() {
+    use engine::kit::expand;
+    use worldgen::l4::{Module, ModuleKind};
+    use worldgen::prim::QVec3;
+
+    let Some(h) = headless() else { return };
+    let m = |kind, pos: [i32; 3], facing, variant, glow| Module {
+        kind,
+        pos: QVec3::new(pos[0], pos[1], pos[2]),
+        facing,
+        len: 0,
+        width: 0,
+        variant,
+        glow,
+    };
+    // Eight metres ahead: a window panel at full, half and zero brightness side by side, a lamp
+    // above the camera and a door light.
+    let mods = [
+        m(ModuleKind::WallPanel, [-128, 0, -128], 0, 3, 15),
+        m(ModuleKind::WallPanel, [0, 0, -128], 0, 3, 8),
+        m(ModuleKind::WallPanel, [128, 0, -128], 0, 3, 0),
+        m(ModuleKind::Lamp, [0, 64, 0], 0, 0, 15),
+    ];
+    let origin = WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0)).unwrap();
+    let dark = FrameParams {
+        fog_density: 0.0,
+        fog_height_k: 0.0,
+        fog_color: [0.0, 0.0, 0.0],
+        ambient: [0.02, 0.02, 0.02],
+        light: 0.0,
+        grid: false,
+        fade: 0.0,
+    };
+    let size = (960, 360);
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 514.0, 512.0)).unwrap();
+    let render = |strength: f32| {
+        let mut batch = expand(&mods);
+        batch.glow = [1.0, 0.95, 0.85, strength];
+        let mut renderer =
+            engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+        renderer.set_scene(&h.device, &h.queue, &[]);
+        renderer.upload_module_chunk(&h.queue, origin, &batch);
+        h.render_with(&mut renderer, &cam, size, dark, &[]).unwrap()
+    };
+    let lit = render(1.0);
+    let off = render(0.0);
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/l4-emissive-dark.png");
+    save_png(&path, size.0, size.1, &lit).unwrap();
+    // The three window panels sit at x = -8, 0 and 8 m; probe one pane of each.
+    let strip = |img: &[u8], fx: f32| {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let (x, y) = ((fx * size.0 as f32) as u32, 180);
+        let i = ((y * size.0 + x) * 4) as usize;
+        u32::from(img[i]) + u32::from(img[i + 1]) + u32::from(img[i + 2])
+    };
+    let level = |fx| strip(&lit, fx);
+    let (a, b, c) = (level(0.198), level(0.469), level(0.742));
+    eprintln!("window strips full {a}, half {b}, off {c}");
+    assert!(a > 450, "a full strip glows in the dark: {a}");
+    assert!(a > b && b > c, "brightness orders the strips: {a} {b} {c}");
+    assert!(c < 260, "a dead strip stays dim: {c}");
+    let max_off = off
+        .chunks(4)
+        .map(|p| u32::from(p[0]).max(u32::from(p[1])))
+        .max()
+        .unwrap();
+    assert!(max_off < 80, "no glow at zero strength: {max_off}");
+}

@@ -35,6 +35,7 @@ struct ModInstance {
 };
 
 @group(1) @binding(3) var<storage, read> mod_instances: array<ModInstance>;
+// Two vec4 per cell: camera-relative origin and fade, then emissive colour and strength.
 @group(1) @binding(4) var<storage, read> mod_cells: array<vec4<f32>>;
 
 struct VsIn {
@@ -53,6 +54,8 @@ struct VsOut {
     // Band cross-fade: magnitude is the fade level, the sign says whether the chunk is
     // fading in (positive) or out (negative). The two rules are exact complements.
     @location(3) @interpolate(flat) fade: f32,
+    // Colour of emissive parts; white for everything that is not an L4 module.
+    @location(4) @interpolate(flat) glow: vec3<f32>,
 };
 
 fn oct_decode(e: vec2<f32>) -> vec3<f32> {
@@ -74,6 +77,7 @@ fn vs_main(in: VsIn) -> VsOut {
     out.normal = oct_decode(in.normal_oct);
     out.material = in.material.x;
     out.fade = bitcast<f32>(instances[in.draw].mesh.w);
+    out.glow = vec3<f32>(1.0);
     return out;
 }
 
@@ -108,6 +112,7 @@ fn vs_far(in: FarIn) -> VsOut {
     out.normal = n;
     out.material = inst.attrs & 0xffffu;
     out.fade = far_cells[inst.cell].w;
+    out.glow = vec3<f32>(1.0);
     return out;
 }
 
@@ -130,13 +135,17 @@ fn vs_module(in: VsIn) -> VsOut {
         p = vec3<f32>(-p.z, p.y, p.x);
         n = vec3<f32>(-n.z, n.y, n.x);
     }
-    let cell = mod_cells[(inst.packed >> 2u) & 0xffffu];
+    let slot = (inst.packed >> 2u) & 0xffffu;
+    let cell = mod_cells[slot * 2u];
+    let glow = mod_cells[slot * 2u + 1u];
+    let level = f32((inst.packed >> 18u) & 15u) / 15.0;
     let rel = cell.xyz + inst.pos + p;
     out.rel = rel;
     out.clip = globals.view_proj * vec4<f32>(rel, 1.0);
     out.normal = n;
     out.material = in.material.x;
     out.fade = cell.w;
+    out.glow = glow.rgb * (glow.a * level);
     return out;
 }
 
@@ -176,7 +185,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         discard;
     }
     let n = normalize(in.normal);
-    var colour = lit_colour(n, in.material);
+    var colour = lit_glow(n, in.material, in.glow);
 
     if (globals.params.y > 0.5) {
         let wp = globals.cam_local.xyz + in.rel;
