@@ -80,6 +80,9 @@ fn tag_colour(tag: &str) -> Rgb<u8> {
         "SURF-03" => Rgb([230, 80, 40]),
         "SURF-04" => Rgb([120, 130, 170]),
         "FRM-13" => Rgb([255, 240, 80]),
+        "VOID-09" => Rgb([255, 120, 0]),
+        "VOID-11" | "VOID-12" => Rgb([0, 255, 120]),
+        t if t.starts_with("VOID-") => Rgb([230, 40, 200]),
         t if t.starts_with("FRM-") => Rgb([90, 220, 255]),
         _ => Rgb([255, 0, 255]),
     }
@@ -143,6 +146,11 @@ pub fn render_content(seed: WorldSeed, view: &View) -> RgbImage {
                 let mut pieces = between_content(seed, l1);
                 pieces.extend(worldgen::l1_surface::surface_content(seed, l1));
                 pieces.extend(worldgen::l1_frame::frame_content(seed, l1));
+                pieces.extend(
+                    worldgen::l1_void::voids_of_cell(seed, l1)
+                        .into_iter()
+                        .map(|v| v.piece),
+                );
                 for (i, w) in pieces.iter().enumerate() {
                     let b = w.prim.aabb();
                     let m = |a: i32| f64::from(a) / 16.0;
@@ -182,7 +190,7 @@ pub fn render_content(seed: WorldSeed, view: &View) -> RgbImage {
 
 fn rank(tag: &str) -> u8 {
     match tag {
-        "SURF-04" => 0,
+        "SURF-04" | "VOID-01" | "VOID-02" | "VOID-03" | "VOID-09" | "VOID-10" | "VOID-13" => 0,
         "STR-11" | "STR-03" => 1,
         "STR-10" => 2,
         "STR-09" => 9,

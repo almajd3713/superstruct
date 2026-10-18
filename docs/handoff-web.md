@@ -45,9 +45,9 @@ After playing the Phase 5 build, the user found the world empty and dull: deck s
 
 The user wants wild, varied ideas, not literal readings. Their examples, and the ones in these docs, are seeds. When implementing a family, multiply its variants. When stuck for ideas, research or ask the user.
 
-## State at handoff (updated 2026-10-18, end of PW.2.5)
+## State at handoff (updated 2026-10-18, end of PW.2.6)
 
-**Done and committed:** PW.0.1–PW.0.7, PW.1.1–PW.1.3, PW.2.1–PW.2.5. `GEN_VERSION` is still 6: nothing is assembled into `l1_cell` yet (the Web L1 is assembled at PW.2.8, which bumps to 7, puts `web` back into the L0 golden digest in `crates/gen/tests/golden.rs` and regenerates the goldens). **Next item: PW.2.6** (voids), then PW.2.7, PW.2.8…; `python3 scripts/coverage.py --todo` lists it. Also open: PW.2.4b (openings and dressing on Tilted skins).
+**Done and committed:** PW.0.1–PW.0.7, PW.1.1–PW.1.3, PW.2.1–PW.2.6. `GEN_VERSION` is still 6: nothing is assembled into `l1_cell` yet (the Web L1 is assembled at PW.2.8, which bumps to 7, puts `web` back into the L0 golden digest in `crates/gen/tests/golden.rs` and regenerates the goldens). **Next item: PW.2.7** (fill field), then PW.2.8…; `python3 scripts/coverage.py --todo` lists it. Also open: PW.2.4b (openings and dressing on Tilted skins) and PW.2.6b (voids in Tilted and Vertical stacks; void mouths cut the skin).
 
 **New modules in `crates/gen/src`** (each has its spec section and tests):
 | Module | What | Spec |
@@ -56,6 +56,7 @@ The user wants wild, varied ideas, not literal readings. Their examples, and the
 | `stack.rs` | the stack of an L0 cell: crusts, Between kinds, face-keyed seams, `u_units` for Flat/Tilted/Vertical/Curved (Curved is Flat until wells, PW.6) | `regimes.md` §8 |
 | `l1_between.rs` | Between content STR-03..11 as `WebPiece { tag, prim }`; shares `Gen`, `Run`, `runs`, `begin` with the surface module | `levels.md` §4W.6.1 |
 | `l1_surface.rs` | skin plates with openings (HOR-02 as data), roofscape, ceiling-scape, skin, section cliff | `levels.md` §4W.6.2 |
+| `l1_void.rs` | voids (VOID-01..13) as keep-out data, whole per L0 cell and clipped per L1 cell; bores by line | `levels.md` §4W.3.3 |
 | `l1_frame.rs` | beams on every line, kinds, knots, mega-bridge census | `levels.md` §4W.2.1a |
 
 **Tools:** `slice --stack` (stacks) and `slice --between` (elevation of one L1 layer with Between, surface and frame pieces, one colour per ID; pieces are drawn as projected bounds). Pictures are in `out/` (git-ignored).

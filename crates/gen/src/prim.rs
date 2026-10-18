@@ -235,6 +235,8 @@ impl FeatureKind {
     pub const WINDOW: Self = Self(15);
     /// The skin of a crust and the walls of a section cliff (SURF-03, SURF-04).
     pub const SKIN: Self = Self(16);
+    /// A void: a region kept free of tissue and fill, not matter (VOID-01..13).
+    pub const VOID: Self = Self(17);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

@@ -68,6 +68,14 @@ salts! {
     BETWEEN_NET = 0x021A;
     /// `(p, q, run key)`: one underside window.
     BETWEEN_WINDOW = 0x021B;
+    /// Cell (L0) with the crust index absorbed: identity of a crust (`levels.md` §4W.3.3).
+    VOID_KEY = 0x0220;
+    /// `(x, z, crust key)`: area void sites.
+    VOID_SITE = 0x0221;
+    /// `(axis, lane, crust key)`: valleys and rifts.
+    VOID_LINE = 0x0222;
+    /// `(p, q, direction)`: bore lines.
+    VOID_BORE = 0x0223;
     /// `(which, 0, run key)`: the kind of a crust surface.
     SURFACE_KIND = 0x021C;
     /// `(p, q, run key + which)`: openings of a skin.

@@ -338,6 +338,27 @@ Each kind draws in the order: existence (by chance), then the parameters in the 
 
 **Which crust.** A valley, hall, shaft, rift or funnel belongs to one crust: the crust is drawn by `pick_weighted` over the crusts of the stack with weights proportional to crust thickness, from the void's key. The void's vertical extent follows that crust. Where the crust has the Tilted, Vertical or Curved geometry the void follows `u(p)` (it is an oriented prism in the crust's frame).
 
+#### 4W.3.3 As implemented (PW.2.6, `worldgen::l1_void`)
+
+*Flat (and Curved-as-Flat) stacks only; voids in Tilted and Vertical stacks and the skin openings that voids need are PW.2.6b. Bores do not depend on the stack and work everywhere.*
+
+**Tags.** The registry rows VOID-03..06 are a garbled list; the mapping used is: VOID-03 any variant hall, VOID-04 hypostyle forest, VOID-05 vault and cathedral, VOID-06 crush, VOID-07 stepped, VOID-08 drowned in fog (a flag for the atmosphere), VOID-02 the plain hall. VOID-14 (Cavity) is the existing L0 event (`cavity.rs`), unchanged.
+
+**Crust keys.** The crusts of an L0 cell's stack are numbered `k`; a void's crust is drawn from its key by `pick_weighted` over the crusts' thickness. `crust_key = absorb(hash(seed, 0, cell, VOID_KEY), k)`. A void's vertical extent follows its crust, clamped to the inner zone of the L0 cell (`y` local in `[4096, 28672)`), with 16 m left under each skin unless the kind opens through it.
+
+**Area voids** (halls, shafts, funnels): one site per crust per L1 column of the inner 6×6 (`x, z` index 1–6). A site draws, in order: `e = below(1000)` (exists iff `e < chance`, with `chance = 1000 · (255 − fill_crust) · 3 / 255` capped at 600), the kind (`pick_weighted([55, 25, 20])` hall, shaft, funnel), then size, variant and position from the same RNG. The footprint stays 256 m inside its L1 column, so two area voids are at least 512 m apart (rule 3). A site whose footprint (grown by 512 m) meets a line void of the same crust is dropped, its draws still made.
+- **Hall:** footprint `100 · range(3, 16)` m each way, height `4 · range(5, 31)` m; variant `pick_weighted([20, 15, 15, 10, 15, 15, 10])` plain, hypostyle, vault, cathedral, crush, stepped, drowned. Hypostyle leaves a grid of solid columns (radius 4–10 m, pitch 48–96 m); vault adds three narrower, higher tiers; cathedral adds a nave a third as wide and up to three times as tall; crush forces height 20 m and a footprint of at least 800 m; stepped is 3–5 terraces, each floor 4 m above the last; drowned is a plain hall with the fog flag.
+- **Shaft:** 64–512 m (`16 · range(4, 33)`), square or round, the crust's whole thickness (open at both surfaces).
+- **Funnel:** `n = 8 + below(9)` coaxial rings, top radius `100 · range(2, 16)`, narrowing to `top / n`, the crust's thickness deep, widest at the top.
+
+**Line voids** (one per axis and lane per crust draw): the six inner lanes of 4096 m across, along X and along Z. Each `(axis, lane)` draws a crust by thickness, a chance of 0.3, then:
+- **Valley (VOID-01):** width `100 · range(3, 21)` m, length `1000 · range(2, 25)` m (at most 24 576), start a multiple of 64 m inside the inner zone, the crust's full thickness (open at both surfaces), ends rounded by four tapering boxes.
+- **Rift (VOID-10):** width `20 + 4 · below(16)` m, length `1000 · range(1, 7)` m, tilt index `0..=6` and a lean side, in the frame `Frame::table(yaw, tilt)` with `yaw` 0 or 32 (rifts along Z) or 16 or 48 (along X) so that the long side is the frame's `z`. A third of rifts **step**: the second half is offset across by 1.5 widths.
+
+**Bore (VOID-11) and Lungs (VOID-12):** lines on the L0 lattice (pitch 16 384 m on the two other axes, so the line may be at any height) in the eight horizontal table directions. A line exists with chance `125/1000`; a segment of 65 536 m along its axis holds a bore with chance 1/2, of length `1000 · range(12, 49)` m at a multiple of 4096 m inside the segment, radius `6 + below(15)` m; it crosses L0 faces and is the same on both sides. A third of bores have Lungs: halls of `200 + 8 · below(51)` m footprint and `4 · range(5, 31)` m height centred on the axis every `1000 · (2 + below(3))` m.
+
+**Output.** `VoidPiece { piece, solid, fog }`: keep-out pieces (`FeatureKind::VOID`, no collision) and the few solids a void leaves standing (hypostyle columns). `voids_of_l0` gives the whole voids; `voids_of_cell` clips them to an L1 cell. Salts `VOID_KEY` `0x0220`, `VOID_SITE` `0x0221`, `VOID_LINE` `0x0222`, `VOID_BORE` `0x0223`.
+
 ### 4W.4 Fill field
 
 *Owner: FILL-01 (PW.2.7).*

@@ -122,17 +122,17 @@ pub struct Beam {
 
 /// Direction data with the dominant axis made positive (`spec §4W.1.1`).
 #[derive(Debug, Clone, Copy)]
-struct DirInfo {
+pub(crate) struct DirInfo {
     /// Dominant, then the two others in cyclic order.
-    a: Axis,
-    u: Axis,
-    v: Axis,
-    da: i64,
-    du: i64,
-    dv: i64,
+    pub(crate) a: Axis,
+    pub(crate) u: Axis,
+    pub(crate) v: Axis,
+    pub(crate) da: i64,
+    pub(crate) du: i64,
+    pub(crate) dv: i64,
 }
 
-fn dir_info(i: usize) -> DirInfo {
+pub(crate) fn dir_info(i: usize) -> DirInfo {
     let d = DIRS[i].map(i64::from);
     // Ties go to Y, then X, then Z.
     let a = if d[1].abs() >= d[0].abs() && d[1].abs() >= d[2].abs() {
@@ -388,7 +388,7 @@ fn span_of(
 }
 
 /// The L0 cell holding the middle of a span of a line, whose regime owns the span.
-fn span_home(info: &DirInfo, u0: i64, v0: i64, span: i64) -> I64Vec3 {
+pub(crate) fn span_home(info: &DirInfo, u0: i64, v0: i64, span: i64) -> I64Vec3 {
     let a_mid = span * SPAN + SPAN / 2;
     let u = u0 + info.du * a_mid / info.da;
     let v = v0 + info.dv * a_mid / info.da;
