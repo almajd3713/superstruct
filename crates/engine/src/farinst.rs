@@ -3,8 +3,9 @@
 //! about twenty times smaller than meshing the same primitives.
 
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
+use glam::{Mat3, Quat, Vec3};
 use worldgen::cell::Axis;
+use worldgen::orient::{LocalShape, Oriented};
 use worldgen::prim::{Primitive, Q_PER_M, Shape};
 
 use crate::mesh::Mesh;
@@ -13,6 +14,8 @@ use crate::vertex::Vertex;
 pub const UNIT_CYLINDER_SIDES: usize = 32;
 const CYLINDER_BIT: u32 = 1 << 16;
 const AXIS_SHIFT: u32 = 17;
+/// Set when `origin` and `rot` apply (an oriented primitive, `primitives.md` §9).
+const ORIENTED_BIT: u32 = 1 << 19;
 
 /// Mirrored by `FarInstance` in `scene.wgsl`.
 #[repr(C)]
@@ -23,14 +26,37 @@ pub struct FarInstance {
     /// Slot of the owning chunk in the cell table; the renderer fills it in on upload.
     pub cell: u32,
     pub size: [f32; 3],
-    /// Material in the low 16 bits, bit 16 set for a cylinder, bits 17-18 its axis.
+    /// Material in the low 16 bits, bit 16 set for a cylinder, bits 17-18 its axis, bit 19 for
+    /// an oriented primitive.
     pub meta: u32,
+    /// Frame origin, cell-local metres. Only read when bit 19 of `meta` is set.
+    pub origin: [f32; 3],
+    _pad: f32,
+    /// Frame rotation as a unit quaternion `(x, y, z, w)`. Identity for axis-aligned instances.
+    pub rot: [f32; 4],
+}
+
+impl FarInstance {
+    /// An axis-aligned instance: `min` and `size` in cell-local metres.
+    pub fn axis_aligned(min: [f32; 3], size: [f32; 3], meta: u32) -> Self {
+        Self {
+            min,
+            cell: 0,
+            size,
+            meta,
+            origin: [0.0; 3],
+            _pad: 0.0,
+            rot: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct FarData {
     pub boxes: Vec<FarInstance>,
     pub cylinders: Vec<FarInstance>,
+    /// World-space bounds of the oriented instances, which `min` and `size` do not describe.
+    pub oriented_bounds: Option<(Vec3, Vec3)>,
 }
 
 impl FarData {
@@ -51,9 +77,13 @@ impl FarData {
         let all = || self.boxes.iter().chain(&self.cylinders);
         let mut lo = Vec3::splat(f32::MAX);
         let mut hi = Vec3::splat(f32::MIN);
-        for i in all() {
+        for i in all().filter(|i| i.meta & ORIENTED_BIT == 0) {
             lo = lo.min(Vec3::from(i.min));
             hi = hi.max(Vec3::from(i.min) + Vec3::from(i.size));
+        }
+        if let Some((a, b)) = self.oriented_bounds {
+            lo = lo.min(a);
+            hi = hi.max(b);
         }
         if self.is_empty() {
             return [0.0; 4];
@@ -72,29 +102,25 @@ fn m(q: i32) -> f32 {
 pub fn far_instances(prims: &[Primitive]) -> FarData {
     let mut data = FarData::default();
     for p in prims {
+        if let Shape::Oriented(o) = p.shape {
+            push_oriented(&mut data, &o, p.material.0);
+            continue;
+        }
         let (cylinder, axis) = match p.shape {
             Shape::Cylinder { axis, .. } => (true, axis),
             Shape::LiftShaft { .. } => continue,
             _ => (false, Axis::Y),
         };
         let aabb = p.shape.aabb();
-        let axis_bits = match (cylinder, axis) {
-            (false, _) | (_, Axis::X) => 0,
-            (_, Axis::Y) => 1,
-            (_, Axis::Z) => 2,
-        };
-        let inst = FarInstance {
-            min: [m(aabb.min.x), m(aabb.min.y), m(aabb.min.z)],
-            cell: 0,
-            size: [
+        let inst = FarInstance::axis_aligned(
+            [m(aabb.min.x), m(aabb.min.y), m(aabb.min.z)],
+            [
                 m(aabb.max.x - aabb.min.x),
                 m(aabb.max.y - aabb.min.y),
                 m(aabb.max.z - aabb.min.z),
             ],
-            meta: u32::from(p.material.0)
-                | if cylinder { CYLINDER_BIT } else { 0 }
-                | (axis_bits << AXIS_SHIFT),
-        };
+            u32::from(p.material.0) | shape_bits(cylinder, axis),
+        );
         if cylinder {
             data.cylinders.push(inst);
         } else {
@@ -102,6 +128,55 @@ pub fn far_instances(prims: &[Primitive]) -> FarData {
         }
     }
     data
+}
+
+fn shape_bits(cylinder: bool, axis: Axis) -> u32 {
+    let axis_bits = match (cylinder, axis) {
+        (false, _) | (_, Axis::X) => 0,
+        (_, Axis::Y) => 1,
+        (_, Axis::Z) => 2,
+    };
+    let kind = if cylinder { CYLINDER_BIT } else { 0 };
+    kind | (axis_bits << AXIS_SHIFT)
+}
+
+/// An oriented primitive as one instance in its own frame. Boxes and cylinders are exact; ramps
+/// and stairs fall back to their local bounding box. The instance is the whole solid, not its
+/// clipped piece: neighbouring cells draw the same solid, so the overlap is identical triangles.
+fn push_oriented(data: &mut FarData, o: &Oriented, material: u16) {
+    let (cylinder, axis) = match o.local {
+        LocalShape::Cylinder { axis, .. } => (true, axis),
+        _ => (false, Axis::Y),
+    };
+    let local = o.local.aabb();
+    let [ex, ey, ez] = o.frame.axes();
+    let rot =
+        Quat::from_mat3(&Mat3::from_cols(ex.as_vec3(), ey.as_vec3(), ez.as_vec3())).normalize();
+    let origin = o.origin.to_metres();
+    let inst = FarInstance {
+        min: [m(local.min.x), m(local.min.y), m(local.min.z)],
+        cell: 0,
+        size: [
+            m(local.max.x - local.min.x),
+            m(local.max.y - local.min.y),
+            m(local.max.z - local.min.z),
+        ],
+        meta: u32::from(material) | shape_bits(cylinder, axis) | ORIENTED_BIT,
+        origin: origin.to_array(),
+        _pad: 0.0,
+        rot: rot.to_array(),
+    };
+    let b = o.aabb();
+    let (lo, hi) = (b.min.to_metres(), b.max.to_metres());
+    data.oriented_bounds = Some(match data.oriented_bounds {
+        Some((a, c)) => (a.min(lo), c.max(hi)),
+        None => (lo, hi),
+    });
+    if cylinder {
+        data.cylinders.push(inst);
+    } else {
+        data.boxes.push(inst);
+    }
 }
 
 /// A cylinder along y inside the unit box (radius 0.5), with smooth radial side normals so a
@@ -201,7 +276,7 @@ mod tests {
         assert_eq!(cyl.min, [5.0, 5.0, 0.0]);
         assert_eq!(cyl.size, [10.0, 10.0, 20.0]);
         assert_eq!(cyl.meta, 4 | CYLINDER_BIT | (2 << AXIS_SHIFT));
-        assert_eq!(data.bytes(), 64);
+        assert_eq!(data.bytes(), 128, "two 64-byte instances");
     }
 
     #[test]
@@ -213,5 +288,40 @@ mod tests {
         for v in &u.mesh.vertices {
             assert!(v.position.iter().all(|c| (-1e-5..=1.0 + 1e-5).contains(c)));
         }
+    }
+
+    #[test]
+    fn instance_is_64_bytes_like_the_shader() {
+        assert_eq!(std::mem::size_of::<FarInstance>(), 64);
+    }
+
+    #[test]
+    fn oriented_pieces_become_rotated_instances() {
+        use worldgen::orient::{Frame, LocalShape};
+        let q = |x: i32, y: i32, z: i32| QVec3::new(x * 16, y * 16, z * 16);
+        let o = Shape::oriented(
+            Frame::table(16, 0),
+            q(20, 8, 6),
+            LocalShape::Box {
+                aabb: QAabb::new(q(2, 0, 1), q(10, 4, 5)),
+            },
+            QAabb::new(q(0, 0, 0), q(64, 64, 64)),
+        );
+        let data = far_instances(&[prim(o, 3)]);
+        assert_eq!(data.boxes.len(), 1);
+        let i = data.boxes[0];
+        assert_eq!(i.meta, 3 | ORIENTED_BIT);
+        assert_eq!(i.origin, [20.0, 8.0, 6.0]);
+        assert_eq!(i.min, [2.0, 0.0, 1.0]);
+        assert_eq!(i.size, [8.0, 4.0, 4.0]);
+        // A quarter turn about +Y: local x maps to world z.
+        let r = Quat::from_array(i.rot);
+        assert!((r * Vec3::X - Vec3::Z).length() < 1e-6);
+        assert!((r * Vec3::Y - Vec3::Y).length() < 1e-6);
+        // The bounds cover the rotated box, not the unrotated min and size.
+        let s = data.bounding_sphere();
+        let c = Vec3::new(s[0], s[1], s[2]);
+        assert!((c - Vec3::new(17.0, 10.0, 12.0)).length() < s[3]);
+        assert!(s[3] > 3.0);
     }
 }

@@ -560,6 +560,179 @@ fn far_instances_draw_like_the_meshed_primitives() {
     );
 }
 
+/// PW.1.2: a test scene of oriented pieces (tilted slab, beams along table directions, a
+/// helical stair, a facet ring, a clipped beam), meshed near and drawn as far instances. The two
+/// draw the same solids; writes `out/oriented-*.png` for inspection.
+#[test]
+#[allow(clippy::too_many_lines)] // one scene, read top to bottom
+fn oriented_pieces_render_near_and_far() {
+    use engine::chunkmesh::mesh_primitives;
+    use engine::farinst::far_instances;
+    use worldgen::cell::Axis;
+    use worldgen::orient::{
+        FacetRing, Frame, HelixStair, LocalShape, Oriented, beam_cylinder, facet_ring, helix_stair,
+    };
+    use worldgen::prim::{FeatureKind, MaterialId, PrimFlags, Primitive, QAabb, QVec3, Shape};
+    const Q: i32 = 16;
+    let Some(h) = headless() else { return };
+    let qb = |lo: [i32; 3], hi: [i32; 3]| {
+        QAabb::new(
+            QVec3::new(lo[0], lo[1], lo[2]),
+            QVec3::new(hi[0], hi[1], hi[2]),
+        )
+    };
+    let cell = qb([0; 3], [64 * Q; 3]);
+    let prim = |shape, material| Primitive {
+        shape,
+        material: MaterialId(material),
+        kind: FeatureKind::MISC,
+        flags: PrimFlags::FAR_VISIBLE,
+    };
+    let at = |x: i32, y: i32, z: i32| QVec3::new(x * Q, y * Q, z * Q);
+    let mut prims = vec![
+        // The floor, axis-aligned.
+        prim(
+            Shape::Box {
+                aabb: qb([0, 0, 0], [64 * Q, Q, 64 * Q]),
+            },
+            0,
+        ),
+        // A tilted slab and a slab turned 30 degrees.
+        prim(
+            Shape::oriented(
+                Frame::table(0, 4),
+                at(4, 2, 8),
+                LocalShape::Box {
+                    aabb: qb([0, 0, 0], [16 * Q, Q / 2, 8 * Q]),
+                },
+                cell,
+            ),
+            1,
+        ),
+        prim(
+            Shape::oriented(
+                Frame::table(5, 0),
+                at(30, 1, 10),
+                LocalShape::Box {
+                    aabb: qb([0, 0, 0], [14 * Q, 2 * Q, 3 * Q]),
+                },
+                cell,
+            ),
+            4,
+        ),
+        // Beams along table directions, round and square.
+        prim(
+            beam_cylinder([1, 1, 0], at(6, 6, 30), 24 * Q, 2 * Q, cell),
+            5,
+        ),
+        prim(
+            beam_cylinder([2, 1, 1], at(8, 4, 44), 26 * Q, 3 * Q / 2, cell),
+            5,
+        ),
+        prim(
+            Shape::oriented(
+                Frame::dir([1, 0, 2]),
+                at(40, 3, 28),
+                LocalShape::Box {
+                    aabb: qb([0, -Q, -Q], [20 * Q, Q, Q]),
+                },
+                cell,
+            ),
+            1,
+        ),
+    ];
+    // A helical stair and a ring wall.
+    prims.extend(helix_stair(
+        &HelixStair {
+            axis: at(48, 1, 46),
+            inner: Q,
+            width: 3 * Q,
+            per_turn: 16,
+            steps: 56,
+            rise: 3,
+            thick: 6,
+            start: 0,
+            sense: 1,
+            material: MaterialId(1),
+            kind: FeatureKind::STAIR_TOWER,
+            flags: PrimFlags::FAR_VISIBLE,
+        },
+        cell,
+    ));
+    prims.extend(facet_ring(
+        &FacetRing {
+            axis: at(18, 1, 16),
+            radius: 6 * Q,
+            thick: Q / 2,
+            height: 3 * Q,
+            n: 16,
+            start: 0,
+            material: MaterialId(0),
+            kind: FeatureKind::MASS,
+            flags: PrimFlags::FAR_VISIBLE,
+        },
+        cell,
+    ));
+    // The same beam as a whole solid, and cut by a tighter clip (the cell's far corner).
+    let long = |clip| {
+        prim(
+            Shape::Oriented(Oriented {
+                frame: Frame::dir([1, 0, 1]),
+                origin: at(50, 8, 6),
+                local: LocalShape::Cylinder {
+                    axis: Axis::X,
+                    base: QVec3::new(0, 0, 0),
+                    length: 40 * Q,
+                    radius: 2 * Q,
+                },
+                clip,
+            }),
+            4,
+        )
+    };
+    let cut = qb([0, 0, 0], [58 * Q, 64 * Q, 64 * Q]);
+    let size = (800, 450);
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.yaw = -0.5;
+    cam.pitch = -0.35;
+    // The cell's centre 70 m ahead of the camera, along the view direction.
+    let origin = cam.pos.offset(Vec3::new(-28.0, -34.0, -92.0)).unwrap();
+    let params = FrameParams::default();
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out");
+    std::fs::create_dir_all(&out).unwrap();
+
+    // Near and far draw the same scene (with the long beam unclipped, so both draw it whole).
+    let mut whole = prims.clone();
+    whole.push(long(cell));
+    let mesh = mesh_primitives(&whole).0;
+    let mut meshed = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    meshed.set_scene(&h.device, &h.queue, &[(origin, mesh)]);
+    let near = h.render_with(&mut meshed, &cam, size, params, &[]).unwrap();
+    let mut instanced = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    instanced.upload_far_chunk(&h.queue, origin, &far_instances(&whole));
+    let far = h
+        .render_with(&mut instanced, &cam, size, params, &[])
+        .unwrap();
+    save_png(&out.join("oriented-near.png"), size.0, size.1, &near).unwrap();
+    save_png(&out.join("oriented-far.png"), size.0, size.1, &far).unwrap();
+    assert!(
+        image_diff(&near, &vec![near[0]; near.len()]).1 > 1.0,
+        "scene should not be empty"
+    );
+    // Cylinders and the helix treads differ in shading detail; the layout must agree.
+    let (_, mean) = image_diff(&near, &far);
+    assert!(mean < 6.0, "near and far differ by {mean}");
+
+    // The clipped piece: the beam is cut at x = 58 m and the cut is open (no cap).
+    let mut clipped = prims;
+    clipped.push(long(cut));
+    let mesh = mesh_primitives(&clipped).0;
+    let mut r = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    r.set_scene(&h.device, &h.queue, &[(origin, mesh)]);
+    let img = h.render_with(&mut r, &cam, size, params, &[]).unwrap();
+    save_png(&out.join("oriented-clipped.png"), size.0, size.1, &img).unwrap();
+}
+
 /// CPU time to record a frame with the whole 50 km far band resident, and GPU zone times.
 /// Run: `scripts/win.sh test --release -p engine --test render far_band_frame_cost -- --ignored --nocapture`.
 #[test]

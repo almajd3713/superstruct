@@ -529,6 +529,71 @@ pub(crate) mod tests {
         );
     }
 
+    /// A 10 m wide slab along the table direction `d`, its low end at (110, 10, 100) on the
+    /// floor, its top surface rising at the slope of `d`.
+    fn oriented_slab(d: [i8; 3]) -> Primitive {
+        use worldgen::orient::{Frame, LocalShape};
+        let q = |v: [i32; 3]| QVec3::new(v[0], v[1], v[2]);
+        shape(Shape::Oriented(worldgen::orient::Oriented {
+            frame: Frame::dir(d),
+            origin: q([110 * 16, 10 * 16, 100 * 16]),
+            local: LocalShape::Box {
+                aabb: QAabb::new(q([0, -8, -80]), q([40 * 16, 0, 80])),
+            },
+            clip: QAabb::new(q([0, 0, 0]), q([4096 * 16; 3])),
+        }))
+    }
+
+    /// TEC-05: the capsule climbs a tilted oriented slab within the slope limit and is stopped
+    /// by one steeper than 40 degrees, exactly as with the axis-aligned ramps.
+    #[test]
+    fn oriented_slabs_follow_the_slope_limit() {
+        // (2,1,0) rises 26.6 degrees; (1,1,0) rises 45.
+        let gentle = Flat(vec![floor(), oriented_slab([2, 1, 0])]);
+        let mut up = at(103.0, 10.0, 100.0);
+        run(&mut up, &gentle, 7.0, Vec3::X, true);
+        assert!(up.grounded, "{:?}", local(&up));
+        assert!(
+            local(&up).y > 16.0,
+            "gentle oriented slab not climbed: {:?}",
+            local(&up)
+        );
+        let steep = Flat(vec![floor(), oriented_slab([1, 1, 0])]);
+        let mut bad = at(103.0, 10.0, 100.0);
+        run(&mut bad, &steep, 7.0, Vec3::X, true);
+        assert!(
+            local(&bad).y < 11.0,
+            "steep oriented slab climbed: {:?}",
+            local(&bad)
+        );
+    }
+
+    /// A rotated box is a solid wall to the capsule: it cannot be walked through at an angle.
+    #[test]
+    fn rotated_walls_stop_the_capsule() {
+        use worldgen::orient::{Frame, LocalShape};
+        let q = |v: [i32; 3]| QVec3::new(v[0], v[1], v[2]);
+        // A wall 2 m thick, 4 m tall, 60 m long, turned 30 degrees about Y (heading 5.33 ~ 5).
+        let wall = shape(Shape::Oriented(worldgen::orient::Oriented {
+            frame: Frame::table(5, 0),
+            origin: q([110 * 16, 10 * 16, 100 * 16]),
+            local: LocalShape::Box {
+                aabb: QAabb::new(q([-30 * 16, 0, -16]), q([30 * 16, 4 * 16, 16])),
+            },
+            clip: QAabb::new(q([0, 0, 0]), q([4096 * 16; 3])),
+        }));
+        let w = Flat(vec![floor(), wall]);
+        let mut c = at(100.0, 10.0, 90.0);
+        run(&mut c, &w, 12.0, Vec3::new(1.0, 0.0, 1.0).normalize(), true);
+        // Still on the near side of the wall's centre line: the capsule never got through.
+        let [ex, _, ez] = worldgen::orient::Frame::table(5, 0).axes();
+        let _ = ex;
+        let n = Vec3::new(ez.x as f32, 0.0, ez.z as f32);
+        let side = (local(&c) - Vec3::new(110.0, 10.0, 100.0)).dot(n);
+        let start = (Vec3::new(100.0, 10.0, 90.0) - Vec3::new(110.0, 10.0, 100.0)).dot(n);
+        assert!(side * start > 0.0, "crossed the wall: {:?}", local(&c));
+    }
+
     #[test]
     fn gentle_ramps_are_climbed_and_steep_ones_are_not() {
         // 5 m run over 2.5 m: about 27 degrees. And 3 m run over 3.5 m: about 49 degrees.

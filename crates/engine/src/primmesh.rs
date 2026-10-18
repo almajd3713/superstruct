@@ -1,10 +1,12 @@
 //! Ramp and cylinder meshers, used by `chunkmesh` for the shapes it does not cull.
 
-use glam::Vec3;
+use glam::{Mat3, Vec3};
 use worldgen::cell::Axis;
+use worldgen::orient::Oriented;
 use worldgen::prim::{Dir4, Primitive, Q_PER_M, QAabb, QVec3, Shape};
 
 use crate::mesh::Mesh;
+use crate::vertex::{Vertex, oct_decode};
 
 /// Segments grow with radius so large trunks stay round and thin pipes stay cheap.
 #[allow(clippy::cast_sign_loss)] // clamped to 8..=48 above the cast
@@ -22,8 +24,11 @@ fn v3(q: QVec3) -> Vec3 {
 
 /// Appends `prim` to `mesh`, in cell-local metres. `LiftShaft` is not solid and adds nothing.
 pub fn add_primitive(mesh: &mut Mesh, prim: &Primitive) {
-    let material = prim.material.0;
-    match prim.shape {
+    add_shape(mesh, prim.shape, prim.material.0);
+}
+
+fn add_shape(mesh: &mut Mesh, shape: Shape, material: u16) {
+    match shape {
         Shape::Box { aabb } => add_aabb(mesh, aabb, material),
         Shape::Ramp { aabb, rise } => add_ramp(mesh, aabb, rise, material),
         Shape::Cylinder {
@@ -33,9 +38,77 @@ pub fn add_primitive(mesh: &mut Mesh, prim: &Primitive) {
             radius,
         } => add_cylinder(mesh, axis, v3(base), m(length), m(radius), material),
         Shape::StairRun { aabb, rise, steps } => add_stairs(mesh, aabb, rise, steps, material),
-        // Oriented pieces are meshed with clipping in PW.1.2; the generator emits none yet.
-        Shape::LiftShaft { .. } | Shape::Oriented(_) => {}
+        Shape::Oriented(o) => add_oriented(mesh, &o, material),
+        Shape::LiftShaft { .. } => {}
     }
+}
+
+/// An oriented shape: its mesh in the frame, turned into place and clipped to the cell box
+/// (`primitives.md` §9.4). Clipped faces get no cap: the neighbouring cell's piece of the same
+/// solid meets this one on the plane, so a cap would be an interior face.
+fn add_oriented(mesh: &mut Mesh, o: &Oriented, material: u16) {
+    let mut local = Mesh::default();
+    add_shape(&mut local, o.local.to_shape(), material);
+    let [ex, ey, ez] = o.frame.axes();
+    let rot = Mat3::from_cols(ex.as_vec3(), ey.as_vec3(), ez.as_vec3());
+    let origin = v3(o.origin);
+    let (lo, hi) = (v3(o.clip.min), v3(o.clip.max));
+    for tri in local.indices.chunks_exact(3) {
+        let v = |i: u32| local.vertices[i as usize];
+        let n = rot * oct_decode(v(tri[0]).normal);
+        let poly: Vec<Vec3> = tri
+            .iter()
+            .map(|&i| origin + rot * Vec3::from(v(i).position))
+            .collect();
+        let poly = clip_polygon(poly, lo, hi);
+        if poly.len() < 3 {
+            continue;
+        }
+        let base = mesh.vertices.len() as u32;
+        mesh.vertices
+            .extend(poly.iter().map(|&p| Vertex::new(p, n, material)));
+        for i in 1..poly.len() as u32 - 1 {
+            mesh.indices.extend([base, base + i, base + i + 1]);
+        }
+    }
+}
+
+/// Sutherland-Hodgman against the six planes of the box `[lo, hi]`. Points created on a plane
+/// get that plane's coordinate exactly, so pieces of one solid meet without cracks.
+pub fn clip_polygon(mut poly: Vec<Vec3>, lo: Vec3, hi: Vec3) -> Vec<Vec3> {
+    for axis in 0..3 {
+        for (plane, keep_above) in [(lo[axis], true), (hi[axis], false)] {
+            if poly.is_empty() {
+                return poly;
+            }
+            let inside = |p: Vec3| {
+                if keep_above {
+                    p[axis] >= plane
+                } else {
+                    p[axis] <= plane
+                }
+            };
+            let mut out = Vec::with_capacity(poly.len() + 2);
+            for i in 0..poly.len() {
+                let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+                match (inside(a), inside(b)) {
+                    (true, true) => out.push(b),
+                    (true, false) | (false, true) => {
+                        let t = (plane - a[axis]) / (b[axis] - a[axis]);
+                        let mut x = a + (b - a) * t;
+                        x[axis] = plane;
+                        out.push(x);
+                        if inside(b) {
+                            out.push(b);
+                        }
+                    }
+                    (false, false) => {}
+                }
+            }
+            poly = out;
+        }
+    }
+    poly
 }
 
 fn add_aabb(mesh: &mut Mesh, aabb: QAabb, material: u16) {
@@ -256,5 +329,129 @@ mod tests {
             }),
         );
         assert!(mesh.vertices.is_empty());
+    }
+
+    mod oriented {
+        use super::*;
+        use worldgen::orient::{Frame, LocalShape};
+
+        fn cell() -> QAabb {
+            aabb([0; 3], [64 * 16; 3])
+        }
+
+        fn beam(frame: Frame, clip: QAabb) -> Oriented {
+            Oriented {
+                frame,
+                origin: QVec3::new(32 * 16, 30 * 16, 32 * 16),
+                local: LocalShape::Box {
+                    aabb: aabb([-20 * 16, -2 * 16, -3 * 16], [20 * 16, 2 * 16, 3 * 16]),
+                },
+                clip,
+            }
+        }
+
+        fn mesh_of(o: &Oriented) -> Mesh {
+            let mut mesh = Mesh::default();
+            add_shape(&mut mesh, Shape::Oriented(*o), 0);
+            mesh
+        }
+
+        /// Every vertex lies in the clip box, and every face points out of the solid.
+        #[test]
+        fn rotated_box_is_closed_and_outward() {
+            for frame in [
+                Frame::table(5, 0),
+                Frame::table(21, 3),
+                Frame::dir([2, 1, -1]),
+                Frame::table(16, 0),
+            ] {
+                let o = beam(frame, cell());
+                let mesh = mesh_of(&o);
+                assert_eq!(mesh.indices.len(), 36, "{frame:?}: a box is 12 triangles");
+                for tri in mesh.indices.chunks(3) {
+                    let v: Vec<Vec3> = tri
+                        .iter()
+                        .map(|&i| Vec3::from(mesh.vertices[i as usize].position))
+                        .collect();
+                    let n = oct_decode(mesh.vertices[tri[0] as usize].normal);
+                    let wound = (v[1] - v[0]).cross(v[2] - v[0]).normalize();
+                    assert!(
+                        wound.dot(n) > 0.999,
+                        "{frame:?}: winding disagrees with the normal"
+                    );
+                    let c = (v[0] + v[1] + v[2]) / 3.0;
+                    assert!(o.contains(c - n * 0.02), "{frame:?}: inside is not solid");
+                    assert!(!o.contains(c + n * 0.02), "{frame:?}: outside is solid");
+                }
+            }
+        }
+
+        /// Clipped meshes stay in the box, and the two halves of one solid cover its surface
+        /// outside the cut with no overlap: the area on the cut plane is the only difference.
+        #[test]
+        fn clipping_keeps_vertices_in_the_cell() {
+            let left = aabb([0; 3], [32 * 16, 64 * 16, 64 * 16]);
+            let right = aabb([32 * 16, 0, 0], [64 * 16, 64 * 16, 64 * 16]);
+            let f = Frame::dir([2, 1, 0]);
+            let whole = mesh_of(&beam(f, cell()));
+            let (l, r) = (mesh_of(&beam(f, left)), mesh_of(&beam(f, right)));
+            for (mesh, clip) in [(&l, left), (&r, right)] {
+                for v in &mesh.vertices {
+                    let p = Vec3::from(v.position);
+                    assert!(
+                        p.cmpge(clip.min_m() - Vec3::splat(1e-4)).all()
+                            && p.cmple(clip.max_m() + Vec3::splat(1e-4)).all(),
+                        "{p} outside {clip:?}"
+                    );
+                }
+            }
+            let area = |m: &Mesh| {
+                m.indices
+                    .chunks(3)
+                    .map(|t| {
+                        let p = |i: u32| Vec3::from(m.vertices[i as usize].position);
+                        (p(t[1]) - p(t[0])).cross(p(t[2]) - p(t[0])).length() * 0.5
+                    })
+                    .sum::<f32>()
+            };
+            // The open cut faces are missing from both halves, so the two surfaces add up to the
+            // whole surface minus nothing: the whole box does not cross the plane x = 32 in a cap.
+            let (aw, al, ar) = (area(&whole), area(&l), area(&r));
+            assert!((al + ar - aw).abs() < 1e-2 * aw, "{al} + {ar} != {aw}");
+        }
+
+        #[test]
+        fn a_clip_that_misses_draws_nothing() {
+            let far = aabb([60 * 16, 0, 0], [64 * 16, 4 * 16, 4 * 16]);
+            assert!(mesh_of(&beam(Frame::table(3, 2), far)).indices.is_empty());
+        }
+
+        #[test]
+        fn cylinders_and_ramps_turn_with_the_frame() {
+            let o = Oriented {
+                frame: Frame::dir([1, 1, 0]),
+                origin: QVec3::new(10 * 16, 10 * 16, 10 * 16),
+                local: LocalShape::Cylinder {
+                    axis: worldgen::cell::Axis::X,
+                    base: QVec3::new(0, 0, 0),
+                    length: 20 * 16,
+                    radius: 2 * 16,
+                },
+                clip: cell(),
+            };
+            let mesh = mesh_of(&o);
+            assert!(!mesh.indices.is_empty());
+            // The far cap centre lies 20 m along (1,1,0)/sqrt2 from the origin.
+            let far = Vec3::splat(10.0) + Vec3::new(1.0, 1.0, 0.0).normalize() * 20.0;
+            let near = mesh
+                .vertices
+                .iter()
+                .map(|v| (Vec3::from(v.position) - far).length())
+                .fold(f32::MAX, f32::min);
+            assert!(
+                near < 2.1,
+                "no vertex within a radius of the far cap centre: {near}"
+            );
+        }
     }
 }

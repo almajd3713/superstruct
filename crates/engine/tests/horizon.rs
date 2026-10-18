@@ -269,3 +269,162 @@ fn gpu_port_matches_the_generator() {
     );
     assert!(mismatches.is_empty());
 }
+
+/// TEC-07: the WGSL SDF of an oriented box matches `Oriented::sdf` for random frames, boxes
+/// and points. Skips without a GPU adapter.
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_wrap,
+    clippy::items_after_statements
+)]
+fn gpu_oriented_box_sdf_matches_the_generator() {
+    use glam::{Mat3, Quat};
+    use worldgen::orient::{DIRS, Frame, LocalShape, Oriented, TILTS};
+    use worldgen::prim::{QAabb, QVec3};
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Pod, Zeroable)]
+    struct OBox {
+        origin: [f32; 4],
+        rot: [f32; 4],
+        centre: [f32; 4],
+        half: [f32; 4],
+        clip_min: [f32; 4],
+        clip_max: [f32; 4],
+        p: [f32; 4],
+    }
+
+    let Some(h) = Headless::new() else {
+        eprintln!("SKIPPED: no GPU adapter available");
+        return;
+    };
+    let mut rng = Rng(0x0B0C5);
+    let mut probes = Vec::new();
+    let mut want = Vec::new();
+    let v4 = |v: Vec3| [v.x, v.y, v.z, 0.0];
+    for i in 0..4000 {
+        let frame = if i % 3 == 0 {
+            Frame::dir(DIRS[rng.range(0, DIRS.len() as i64) as usize])
+        } else {
+            Frame::table(rng.range(0, 64) as u8, rng.range(0, i64::from(TILTS)) as u8)
+        };
+        let mut q = |lo: i64, hi: i64| rng.range(lo, hi) as i32;
+        let (hx, hy, hz) = (q(1, 20), q(1, 20), q(1, 20));
+        let o = Oriented {
+            frame,
+            origin: QVec3::new(q(16, 48) * 16, q(16, 48) * 16, q(16, 48) * 16),
+            local: LocalShape::Box {
+                aabb: QAabb::new(
+                    QVec3::new(-hx * 16, -hy * 16, -hz * 16),
+                    QVec3::new(hx * 16, hy * 16, hz * 16),
+                ),
+            },
+            clip: QAabb::new(QVec3::new(0, 0, 0), QVec3::new(64 * 16, 64 * 16, 64 * 16)),
+        };
+        let [ex, ey, ez] = frame.axes();
+        let rot = Quat::from_mat3(&Mat3::from_cols(ex.as_vec3(), ey.as_vec3(), ez.as_vec3()));
+        let p = Vec3::new(rng.unit() * 64.0, rng.unit() * 64.0, rng.unit() * 64.0);
+        probes.push(OBox {
+            origin: v4(o.origin.to_metres()),
+            rot: rot.to_array(),
+            centre: [0.0; 4],
+            half: [hx as f32, hy as f32, hz as f32, 0.0],
+            clip_min: [0.0; 4],
+            clip_max: [64.0, 64.0, 64.0, 0.0],
+            p: v4(p),
+        });
+        want.push(o.sdf(p));
+    }
+    let params = Params {
+        seed: [0; 2],
+        count: probes.len() as u32,
+        pad: 0,
+    };
+    let module = h.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("horizon probe"),
+        source: wgpu::ShaderSource::Wgsl(engine::horizon::probe_source().into()),
+    });
+    let pipeline = h
+        .device
+        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("oriented sdf"),
+            layout: None,
+            module: &module,
+            entry_point: Some("cs_oriented"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+    let init = |label, data: &[u8], usage| {
+        h.device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents: data,
+                usage,
+            })
+    };
+    let params_buf = init(
+        "params",
+        bytemuck::bytes_of(&params),
+        wgpu::BufferUsages::UNIFORM,
+    );
+    let boxes_buf = init(
+        "oboxes",
+        bytemuck::cast_slice(&probes),
+        wgpu::BufferUsages::STORAGE,
+    );
+    let size = (probes.len() * 4) as u64;
+    let out_buf = h.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("odist"),
+        size,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let read_buf = h.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("odist readback"),
+        size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    fn entry(binding: u32, buf: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
+        wgpu::BindGroupEntry {
+            binding,
+            resource: buf.as_entire_binding(),
+        }
+    }
+    let bg = h.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("oriented bg"),
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[
+            entry(0, &params_buf),
+            entry(3, &boxes_buf),
+            entry(4, &out_buf),
+        ],
+    });
+    let mut encoder = h
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bg, &[]);
+        pass.dispatch_workgroups((probes.len() as u32).div_ceil(64), 1, 1);
+    }
+    encoder.copy_buffer_to_buffer(&out_buf, 0, &read_buf, 0, size);
+    h.queue.submit([encoder.finish()]);
+    read_buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    let _ = h.device.poll(wgpu::PollType::wait_indefinitely());
+    let view = read_buf.slice(..).get_mapped_range().unwrap();
+    let got: &[f32] = bytemuck::cast_slice(&view);
+    let worst = got
+        .iter()
+        .zip(&want)
+        .map(|(g, w)| (g - w).abs())
+        .fold(0.0f32, f32::max);
+    assert!(worst < 2e-3, "worst GPU/CPU difference {worst} m");
+    eprintln!(
+        "oriented box sdf: worst difference {worst} m over {} probes",
+        got.len()
+    );
+}

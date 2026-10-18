@@ -422,3 +422,29 @@ fn l1_classify(d: CellData, p: vec3<f32>) -> u32 {
     }
     return 0u;
 }
+
+// ---- Oriented pieces (primitives.md §9, TEC-07) ---------------------------------------------
+// The SDF of an oriented box is the axis-aligned SDF in its frame, cut by the cell clip with
+// `max` (a lower bound). `rot` is the frame as a unit quaternion (x, y, z, w); the box is the
+// frame-local box `centre ± half`. Checked against `worldgen::orient::Oriented::sdf` in
+// `tests/horizon.rs`.
+
+fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let t = 2.0 * cross(q.xyz, v);
+    return v + q.w * t + cross(q.xyz, t);
+}
+
+fn sdf_aabb(p: vec3<f32>, centre: vec3<f32>, half_size: vec3<f32>) -> f32 {
+    let d = abs(p - centre) - half_size;
+    return length(max(d, vec3<f32>(0.0))) + min(max(d.x, max(d.y, d.z)), 0.0);
+}
+
+fn sdf_oriented_box(
+    p: vec3<f32>, origin: vec3<f32>, rot: vec4<f32>, centre: vec3<f32>, half_size: vec3<f32>,
+    clip_min: vec3<f32>, clip_max: vec3<f32>,
+) -> f32 {
+    let local = quat_rotate(vec4<f32>(-rot.xyz, rot.w), p - origin);
+    let shape = sdf_aabb(local, centre, half_size);
+    let clip = sdf_aabb(p, (clip_min + clip_max) * 0.5, (clip_max - clip_min) * 0.5);
+    return max(shape, clip);
+}

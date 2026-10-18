@@ -19,9 +19,18 @@ struct FarInstance {
     min: vec3<f32>,
     cell: u32,
     size: vec3<f32>,
-    // Material in the low 16 bits, bit 16 for a cylinder, bits 17-18 its axis (0 x, 1 y, 2 z).
+    // Material in the low 16 bits, bit 16 for a cylinder, bits 17-18 its axis (0 x, 1 y, 2 z),
+    // bit 19 for an oriented primitive: then `origin` and the quaternion `rot` apply.
     attrs: u32,
+    origin: vec3<f32>,
+    pad: f32,
+    rot: vec4<f32>,
 };
+
+fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let t = 2.0 * cross(q.xyz, v);
+    return v + q.w * t + cross(q.xyz, t);
+}
 
 @group(1) @binding(1) var<storage, read> far_instances: array<FarInstance>;
 // Camera-relative origin of each far cell, rewritten every frame.
@@ -106,7 +115,12 @@ fn vs_far(in: FarIn) -> VsOut {
             n = vec3<f32>(n.z, n.x, n.y);
         }
     }
-    let rel = far_cells[inst.cell].xyz + inst.min + p * inst.size;
+    var local = inst.min + p * inst.size;
+    if ((inst.attrs & 0x80000u) != 0u) {
+        local = inst.origin + quat_rotate(inst.rot, local);
+        n = quat_rotate(inst.rot, n);
+    }
+    let rel = far_cells[inst.cell].xyz + local;
     out.rel = rel;
     out.clip = globals.view_proj * vec4<f32>(rel, 1.0);
     out.normal = n;

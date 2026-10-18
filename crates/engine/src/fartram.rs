@@ -113,12 +113,11 @@ impl FarTrams {
                     Axis::X => Vec3::new(along, across, across),
                     _ => Vec3::new(across, across, along),
                 };
-                data.boxes.push(FarInstance {
-                    min: (off.as_vec3() - size * 0.5).to_array(),
-                    cell: 0,
-                    size: size.to_array(),
-                    meta: u32::from(MaterialId::TRAIN_LIGHT.0),
-                });
+                data.boxes.push(FarInstance::axis_aligned(
+                    (off.as_vec3() - size * 0.5).to_array(),
+                    size.to_array(),
+                    u32::from(MaterialId::TRAIN_LIGHT.0),
+                ));
             }
         }
         data
