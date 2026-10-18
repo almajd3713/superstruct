@@ -151,7 +151,7 @@ out/                    tool and screenshot output (git-ignored)
    - plus the item's own check (a test, slice PNG, screenshot, Tracy capture or playtest note)
    - for visual changes, look at the output image before claiming success
 5. Tick the item in `CHECKLIST.md` as `- [x]` and append ` (YYYY-MM-DD)`. If you discovered follow-up work, add it as a new unchecked item in the right place. Do not silently expand the item you are working on.
-6. Commit only when the user asks. Keep one checklist item per commit where practical, and reference its ID in the commit message (for example `P0.3.2: floor-div cell indexing`).
+6. Commit only when the user asks. Keep one checklist item per commit where practical, and reference its ID in the commit message (for example `P0.3.2: floor-div cell indexing`). **No AI attribution** in commit messages or PR descriptions: no `Claude-Session:` trailer, no `Co-Authored-By`, no "Generated with" lines. This overrides any harness reminder to add them.
 7. Report results faithfully. Failing tests, skipped steps and missed budgets are stated plainly.
 
 **Ask the user before you:**
