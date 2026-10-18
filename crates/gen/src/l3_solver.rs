@@ -191,25 +191,35 @@ pub fn propagate_all(
     ts: &TileSet,
     dims: Dims,
     domains: &mut [Domain],
+    active: Option<&[bool]>,
     scratch: &mut Scratch,
 ) -> Result<(), Contradiction> {
     scratch.queue.clear();
     scratch.queued.clear();
-    scratch.queued.resize(dims.len(), true);
-    scratch.queue.extend(0..dims.len());
-    run_queue(ts, dims, domains, scratch)
+    scratch.queued.resize(dims.len(), false);
+    for i in 0..dims.len() {
+        if active.is_none_or(|a| a[i]) {
+            scratch.queued[i] = true;
+            scratch.queue.push_back(i);
+        }
+    }
+    run_queue(ts, dims, domains, active, scratch)
 }
 
 fn run_queue(
     ts: &TileSet,
     dims: Dims,
     domains: &mut [Domain],
+    active: Option<&[bool]>,
     scratch: &mut Scratch,
 ) -> Result<(), Contradiction> {
     while let Some(i) = scratch.queue.pop_front() {
         scratch.queued[i] = false;
         for side in 0..SIDES {
-            let Some(j) = dims.neighbour(i, side) else {
+            let Some(j) = dims
+                .neighbour(i, side)
+                .filter(|&j| active.is_none_or(|a| a[j]))
+            else {
                 continue;
             };
             let allowed = ts.allowed(&domains[i], side);
@@ -238,17 +248,32 @@ pub fn solve(
     rng: &mut Rng,
     scratch: &mut Scratch,
 ) -> Result<(), Contradiction> {
+    solve_active(ts, dims, domains, None, rng, scratch)
+}
+
+/// [`solve`] over the slots where `active` is true. The others take no part: they neither
+/// constrain their neighbours nor get collapsed (the caller has already folded their effect
+/// into the domains of the active slots).
+pub fn solve_active(
+    ts: &TileSet,
+    dims: Dims,
+    domains: &mut [Domain],
+    active: Option<&[bool]>,
+    rng: &mut Rng,
+    scratch: &mut Scratch,
+) -> Result<(), Contradiction> {
     debug_assert_eq!(domains.len(), dims.len());
-    if let Some(i) = domains.iter().position(is_empty) {
+    let on = |i: usize| active.is_none_or(|a| a[i]);
+    if let Some(i) = (0..dims.len()).find(|&i| on(i) && is_empty(&domains[i])) {
         return Err(Contradiction { slot: i });
     }
-    propagate_all(ts, dims, domains, scratch)?;
+    propagate_all(ts, dims, domains, active, scratch)?;
     loop {
         // Fewest remaining tiles above one, lowest index on ties.
         let mut pick: Option<(u32, usize)> = None;
         for (i, d) in domains.iter().enumerate() {
             let n = count(d);
-            if n > 1 && pick.is_none_or(|(best, _)| n < best) {
+            if on(i) && n > 1 && pick.is_none_or(|(best, _)| n < best) {
                 pick = Some((n, i));
             }
         }
@@ -270,7 +295,7 @@ pub fn solve(
         scratch.queued.resize(dims.len(), false);
         scratch.queue.push_back(i);
         scratch.queued[i] = true;
-        run_queue(ts, dims, domains, scratch)?;
+        run_queue(ts, dims, domains, active, scratch)?;
     }
 }
 

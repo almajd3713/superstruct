@@ -51,9 +51,15 @@ salts! {
     VISTA = 0x0307;
     /// Keyed by `CellKey(L2)`: masses attached to trunks.
     TRUNK_MASS = 0x0308;
+    /// Keyed by `CellKey(L2)`: mass entrances.
+    MASS_ENTRANCE = 0x0309;
 
     // L3 blocks: 0x04xx
     L3_RETRY = 0x0401;
+    L3_SOLVE = 0x0402;
+    /// Keyed by the parent L2 cell: mass plans.
+    L3_MASS = 0x0403;
+    L3_PIPE = 0x0404;
 
     // L4 modules: 0x05xx
     MODULE = 0x0501;

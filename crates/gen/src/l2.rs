@@ -28,8 +28,22 @@ pub fn l2_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     l2_cell_in(seed, &L1Cache::default(), cell)
 }
 
+/// A mass of an L2 cell: its envelope box and, for a mass attached to a trunk, the entrance
+/// skywalk. In the order of the cell's `Envelope` constraints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MassInfo {
+    pub aabb: QAabb,
+    pub walk: Option<Skywalk>,
+}
+
 /// `l2_cell` reading L1 cells through `cache`.
 pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput {
+    l2_build(seed, cache, cell).0
+}
+
+/// The L2 output together with its masses, which L3 and the entrance rules need.
+#[allow(clippy::too_many_lines)] // one pipeline, read top to bottom
+pub fn l2_build(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> (CellOutput, Vec<MassInfo>) {
     debug_assert_eq!(cell.level, Level::L2);
     let c = cell.coords;
     let parent_key = CellKey::new(Level::L1, c.map(|v| floor_div_pow2(v, 3)));
@@ -109,7 +123,18 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
     let normal = masses_in(seed, cell, &parent, &corridors);
     let normal_boxes: Vec<QAabb> = normal.iter().map(Primitive::aabb).collect();
     let mut masses: Vec<Primitive> = normal;
+    let mut infos: Vec<MassInfo> = masses
+        .iter()
+        .map(|m| MassInfo {
+            aabb: m.aabb(),
+            walk: None,
+        })
+        .collect();
     for a in attached_masses(seed, cell, &parent, origin, &corridors, &normal_boxes) {
+        infos.push(MassInfo {
+            aabb: a.mass.aabb(),
+            walk: Some(a.walk),
+        });
         masses.push(a.mass);
         out.primitives.extend(a.walk.primitives());
         out.child_constraints.push(ChildConstraint::KeepOut {
@@ -130,7 +155,7 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
             port: u32::try_from(i).unwrap_or(u32::MAX),
         });
     }
-    out
+    (out, infos)
 }
 
 /// Copies the parent's sanctuary zone and flag into the child that holds it.

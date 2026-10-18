@@ -16,6 +16,8 @@ pub const STEP_UP: Q = 7;
 pub const HEADROOM: Q = 29;
 /// A surface must hold a disk of the capsule radius: 2 × 0.3 m, rounded up.
 pub const MIN_WIDTH: Q = 10;
+/// The thinnest strip fine validation may count, and only as a crossing between wide floors.
+const MIN_NARROW: Q = 4;
 /// Steepest walkable incline, `tan 40°`.
 const MAX_TAN: f64 = 0.839;
 /// Smallest stair tread, 0.25 m.
@@ -133,12 +135,139 @@ fn subtract(r: Rect, o: &Rect) -> Vec<Rect> {
     out
 }
 
+/// Solid primitives bucketed by plan position, for finding what can block a plate.
+struct PlanGrid {
+    min: (Q, Q),
+    side: usize,
+    buckets: Vec<Vec<u32>>,
+}
+
+const GRID_SHIFT: u32 = 11;
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)] // clamped bucket coordinates and primitive indices
+impl PlanGrid {
+    fn new(prims: &[Primitive], solid: impl Fn(&Primitive) -> bool) -> Self {
+        Self::from_rects(
+            prims
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| solid(p))
+                .map(|(i, p)| (i, rect_of(&p.aabb()))),
+        )
+    }
+
+    fn from_rects(items: impl Iterator<Item = (usize, Rect)>) -> Self {
+        let boxes: Vec<(usize, Rect)> = items.collect();
+        let min = boxes
+            .iter()
+            .fold((Q::MAX, Q::MAX), |m, (_, b)| (m.0.min(b.x0), m.1.min(b.z0)));
+        let max = boxes
+            .iter()
+            .fold((Q::MIN, Q::MIN), |m, (_, b)| (m.0.max(b.x1), m.1.max(b.z1)));
+        let span = ((max.0 - min.0).max(max.1 - min.1).max(0) >> GRID_SHIFT) as usize + 1;
+        let mut grid = Self {
+            min,
+            side: span,
+            buckets: vec![Vec::new(); span * span],
+        };
+        for (i, b) in &boxes {
+            let (x0, x1) = (grid.cell(b.x0, grid.min.0), grid.cell(b.x1, grid.min.0));
+            let (z0, z1) = (grid.cell(b.z0, grid.min.1), grid.cell(b.z1, grid.min.1));
+            for z in z0..=z1 {
+                for x in x0..=x1 {
+                    grid.buckets[z * grid.side + x].push(*i as u32);
+                }
+            }
+        }
+        grid
+    }
+
+    fn cell(&self, v: Q, min: Q) -> usize {
+        (((v - min).max(0)) >> GRID_SHIFT).min((self.side - 1) as i32) as usize
+    }
+
+    /// Primitives whose buckets meet `r`, unsorted and possibly repeated.
+    fn candidates(&self, r: &Rect) -> Vec<u32> {
+        let (x0, x1) = (self.cell(r.x0, self.min.0), self.cell(r.x1, self.min.0));
+        let (z0, z1) = (self.cell(r.z0, self.min.1), self.cell(r.z1, self.min.1));
+        let mut out = Vec::new();
+        for z in z0..=z1 {
+            for x in x0..=x1 {
+                out.extend_from_slice(&self.buckets[z * self.side + x]);
+            }
+        }
+        out
+    }
+}
+
+/// [`subtract`] that also tries cutting along x first and keeps the split that leaves more area
+/// in pieces wide enough to stand on. A long narrow blocker then does not shave a free strip
+/// next to it into slivers that the width filter drops.
+fn subtract_best(r: Rect, o: &Rect) -> Vec<Rect> {
+    if !overlap_area(&r, o) {
+        return vec![r];
+    }
+    let z_first = subtract(r, o);
+    let mut x_first = Vec::with_capacity(4);
+    if o.x0 > r.x0 {
+        x_first.push(Rect { x1: o.x0, ..r });
+    }
+    if o.x1 < r.x1 {
+        x_first.push(Rect { x0: o.x1, ..r });
+    }
+    let (mx0, mx1) = (r.x0.max(o.x0), r.x1.min(o.x1));
+    if o.z0 > r.z0 {
+        x_first.push(Rect {
+            z1: o.z0,
+            x0: mx0,
+            x1: mx1,
+            ..r
+        });
+    }
+    if o.z1 < r.z1 {
+        x_first.push(Rect {
+            z0: o.z1,
+            x0: mx0,
+            x1: mx1,
+            ..r
+        });
+    }
+    let kept = |v: &[Rect]| -> i64 {
+        v.iter()
+            .filter(|p| p.x1 - p.x0 >= MIN_WIDTH && p.z1 - p.z0 >= MIN_WIDTH)
+            .map(|p| i64::from(p.x1 - p.x0) * i64::from(p.z1 - p.z0))
+            .sum()
+    };
+    if kept(&x_first) > kept(&z_first) {
+        x_first
+    } else {
+        z_first
+    }
+}
+
 /// Walkable surfaces of `prims`, plus the lift platforms of their `LiftShaft`s.
 pub fn surfaces(prims: &[Primitive]) -> Vec<Plate> {
+    surfaces_with(prims, false)
+}
+
+/// [`surfaces`] with the better-fitting cuts of [`subtract_best`], for validating L3 interiors.
+/// The generator's railing pass keeps using the plain version, so its output is unchanged.
+pub fn surfaces_fine(prims: &[Primitive]) -> Vec<Plate> {
+    surfaces_with(prims, true)
+}
+
+#[allow(clippy::too_many_lines)] // one pass over the plates, then the narrow crossings
+fn surfaces_with(prims: &[Primitive], fine: bool) -> Vec<Plate> {
     let solid = |p: &Primitive| {
         !matches!(p.shape, Shape::LiftShaft { .. }) && !p.flags.contains(PrimFlags::NO_COLLIDE)
     };
     let mut plates = Vec::new();
+    let mut narrow: Vec<Plate> = Vec::new();
+    let grid = PlanGrid::new(prims, solid);
     for (i, p) in prims.iter().enumerate().filter(|(_, p)| solid(p)) {
         let bb = p.aabb();
         let (rect, y0, y1, rise) = match p.shape {
@@ -162,9 +291,14 @@ pub fn surfaces(prims: &[Primitive]) -> Vec<Plate> {
         };
         let top = y1;
         let reach = top + HEADROOM;
-        let blockers: Vec<Rect> = prims
-            .iter()
-            .enumerate()
+        // Candidates come from the plan buckets the plate touches, in primitive order, so the
+        // result is the same as scanning every primitive.
+        let mut cand = grid.candidates(&rect);
+        cand.sort_unstable();
+        cand.dedup();
+        let blockers: Vec<Rect> = cand
+            .into_iter()
+            .map(|j| (j as usize, &prims[j as usize]))
             .filter(|&(j, q)| j != i && solid(q))
             .filter(|(_, q)| {
                 let o = q.aabb();
@@ -175,7 +309,33 @@ pub fn surfaces(prims: &[Primitive]) -> Vec<Plate> {
             .collect();
         let mut pieces = vec![rect];
         for o in &blockers {
-            pieces = pieces.into_iter().flat_map(|r| subtract(r, o)).collect();
+            pieces = pieces
+                .into_iter()
+                .flat_map(|r| {
+                    if fine {
+                        subtract_best(r, o)
+                    } else {
+                        subtract(r, o)
+                    }
+                })
+                .collect();
+        }
+        if fine && rise.is_none() {
+            narrow.extend(
+                pieces
+                    .iter()
+                    .filter(|r| r.x1 - r.x0 >= MIN_NARROW && r.z1 - r.z0 >= MIN_NARROW)
+                    .filter(|r| r.x1 - r.x0 < MIN_WIDTH || r.z1 - r.z0 < MIN_WIDTH)
+                    .map(|&r| Plate {
+                        rect: r,
+                        y0,
+                        y1,
+                        rise,
+                        kind: p.kind,
+                        source: i,
+                        lift: false,
+                    }),
+            );
         }
         for r in pieces
             .into_iter()
@@ -197,9 +357,57 @@ pub fn surfaces(prims: &[Primitive]) -> Vec<Plate> {
             });
         }
     }
+    let bridged: Vec<Plate> = narrow
+        .iter()
+        .filter(|n| bridges(n, &plates))
+        .copied()
+        .collect();
+    plates.extend(bridged);
     let lifts = lift_platforms(prims, &plates);
     plates.extend(lifts);
     plates
+}
+
+fn bridges(n: &Plate, plates: &[Plate]) -> bool {
+    // A narrow strip is floor only where it joins wide floor on both of its short sides, so
+    // it is a crossing and never a ledge or a gap that hides a drop.
+    let r = n.rect;
+    let (lo, hi) = if r.x1 - r.x0 < r.z1 - r.z0 {
+        (
+            Rect {
+                x0: r.x0 - 1,
+                x1: r.x0,
+                ..r
+            },
+            Rect {
+                x0: r.x1,
+                x1: r.x1 + 1,
+                ..r
+            },
+        )
+    } else {
+        (
+            Rect {
+                z0: r.z0 - 1,
+                z1: r.z0,
+                ..r
+            },
+            Rect {
+                z0: r.z1,
+                z1: r.z1 + 1,
+                ..r
+            },
+        )
+    };
+    [lo, hi].iter().all(|probe| {
+        plates.iter().any(|w| {
+            w.rect.x0 <= probe.x1
+                && probe.x0 <= w.rect.x1
+                && w.rect.z0 <= probe.z1
+                && probe.z0 <= w.rect.z1
+                && (w.height_at(probe.x0, probe.z0) - f64::from(n.y0)).abs() <= f64::from(STEP_UP)
+        })
+    })
 }
 
 /// Re-derives `y0` and `y1` of a cut piece of a sloped plate from the whole plate's slope.
@@ -521,12 +729,24 @@ impl Nav {
         Self::from_plates(surfaces(prims))
     }
 
+    /// [`Nav::build`] over the finer plate cuts of [`surfaces_fine`].
+    pub fn build_fine(prims: &[Primitive]) -> Self {
+        Self::from_plates(surfaces_fine(prims))
+    }
+
     pub fn from_plates(plates: Vec<Plate>) -> Self {
         let n = plates.len();
         let mut parent: Vec<usize> = (0..n).collect();
         let mut edges = Vec::new();
+        // Only plates whose plan buckets meet can touch, so pairs come from the grid, in the same
+        // order as scanning every pair.
+        let grid = PlanGrid::from_rects(plates.iter().enumerate().map(|(i, p)| (i, p.rect)));
         for i in 0..n {
-            for j in i + 1..n {
+            let mut near = grid.candidates(&plates[i].rect);
+            near.retain(|&j| j as usize > i);
+            near.sort_unstable();
+            near.dedup();
+            for j in near.into_iter().map(|j| j as usize) {
                 // Lift platforms of one shaft ride to each other; a lift reaches nothing else
                 // except through the sills and decks it overlaps.
                 let ride = plates[i].lift && plates[j].lift && plates[i].source == plates[j].source;
