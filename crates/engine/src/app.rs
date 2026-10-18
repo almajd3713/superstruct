@@ -83,6 +83,10 @@ struct App {
     accumulator: f64,
     fps_window_start: Instant,
     fps_frames: u32,
+    /// Longest frame in the current one-second window, seconds.
+    worst_frame: f64,
+    /// `SUPERSTRUCT_AUTOFLY=<m/s>`: fly level along the view at a constant speed, for captures.
+    autofly: Option<f32>,
     frame_count: u64,
     quit: bool,
     /// `SUPERSTRUCT_AUTOSHOT=<n>`: screenshot after n frames, then exit. For remote runs.
@@ -153,7 +157,14 @@ impl App {
         };
         let flat = self.camera.forward_flat() * axis(Action::MoveForward, Action::MoveBack)
             + self.camera.right_flat() * axis(Action::MoveRight, Action::MoveLeft);
-        if self.fly_mode {
+        if self.fly_mode
+            && let Some(speed) = self.autofly
+        {
+            let step = self.camera.forward_flat() * speed * dt;
+            if let Ok(p) = self.camera.pos.offset(step) {
+                self.camera.pos = p;
+            }
+        } else if self.fly_mode {
             let dir = flat + Vec3::Y * axis(Action::MoveUp, Action::MoveDown);
             let boost = if grabbed && self.input.held(Action::Sprint) {
                 4.0
@@ -505,12 +516,15 @@ impl App {
 
         crate::profile::frame_mark();
         self.fps_frames += 1;
+        self.worst_frame = self.worst_frame.max(frame_time);
         let elapsed = now.duration_since(self.fps_window_start);
         if elapsed >= Duration::from_secs(1) {
             info!(
                 fps = format!("{:.1}", f64::from(self.fps_frames) / elapsed.as_secs_f64()),
+                worst_ms = format!("{:.1}", self.worst_frame * 1000.0),
                 "frame rate"
             );
+            self.worst_frame = 0.0;
             self.fps_window_start = now;
             self.fps_frames = 0;
         }
@@ -640,6 +654,10 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         accumulator: 0.0,
         fps_window_start: now,
         fps_frames: 0,
+        worst_frame: 0.0,
+        autofly: std::env::var("SUPERSTRUCT_AUTOFLY")
+            .ok()
+            .and_then(|v| v.parse().ok()),
         frame_count: 0,
         quit: false,
         autoshot_after: std::env::var("SUPERSTRUCT_AUTOSHOT")
