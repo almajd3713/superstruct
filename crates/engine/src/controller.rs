@@ -44,6 +44,8 @@ pub struct Controller {
     pub ground_normal: Vec3,
     /// Seconds spent continuously grounded.
     pub grounded_time: f32,
+    /// Velocity of the moving platform the player stands on, if any.
+    platform: Option<Vec3>,
     solids: Vec<Solid>,
 }
 
@@ -55,8 +57,15 @@ impl Controller {
             grounded: false,
             ground_normal: Vec3::Y,
             grounded_time: 0.0,
+            platform: None,
             solids: Vec::new(),
         }
+    }
+
+    /// Whether the ground underfoot belongs to a moving platform. Such spots never count as safe
+    /// ground: the platform will have moved on when you respawn there.
+    pub fn on_platform(&self) -> bool {
+        self.grounded && self.platform.is_some()
     }
 
     pub fn eye(&self) -> WorldPos {
@@ -69,6 +78,7 @@ impl Controller {
         self.vel = Vec3::ZERO;
         self.grounded = false;
         self.grounded_time = 0.0;
+        self.platform = None;
     }
 
     /// Advances by `dt` seconds. Does nothing until collision data exists around the player.
@@ -99,7 +109,8 @@ impl Controller {
         let travel = self.vel.length() * dt;
         self.solids.clear();
         src.gather(&self.pos, 3.0 + travel, &mut self.solids);
-        let mut p = Vec3::ZERO;
+        // The platform underfoot has already moved to its new place; ride along with it.
+        let mut p = self.platform.map_or(Vec3::ZERO, |v| v * dt);
         let mut disp = self.vel * dt;
         if self.grounded {
             // Follow the ground plane so slopes are climbed at walking speed.
@@ -177,13 +188,32 @@ impl Controller {
                     0.0
                 };
                 self.grounded = true;
+                self.platform = platform_under(&self.solids, *p);
             }
             _ => {
+                // Leaving a platform keeps its momentum.
+                if self.grounded
+                    && let Some(v) = self.platform
+                {
+                    self.vel += v;
+                }
                 self.grounded = false;
                 self.grounded_time = 0.0;
+                self.platform = None;
             }
         }
     }
+}
+
+/// Velocity of the moving platform just below the capsule's feet at `p`, if the ground there is
+/// one: the platform flag of the nearest solid.
+fn platform_under(solids: &[Solid], p: Vec3) -> Option<Vec3> {
+    let at = p - Vec3::Y * 0.01;
+    solids
+        .iter()
+        .map(|s| (s.shape.sdf(at - s.offset), s.platform))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .and_then(|(_, platform)| platform)
 }
 
 fn max_slope_cos() -> f32 {
@@ -307,11 +337,67 @@ pub(crate) mod tests {
             out.extend(self.0.iter().map(|p| Solid {
                 shape: p.shape,
                 offset,
+                platform: None,
             }));
         }
 
         fn ready(&self, _pos: &WorldPos) -> bool {
             true
+        }
+    }
+
+    /// A static world plus one platform whose displacement and velocity come from a function of
+    /// time. The driver advances `time` before each controller step, so the platform is already
+    /// where it will be at the end of that step.
+    pub(crate) struct Moving {
+        pub(crate) world: Vec<Primitive>,
+        pub(crate) platform: Primitive,
+        pub(crate) time: std::cell::Cell<f32>,
+        /// Time to (displacement, velocity) of the platform.
+        pub(crate) motion: Box<dyn Fn(f32) -> (Vec3, Vec3)>,
+    }
+
+    impl SolidSource for Moving {
+        fn gather(&self, centre: &WorldPos, _half: f32, out: &mut Vec<Solid>) {
+            let offset = -centre.local();
+            out.extend(self.world.iter().map(|p| Solid {
+                shape: p.shape,
+                offset,
+                platform: None,
+            }));
+            let (shift, velocity) = (self.motion)(self.time.get());
+            out.push(Solid {
+                shape: self.platform.shape,
+                offset: offset + shift,
+                platform: Some(velocity),
+            });
+        }
+
+        fn ready(&self, _pos: &WorldPos) -> bool {
+            true
+        }
+    }
+
+    impl Moving {
+        /// A 6 m by 6 m slab, 0.5 m thick with its top at y = 12, over the floor (top at y = 10),
+        /// spanning x and z from 98 to 104 m at time 0.
+        pub(crate) fn new(motion: impl Fn(f32) -> (Vec3, Vec3) + 'static) -> Self {
+            Self {
+                world: vec![floor()],
+                platform: floor_box([1568, 184, 1568], [1664, 192, 1664]),
+                time: std::cell::Cell::new(0.0),
+                motion: Box::new(motion),
+            }
+        }
+
+        pub(crate) fn shift(&self) -> Vec3 {
+            (self.motion)(self.time.get()).0
+        }
+
+        /// Advances the world by `dt`, then the controller.
+        pub(crate) fn step(&self, c: &mut Controller, dt: f32, input: MoveInput) {
+            self.time.set(self.time.get() + dt);
+            c.step(dt, input, self);
         }
     }
 
@@ -642,5 +728,109 @@ pub(crate) mod tests {
             assert!(c.pos.delta(&start).x > 10.0);
             assert!(c.pos.delta(&spot).y.abs() < 0.3);
         }
+    }
+
+    const DT: f32 = 1.0 / 120.0;
+
+    #[test]
+    fn rides_a_platform_moving_sideways() {
+        let w = Moving::new(|t| (Vec3::X * 5.0 * t, Vec3::X * 5.0));
+        let mut c = at(100.0, 12.0, 100.0);
+        for _ in 0..(4.0 / DT) as u32 {
+            w.step(&mut c, DT, MoveInput::default());
+            assert!(c.grounded && c.on_platform());
+        }
+        // 20 m along, still in the middle of the slab.
+        let rel = local(&c) - w.shift();
+        assert!(
+            (rel.x - 100.0).abs() < 0.05 && (rel.z - 100.0).abs() < 0.05,
+            "{rel:?}"
+        );
+        assert!((local(&c).y - 12.0).abs() < 0.02);
+    }
+
+    #[test]
+    fn rides_a_lift_up_and_down_without_losing_the_ground() {
+        // Up at 4 m/s for 3 s, then down at 4 m/s for 3 s.
+        let w = Moving::new(|t| {
+            if t < 3.0 {
+                (Vec3::Y * 4.0 * t, Vec3::Y * 4.0)
+            } else {
+                (
+                    Vec3::Y * (12.0 - 4.0 * (t - 3.0)).max(0.0),
+                    Vec3::NEG_Y * 4.0,
+                )
+            }
+        });
+        let mut c = at(100.0, 12.0, 100.0);
+        for _ in 0..(6.0 / DT) as u32 {
+            w.step(&mut c, DT, MoveInput::default());
+            assert!(c.grounded, "left the lift at t = {}", w.time.get());
+            let height = local(&c).y - 12.0 - w.shift().y;
+            assert!(
+                height.abs() < 0.03,
+                "{height} off the deck at t = {}",
+                w.time.get()
+            );
+        }
+        assert!((local(&c).y - 12.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn walking_on_a_platform_adds_to_its_motion() {
+        let w = Moving::new(|t| (Vec3::X * 5.0 * t, Vec3::X * 5.0));
+        let mut c = at(99.0, 12.0, 100.0);
+        for _ in 0..(2.0 / DT) as u32 {
+            w.step(
+                &mut c,
+                DT,
+                MoveInput {
+                    wish: Vec3::X,
+                    run: false,
+                },
+            );
+        }
+        // Relative to the slab the player walked at the usual speed; the controller's own
+        // velocity does not include the platform's.
+        let rel = local(&c) - w.shift();
+        assert!(rel.x - 99.0 > 1.4 && rel.x - 99.0 < 2.8, "{rel:?}");
+        assert!((c.vel.x - WALK_SPEED).abs() < 1e-3, "{:?}", c.vel);
+        assert!(c.on_platform());
+    }
+
+    #[test]
+    fn stepping_off_keeps_the_platforms_momentum() {
+        let w = Moving::new(|t| (Vec3::X * 5.0 * t, Vec3::X * 5.0));
+        let mut c = at(102.0, 12.0, 100.0);
+        let wish = MoveInput {
+            wish: Vec3::X,
+            run: false,
+        };
+        let mut left_at = None;
+        for _ in 0..(3.0 / DT) as u32 {
+            w.step(&mut c, DT, wish);
+            if left_at.is_none() && !c.grounded {
+                left_at = Some(c.vel);
+            }
+        }
+        let vel = left_at.expect("walked off the front edge");
+        assert!(vel.x > 5.0, "momentum lost: {vel:?}");
+        // The floor is 2 m below: it lands there and is no longer on a platform.
+        assert!(c.grounded && !c.on_platform(), "{:?}", local(&c));
+        assert!((local(&c).y - 10.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn rides_a_tram_at_one_hundred_metres_per_second() {
+        let w = Moving::new(|t| (Vec3::X * 100.0 * t, Vec3::X * 100.0));
+        let mut c = at(100.0, 12.0, 100.0);
+        // One step before the tram moves, so the controller already knows it stands on it.
+        c.step(DT, MoveInput::default(), &w);
+        for _ in 0..(5.0 / DT) as u32 {
+            w.step(&mut c, DT, MoveInput::default());
+            assert!(c.grounded);
+        }
+        let rel = local(&c) - w.shift();
+        assert!((rel.x - 100.0).abs() < 0.05, "{rel:?}");
     }
 }

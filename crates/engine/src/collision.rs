@@ -17,6 +17,9 @@ use crate::stream::ChunkId;
 pub struct Solid {
     pub shape: Shape,
     pub offset: Vec3,
+    /// `Some(velocity)` for a piece of a moving platform (lift cabin, tram car), even while it
+    /// is at rest; `None` for the static world. Metres per second in the query frame.
+    pub platform: Option<Vec3>,
 }
 
 /// Signed distance to the nearest solid at `p` (query frame). `+inf` when there are none.
@@ -152,6 +155,7 @@ impl SolidSource for CollisionWorld {
                     .map(|i| Solid {
                         shape: i.shape,
                         offset,
+                        platform: None,
                     }),
             );
         }

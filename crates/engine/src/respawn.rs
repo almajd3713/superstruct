@@ -136,7 +136,10 @@ impl Survival {
         if ctl.grounded {
             self.last_ground = ctl.pos;
             self.airtime = 0.0;
-            if ctl.grounded_time >= SAFE_GROUNDED_TIME && self.edge_clear(ctl, src) {
+            if ctl.grounded_time >= SAFE_GROUNDED_TIME
+                && !ctl.on_platform()
+                && self.edge_clear(ctl, src)
+            {
                 self.safe = Some(SafeSpot { pos: ctl.pos, yaw });
             }
             return false;
@@ -203,6 +206,20 @@ mod tests {
         drive(&mut c, &mut s, &w, 0.5, Vec3::ZERO);
         let safe = s.safe.expect("no safe spot after 1.4 s");
         assert!(safe.pos.delta(&c.pos).length() < 0.01);
+    }
+
+    #[test]
+    fn a_moving_platform_is_never_safe_ground() {
+        use crate::controller::tests::Moving;
+        let w = Moving::new(|t| (Vec3::X * 2.0 * t, Vec3::X * 2.0));
+        let mut c = at(100.0, 12.0, 100.0);
+        let mut s = Survival::new(c.pos);
+        for _ in 0..(4.0 / DT) as u32 {
+            w.step(&mut c, DT, MoveInput::default());
+            s.update(DT, &c, 0.0, &w);
+        }
+        assert!(c.grounded && c.grounded_time > 3.0);
+        assert!(s.safe.is_none(), "recorded a spot on a moving platform");
     }
 
     #[test]
