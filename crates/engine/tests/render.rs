@@ -534,3 +534,80 @@ fn far_instances_draw_like_the_meshed_primitives() {
         "scene should not be empty"
     );
 }
+
+/// CPU time to record a frame with the whole 50 km far band resident, and GPU zone times.
+/// Run: `scripts/win.sh test --release -p engine --test render far_band_frame_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing measurement"]
+fn far_band_frame_cost() {
+    use engine::farinst::far_instances;
+    use engine::renderer::FrameInput;
+    use worldgen::cell::{CellKey, Level};
+    use worldgen::l1::l1_far_primitives;
+    use worldgen::seed::WorldSeed;
+    let Some(h) = headless() else { return };
+    let size = (2560, 1440);
+    let cam = camera_at(I64Vec3::ZERO);
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    let mut cells = 0;
+    for z in -13..=13 {
+        for y in -13..=13 {
+            for x in -13..=13 {
+                let key = CellKey::new(Level::L1, I64Vec3::new(x, y, z));
+                let Ok(b) = key.aabb_world() else { continue };
+                let data = far_instances(&l1_far_primitives(WorldSeed(0), key));
+                renderer.upload_far_chunk(&h.queue, b.min, &data);
+                cells += 1;
+            }
+        }
+    }
+    let target = h.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("target"),
+        size: wgpu::Extent3d {
+            width: size.0,
+            height: size.1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: engine::headless::FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut cpu = Vec::new();
+    for _ in 0..60 {
+        let mut encoder = h
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let t = std::time::Instant::now();
+        renderer.render(
+            &h.queue,
+            &mut encoder,
+            &view,
+            &FrameInput {
+                camera: &cam,
+                size,
+                params: PLAIN,
+                boxes: &[],
+                timer: None,
+            },
+        );
+        cpu.push(t.elapsed().as_secs_f64() * 1000.0);
+        h.queue.submit([encoder.finish()]);
+        let _ = h.device.poll(wgpu::PollType::wait_indefinitely());
+    }
+    cpu.sort_by(f64::total_cmp);
+    eprintln!(
+        "{cells} cells, {} chunks; render() CPU median {:.3} ms, max {:.3} ms",
+        renderer.chunk_count(),
+        cpu[30],
+        cpu[59]
+    );
+    if let Some(t) = h.gpu_times(&mut renderer, &cam, size, PLAIN, 30) {
+        for (z, ms) in t {
+            eprintln!("gpu {} {ms:.3} ms", z.name());
+        }
+    }
+}

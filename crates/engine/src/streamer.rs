@@ -95,9 +95,12 @@ struct Resident {
     visible: bool,
 }
 
-/// Frames between re-ranking when the camera stays in the same L2 cell, so turning the view
-/// changes the load order.
+/// While chunks are still loading, frames between re-ranking inside the same L2 cell, so
+/// turning the view changes the load order.
 const RERANK_FRAMES: u64 = 30;
+/// With everything loaded, re-ranking only pays off after the camera moved this far (metres),
+/// since the wanted set cannot change otherwise.
+const RERANK_MOVE_M: f64 = 32.0;
 
 pub struct Streamer {
     cfg: StreamerConfig,
@@ -109,6 +112,9 @@ pub struct Streamer {
     wanted_map: HashMap<ChunkId, f32>,
     last_cell: Option<CellKey>,
     last_rank: u64,
+    last_rank_pos: Option<WorldPos>,
+    /// Visibility only depends on the wanted and resident sets, which change rarely.
+    visibility_dirty: bool,
     frame: u64,
     resident_bytes: u64,
     stats: StreamStats,
@@ -129,6 +135,8 @@ impl Streamer {
             wanted_map: HashMap::new(),
             last_cell: None,
             last_rank: 0,
+            last_rank_pos: None,
+            visibility_dirty: true,
             frame: 0,
             resident_bytes: 0,
             stats: StreamStats::default(),
@@ -168,15 +176,29 @@ impl Streamer {
         zone!("streamer update");
         self.frame += 1;
         let cell = CellKey::containing(Level::L2, cam);
-        if self.last_cell != Some(cell) || self.frame - self.last_rank >= RERANK_FRAMES {
+        let moved = self
+            .last_rank_pos
+            .is_none_or(|p| cam.delta(&p).length() >= RERANK_MOVE_M);
+        let loading = self.frame - self.last_rank >= RERANK_FRAMES && self.has_pending_work();
+        if self.last_cell != Some(cell) || moved || loading {
             self.last_cell = Some(cell);
             self.last_rank = self.frame;
+            self.last_rank_pos = Some(*cam);
+            self.visibility_dirty = true;
             self.retarget(cam, view_dir);
         }
         self.collect_finished();
         self.upload(sink);
-        self.refresh_visibility(sink);
+        if self.visibility_dirty {
+            self.visibility_dirty = false;
+            self.refresh_visibility(sink);
+        }
         self.evict(sink);
+    }
+
+    fn has_pending_work(&self) -> bool {
+        let pool = self.pool.stats();
+        !self.ready.is_empty() || pool.queued + pool.running > 0
     }
 
     /// The far band must draw exactly the structure the near band does for the same cell: when
@@ -274,6 +296,7 @@ impl Streamer {
                 );
             }
             used += bytes;
+            self.visibility_dirty = true;
             self.stats.uploads_this_frame += 1;
             self.stats.upload_bytes_this_frame = used;
             self.resident_bytes += actual;
@@ -334,6 +357,7 @@ impl Streamer {
                 self.digests.remove(&id);
                 self.resident_bytes -= r.bytes;
                 self.stats.evictions += 1;
+                self.visibility_dirty = true;
             }
         }
         if self.resident_bytes > self.cfg.memory_budget_bytes {
@@ -422,7 +446,7 @@ mod tests {
 
     #[test]
     fn fast_flythrough_stays_inside_the_memory_budget_without_stale_work() {
-        let memory = 400_000;
+        let memory = 900_000;
         let mut s = streamer(StreamerConfig {
             stream: small(),
             upload_budget_bytes: 1 << 20,
@@ -433,7 +457,7 @@ mod tests {
         let (mut x, mut sector) = (0.0_f32, 0_i64);
         let mut peak = 0;
         let mut evicted = 0;
-        for _ in 0..900 {
+        for _ in 0..2400 {
             x += 400.0 / 60.0;
             if x >= 1024.0 {
                 x -= 1024.0;
@@ -568,6 +592,19 @@ mod tests {
         eprintln!(
             "{far} chunks resident in {took:?}, {} bytes",
             st.resident_bytes
+        );
+        // Steady state: nothing arrives, the camera creeps along, so only bookkeeping remains.
+        let mut times: Vec<f64> = (0..120)
+            .map(|i| {
+                let t = Instant::now();
+                s.update(&pos(512.0 + i as f32 * 0.1, 0), Vec3::X, &mut sink);
+                t.elapsed().as_secs_f64() * 1000.0
+            })
+            .collect();
+        times.sort_by(f64::total_cmp);
+        eprintln!(
+            "steady update: median {:.3} ms, max {:.3} ms",
+            times[60], times[119]
         );
         // 50 km reached: a far cell 12 L1 cells (49 km) out along x is resident.
         let edge = ChunkId::l1(I64Vec3::new(12, 0, 0), crate::stream::Detail::Far);
