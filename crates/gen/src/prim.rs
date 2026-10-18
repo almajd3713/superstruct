@@ -221,6 +221,7 @@ impl FeatureKind {
     pub const PIPE: Self = Self(9);
     pub const SANCTUARY: Self = Self(10);
     pub const MISC: Self = Self(11);
+    pub const TRAM: Self = Self(12);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

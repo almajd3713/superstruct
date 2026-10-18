@@ -295,7 +295,12 @@ fn build(seed: WorldSeed, cache: &L1Cache, id: ChunkId, stale: &AtomicBool) -> O
         (Level::L2, Detail::Mid) => mid_primitives(l2_cell_in(seed, cache, id.key).primitives),
         (Level::L2, _) => l2_cell_in(seed, cache, id.key).primitives,
         (_, Detail::Far) => l1_far_primitives(seed, id.key),
-        _ => l1_cell(seed, id.key).primitives,
+        _ => {
+            let mut prims = l1_cell(seed, id.key).primitives;
+            // Static tram track: drawn with the L1 full chunk, never collidable.
+            prims.extend(worldgen::tram::tram_pieces(seed, id.key));
+            prims
+        }
     };
     let t1 = Instant::now();
     if stale.load(Ordering::Relaxed) {

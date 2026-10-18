@@ -622,6 +622,7 @@ Values follow the blocks in `hashing.md` §4. Port salts are defined in `ports.m
 | `SANCTUARY` | `0x0206` | cell (L1) | sanctuary existence and child choice |
 | `CORE` | `0x0207` | ColumnKey (L1) | lift core footprint and position |
 | `CAVITY_BITE` | `0x0208` | cell (L1) | rim-bite scale (§4.6) |
+| `TRAM_LINE` | `0x0209` | `LayerKey(L1, W = 4)` | tram lines per deck (`trams.md` §2.1) |
 | `MASS` | `0x0301` | cell (L2) | mass count, sizes, placement |
 | `STAIR_TOWER` | `0x0302` | ColumnSpanKey (L2) | keyed stair towers |
 | `LIFT_SHAFT` | `0x0303` | ColumnSpanKey (L2) | keyed lift shafts |

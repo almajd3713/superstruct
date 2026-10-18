@@ -285,7 +285,7 @@ Generator tests are headless and run in release. They sample with `hash(0x7A11, 
    - Zero failures are allowed.
 4. **Stations on N.** For each of those 100 lines and each station, the validator's `check_cell` passes for the L2 cell holding the station. The boarding rect's centre at `top` lies on a plate of L1 origin, in the component that holds the cell's ports.
 5. **No output change.** `golden_cells_are_unchanged` passes with `GEN_VERSION` still 3, and the salt uniqueness test passes with `TRAM_LINE`. New golden file `tests/golden/trams.txt`: digests of `tram_lines` for 100 layers and of `tram_pieces` for 100 run cells. From now on a tram output change is a `GEN_VERSION` bump.
-6. **Stats** over 10⁴ layers (printed, bounded): share of decks with a line within [0.3, 0.5], share of lines with `b − a = 3` within [0.3, 0.7], and every station spacing as in §2.4.
+6. **Stats** over 10⁴ layers (printed, bounded): share of decks with a line within [0.4, 0.55] (the chance is 0.5 and almost every deck finds a clear plane among 28), share of lines with `b − a = 3` within [0.3, 0.7], and every station spacing as in §2.4.
 
 ### 9.2 Schedule (engine, `tram.rs`)
 

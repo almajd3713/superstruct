@@ -36,6 +36,8 @@ salts! {
     /// Keyed by `ColumnKey(L1)`.
     CORE = 0x0207;
     CAVITY_BITE = 0x0208;
+    /// Keyed by `LayerKey(L1, W = 4)`: tram lines per deck.
+    TRAM_LINE = 0x0209;
 
     // L2 districts: 0x03xx
     MASS = 0x0301;
