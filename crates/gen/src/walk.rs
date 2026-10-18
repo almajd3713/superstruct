@@ -162,6 +162,13 @@ impl PlanGrid {
 
     fn from_rects(items: impl Iterator<Item = (usize, Rect)>) -> Self {
         let boxes: Vec<(usize, Rect)> = items.collect();
+        if boxes.is_empty() {
+            return Self {
+                min: (0, 0),
+                side: 1,
+                buckets: vec![Vec::new()],
+            };
+        }
         let min = boxes
             .iter()
             .fold((Q::MAX, Q::MAX), |m, (_, b)| (m.0.min(b.x0), m.1.min(b.z0)));
@@ -926,5 +933,26 @@ mod tests {
             }
         }
         assert!(cells > 300 && multi > 150, "{cells} {multi}");
+    }
+}
+
+#[cfg(test)]
+mod empty_grid_tests {
+    use super::*;
+
+    /// A cell with nothing solid used to overflow `max - min` in debug builds.
+    #[test]
+    fn a_grid_of_nothing_is_empty_and_safe() {
+        let g = PlanGrid::from_rects(std::iter::empty());
+        assert!(
+            g.candidates(&Rect {
+                x0: -5,
+                z0: -5,
+                x1: 5,
+                z1: 5
+            })
+            .is_empty()
+        );
+        assert!(surfaces(&[]).is_empty());
     }
 }
