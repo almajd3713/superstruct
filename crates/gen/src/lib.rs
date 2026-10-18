@@ -21,6 +21,7 @@ pub mod l2_port;
 pub mod l2_rail;
 pub mod l2_vista;
 pub mod l2_walk;
+pub mod l3_solver;
 pub mod port;
 pub mod prim;
 pub mod regime;

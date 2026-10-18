@@ -292,8 +292,8 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 *Phase exit:* near-band spaces read as an architected megastructure at human scale.
 
 ### P4.1 L3 blocks (bounded WFC)
-- [ ] **P4.1.1** Spec: an L3 tileset (rooms, corridors, stairwells, pipe runs, voids), connector types and the ports-to-boundary-conditions mapping. Write it in `docs/spec/levels.md`. *Done when:* the spec is complete.
-- [ ] **P4.1.2** WFC/model-synthesis solver over a fixed 8×8×8 block with fixed boundary conditions. *Done when:* unit tests on small tilesets pass.
+- [x] **P4.1.1** Spec: an L3 tileset (rooms, corridors, stairwells, pipe runs, voids), connector types and the ports-to-boundary-conditions mapping. Write it in `docs/spec/levels.md`. *Done when:* the spec is complete. (2026-10-18: `levels.md` §6; user approved the invariant 3.5 reading, `PortKind::Entrance` and the slot grid the same day.)
+- [x] **P4.1.2** WFC/model-synthesis solver over a fixed block of 8×16×8 storey slots (8 m × 4 m × 8 m, approved 2026-10-18) with fixed boundary conditions. *Done when:* unit tests on small tilesets pass. (2026-10-18: `gen::l3_solver`: bitset domains for up to 256 tiles, socket-equality adjacency, AC-3 propagation, fewest-remaining selection with index ties, one weighted draw per collapse, contradiction reporting; 7 unit tests on small tile sets including a free 81-room set. The real tileset is P4.1.3.)
 - [ ] **P4.1.3** Retry with sub-seeds (up to K attempts), then a fallback template that is always solvable. *Done when:* ≥ 99.9% of blocks solve before needing the fallback (stats over 10⁵ blocks).
 - [ ] **P4.1.4** L3 output is wired into the walkability validator. *Done when:* L3 blocks keep every port reachable (10⁴ blocks).
 - [ ] **P4.1.5** L3 performance: a block solves in under 5 ms on a worker thread. *Done when:* a benchmark records it.
