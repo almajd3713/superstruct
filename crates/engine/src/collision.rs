@@ -68,6 +68,9 @@ pub trait SolidSource {
     fn ready(&self, pos: &WorldPos) -> bool;
 }
 
+/// Extra distance, metres, within which a dynamic solid still counts as near.
+const NEAR_SLACK: f32 = 1.0;
+
 struct Item {
     min: Vec3,
     max: Vec3,
@@ -106,9 +109,19 @@ impl CollisionChunk {
     }
 }
 
+/// A moving solid owned by the game rather than by a chunk (a lift car, a tram): a shape with
+/// its minimum corner at `origin`, moving at `velocity` m/s.
+#[derive(Debug, Clone, Copy)]
+pub struct DynamicSolid {
+    pub shape: Shape,
+    pub origin: WorldPos,
+    pub velocity: Vec3,
+}
+
 #[derive(Default)]
 pub struct CollisionWorld {
     chunks: HashMap<ChunkId, CollisionChunk>,
+    dynamic: Vec<DynamicSolid>,
 }
 
 impl CollisionWorld {
@@ -124,6 +137,12 @@ impl CollisionWorld {
         self.chunks.contains_key(id)
     }
 
+    /// Replaces the moving solids. Call once per tick, after moving them and before the
+    /// controller steps, so they are where they will be at the end of that step.
+    pub fn set_dynamic(&mut self, solids: Vec<DynamicSolid>) {
+        self.dynamic = solids;
+    }
+
     pub fn len(&self) -> usize {
         self.chunks.len()
     }
@@ -136,6 +155,17 @@ impl CollisionWorld {
 impl SolidSource for CollisionWorld {
     fn gather(&self, centre: &WorldPos, half: f32, out: &mut Vec<Solid>) {
         crate::zone!("collision gather");
+        for d in &self.dynamic {
+            let reach = d.shape.aabb().max_m().max_element() + half;
+            let offset = d.origin.delta(centre).as_vec3();
+            if offset.abs().max_element() <= reach + NEAR_SLACK {
+                out.push(Solid {
+                    shape: d.shape,
+                    offset,
+                    platform: Some(d.velocity),
+                });
+            }
+        }
         for chunk in self.chunks.values() {
             // The centre in this chunk's cell-local space. Chunks far away are rejected before
             // any per-primitive work.
@@ -234,5 +264,37 @@ pub(crate) mod tests {
         };
         let c = CollisionChunk::new(WorldPos::ORIGIN, 512.0, &[p, shaft]);
         assert!(c.items.is_empty());
+    }
+
+    #[test]
+    fn dynamic_solids_are_gathered_with_their_platform_velocity() {
+        let mut world = CollisionWorld::default();
+        let origin = WorldPos::new(I64Vec3::new(1, 0, 0), Vec3::new(10.0, 20.0, 10.0)).unwrap();
+        let slab = floor_box([0, 0, 0], [160, 8, 160]).shape;
+        world.set_dynamic(vec![DynamicSolid {
+            shape: slab,
+            origin,
+            velocity: Vec3::new(0.0, 3.0, 0.0),
+        }]);
+        let centre = origin.offset(Vec3::new(5.0, 0.5, 5.0)).unwrap();
+        let mut out = Vec::new();
+        world.gather(&centre, 3.0, &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].platform, Some(Vec3::new(0.0, 3.0, 0.0)));
+        // The slab's top (0.5 m thick) is 0.5 m below... the slab spans y 0..0.5 above its
+        // origin, and the centre is at y = 0.5, so the top surface passes through the centre.
+        assert!(sdf(&out, Vec3::ZERO).abs() < 1e-5);
+        // Far from the slab, nothing.
+        let mut none = Vec::new();
+        world.gather(
+            &origin.offset(Vec3::new(200.0, 0.0, 0.0)).unwrap(),
+            3.0,
+            &mut none,
+        );
+        assert!(none.is_empty());
+        world.set_dynamic(Vec::new());
+        out.clear();
+        world.gather(&centre, 3.0, &mut out);
+        assert!(out.is_empty());
     }
 }

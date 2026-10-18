@@ -831,6 +831,13 @@ impl Renderer {
     }
 
     /// Hidden chunks stay resident but are not drawn.
+    /// Moves a chunk to a new world origin, for geometry that travels (lift cars, trams).
+    pub fn set_chunk_origin(&mut self, handle: ChunkHandle, origin: WorldPos) {
+        if let Some(c) = self.chunks.iter_mut().find(|c| c.handle == handle) {
+            c.origin = origin;
+        }
+    }
+
     /// Starts a freshly uploaded chunk invisible so it fades in.
     pub fn begin_fade_in(&mut self, handle: ChunkHandle) {
         self.set_chunk_fade_state(handle, 0.0, true);

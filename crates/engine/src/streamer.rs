@@ -179,6 +179,11 @@ impl Streamer {
         &self.collision
     }
 
+    /// For the game to place its moving solids (lift cars, trams).
+    pub fn collision_mut(&mut self) -> &mut CollisionWorld {
+        &mut self.collision
+    }
+
     pub fn is_resident(&self, id: &ChunkId) -> bool {
         self.resident.contains_key(id)
     }
