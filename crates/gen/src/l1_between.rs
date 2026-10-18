@@ -46,39 +46,39 @@ pub const STR_NET: &str = "STR-09";
 pub const STR_MACHINE: &str = "STR-10";
 pub const STR_LIGHTS: &str = "STR-11";
 
-const L1_M: i64 = 4096;
-const L0_M: i64 = 32_768;
-const Q: i64 = Q_PER_M as i64;
+pub(crate) const L1_M: i64 = 4096;
+pub(crate) const L0_M: i64 = 32_768;
+pub(crate) const Q: i64 = Q_PER_M as i64;
 
 /// One stretch of Between along the stack axis, in world metres. `lo` is the surface of the
 /// crust below, `hi` the underside of the crust above.
 #[derive(Debug, Clone, Copy)]
-struct Run {
-    key: u64,
-    kind: BetweenKind,
-    flooded: bool,
+pub(crate) struct Run {
+    pub(crate) key: u64,
+    pub(crate) kind: BetweenKind,
+    pub(crate) flooded: bool,
     /// `fill_between` of the cell that owns the key: both cells of a seam must draw alike.
-    fb: i64,
-    lo: i64,
-    hi: i64,
+    pub(crate) fb: i64,
+    pub(crate) lo: i64,
+    pub(crate) hi: i64,
 }
 
 impl Run {
-    fn depth(&self) -> i64 {
+    pub(crate) fn depth(&self) -> i64 {
         self.hi - self.lo
     }
 }
 
 /// World axes of the stack coordinates `(s, t, a)`: two across the stack and the axis along it.
 #[derive(Debug, Clone, Copy)]
-struct AxisMap {
-    s: Axis,
-    t: Axis,
-    a: Axis,
+pub(crate) struct AxisMap {
+    pub(crate) s: Axis,
+    pub(crate) t: Axis,
+    pub(crate) a: Axis,
 }
 
 impl AxisMap {
-    fn of(axis: Axis) -> Self {
+    pub(crate) fn of(axis: Axis) -> Self {
         match axis {
             Axis::Y => Self {
                 s: Axis::X,
@@ -98,12 +98,12 @@ impl AxisMap {
         }
     }
 
-    fn axes(self) -> [Axis; 3] {
+    pub(crate) fn axes(self) -> [Axis; 3] {
         [self.s, self.t, self.a]
     }
 }
 
-fn comp(v: I64Vec3, axis: Axis) -> i64 {
+pub(crate) fn comp(v: I64Vec3, axis: Axis) -> i64 {
     match axis {
         Axis::X => v.x,
         Axis::Y => v.y,
@@ -111,7 +111,7 @@ fn comp(v: I64Vec3, axis: Axis) -> i64 {
     }
 }
 
-fn unit(axis: Axis) -> I64Vec3 {
+pub(crate) fn unit(axis: Axis) -> I64Vec3 {
     match axis {
         Axis::X => I64Vec3::X,
         Axis::Y => I64Vec3::Y,
@@ -119,7 +119,7 @@ fn unit(axis: Axis) -> I64Vec3 {
     }
 }
 
-fn stack_axis(g: StackGeometry) -> Axis {
+pub(crate) fn stack_axis(g: StackGeometry) -> Axis {
     match g {
         StackGeometry::Vertical { axis: 0 } => Axis::X,
         StackGeometry::Vertical { .. } => Axis::Z,
@@ -128,7 +128,7 @@ fn stack_axis(g: StackGeometry) -> Axis {
 }
 
 /// Whether the stacks of two L0 cells that touch along `axis` share a seam Between.
-fn joins(a: StackGeometry, b: StackGeometry) -> bool {
+pub(crate) fn joins(a: StackGeometry, b: StackGeometry) -> bool {
     !matches!(a, StackGeometry::Tilted { .. })
         && !matches!(b, StackGeometry::Tilted { .. })
         && stack_axis(a) == stack_axis(b)
@@ -144,7 +144,7 @@ fn run_key(seed: WorldSeed, home: I64Vec3, index: u16) -> u64 {
 /// The Betweens of L0 cell `home`, as runs along its stack axis (spec §4W.6.1). Seam Betweens
 /// are merged with the half in the neighbouring cell when both stacks are plain, so both cells
 /// derive one run with one key.
-fn runs(seed: WorldSeed, home: I64Vec3, web: &WebFields, st: &Stack) -> Vec<Run> {
+pub(crate) fn runs(seed: WorldSeed, home: I64Vec3, web: &WebFields, st: &Stack) -> Vec<Run> {
     let axis = stack_axis(web.stack);
     let base = comp(home, axis) * L0_M;
     let mut out = Vec::new();
@@ -158,6 +158,11 @@ fn runs(seed: WorldSeed, home: I64Vec3, web: &WebFields, st: &Stack) -> Vec<Run>
         let (Stratum::Between(j), Some(kind)) = (seg.stratum, seg.kind) else {
             continue;
         };
+        // A Tilted stack wraps: its first Between is the continuation of its last one.
+        let tilted = matches!(web.stack, StackGeometry::Tilted { .. });
+        if tilted && i == 0 {
+            continue;
+        }
         let mut lo = base + i64::from(seg.start) * 64;
         let mut hi = base + i64::from(seg.end) * 64;
         let mut key = run_key(seed, home, j);
@@ -176,7 +181,10 @@ fn runs(seed: WorldSeed, home: I64Vec3, web: &WebFields, st: &Stack) -> Vec<Run>
                 }
             }
         }
-        if i + 1 == n {
+        if tilted && i + 1 == n {
+            hi = base + L0_M + i64::from(st.segments[0].depth()) * 64;
+        }
+        if !tilted && i + 1 == n {
             let above = home + unit(axis);
             let aw = regime(seed, above).web;
             if joins(web.stack, aw.stack) {
@@ -202,7 +210,7 @@ fn runs(seed: WorldSeed, home: I64Vec3, web: &WebFields, st: &Stack) -> Vec<Run>
     out
 }
 
-fn site_rng(seed: WorldSeed, p: i64, q: i64, key: u64, salt: u64) -> Rng {
+pub(crate) fn site_rng(seed: WorldSeed, p: i64, q: i64, key: u64, salt: u64) -> Rng {
     Rng::new(hash(
         seed.0,
         Level::L1,
@@ -218,24 +226,10 @@ pub fn between_content(seed: WorldSeed, l1: I64Vec3) -> Vec<WebPiece> {
 
 /// `between_content` with `fill_between` forced, for calibration tests.
 fn content(seed: WorldSeed, l1: I64Vec3, fb_override: Option<i64>) -> Vec<WebPiece> {
-    let home = l1.div_euclid(I64Vec3::splat(8));
-    let web = regime(seed, home).web;
-    let st = stack(seed, home);
-    let axis = stack_axis(web.stack);
-    let mut g = Gen {
-        seed,
-        origin: l1 * L1_M,
-        home,
-        map: AxisMap::of(axis),
-        tilt: match web.stack {
-            StackGeometry::Tilted { tilt, yaw } => Some((tilt, yaw)),
-            _ => None,
-        },
-        out: Vec::new(),
-    };
+    let (mut g, runs) = begin(seed, l1);
     let a0 = comp(g.origin, g.map.a);
     let (smin, smax) = g.shift_range();
-    for mut run in runs(seed, home, &web, &st) {
+    for mut run in runs {
         if let Some(fb) = fb_override {
             run.fb = fb;
         }
@@ -247,33 +241,56 @@ fn content(seed: WorldSeed, l1: I64Vec3, fb_override: Option<i64>) -> Vec<WebPie
     g.out
 }
 
-struct Gen {
-    seed: WorldSeed,
-    origin: I64Vec3,
-    home: I64Vec3,
-    map: AxisMap,
-    tilt: Option<(u8, u8)>,
-    out: Vec<WebPiece>,
+/// The generator state of L1 cell `l1` and the Between runs of its L0 cell.
+pub(crate) fn begin(seed: WorldSeed, l1: I64Vec3) -> (Gen, Vec<Run>) {
+    let home = l1.div_euclid(I64Vec3::splat(8));
+    let web = regime(seed, home).web;
+    let st = stack(seed, home);
+    let axis = stack_axis(web.stack);
+    let g = Gen {
+        seed,
+        origin: l1 * L1_M,
+        home,
+        map: AxisMap::of(axis),
+        tilt: match web.stack {
+            StackGeometry::Tilted { tilt, yaw } => Some((tilt, yaw)),
+            _ => None,
+        },
+        out: Vec::new(),
+        kind: None,
+    };
+    (g, runs(seed, home, &web, &st))
+}
+
+pub(crate) struct Gen {
+    pub(crate) seed: WorldSeed,
+    pub(crate) origin: I64Vec3,
+    pub(crate) home: I64Vec3,
+    pub(crate) map: AxisMap,
+    pub(crate) tilt: Option<(u8, u8)>,
+    pub(crate) out: Vec<WebPiece>,
+    /// Replaces the `FeatureKind` of the pieces pushed while set.
+    pub(crate) kind: Option<FeatureKind>,
 }
 
 type V3 = [i64; 3];
 
 impl Gen {
     /// Cell range across the stack: `[s0, s0 + 4096)` and `[t0, t0 + 4096)`.
-    fn s0(&self) -> i64 {
+    pub(crate) fn s0(&self) -> i64 {
         comp(self.origin, self.map.s)
     }
 
-    fn t0(&self) -> i64 {
+    pub(crate) fn t0(&self) -> i64 {
         comp(self.origin, self.map.t)
     }
 
-    fn a0(&self) -> i64 {
+    pub(crate) fn a0(&self) -> i64 {
         comp(self.origin, self.map.a)
     }
 
     /// How far the strata are raised at plane position `(s, t)` in world metres.
-    fn shift(&self, s: i64, t: i64) -> i64 {
+    pub(crate) fn shift(&self, s: i64, t: i64) -> i64 {
         self.tilt.map_or(0, |(tilt, yaw)| {
             tilt_shift(
                 tilt,
@@ -285,7 +302,7 @@ impl Gen {
     }
 
     /// The least and greatest shift over the cell's footprint (the shift is linear).
-    fn shift_range(&self) -> (i64, i64) {
+    pub(crate) fn shift_range(&self) -> (i64, i64) {
         let (s0, t0) = (self.s0(), self.t0());
         let v = [
             self.shift(s0, t0),
@@ -300,13 +317,13 @@ impl Gen {
     }
 
     /// Slack at the ends of a column so an oblique crust surface covers them.
-    fn margin(&self, width: i64) -> i64 {
+    pub(crate) fn margin(&self, width: i64) -> i64 {
         8 + self.tilt.map_or(0, |(t, _)| {
             i64::from(TILT_SLOPE[usize::from(t)]) * width / 128
         })
     }
 
-    fn world(&self, v: V3) -> I64Vec3 {
+    pub(crate) fn world(&self, v: V3) -> I64Vec3 {
         let mut w = I64Vec3::ZERO;
         for (axis, x) in self.map.axes().into_iter().zip(v) {
             match axis {
@@ -318,12 +335,19 @@ impl Gen {
         w
     }
 
-    fn local(&self, w: i64, axis: Axis) -> i64 {
+    pub(crate) fn local(&self, w: i64, axis: Axis) -> i64 {
         (w - comp(self.origin, axis)) * Q
     }
 
     /// A box from `lo` to `hi` in stack coordinates, trimmed to the cell.
-    fn bx(&mut self, tag: &'static str, lo: V3, hi: V3, material: MaterialId, flags: PrimFlags) {
+    pub(crate) fn bx(
+        &mut self,
+        tag: &'static str,
+        lo: V3,
+        hi: V3,
+        material: MaterialId,
+        flags: PrimFlags,
+    ) {
         let (a, b) = (self.world(lo), self.world(hi));
         let (lo, hi) = (a.min(b), a.max(b));
         let mut min = [0i32; 3];
@@ -353,7 +377,7 @@ impl Gen {
     /// A cylinder along stack axis `k` (0 = s, 1 = t, 2 = a) through `centre` (the other two
     /// coordinates), from `start` to `end` along it.
     #[allow(clippy::too_many_arguments)]
-    fn cyl(
+    pub(crate) fn cyl(
         &mut self,
         tag: &'static str,
         k: usize,
@@ -405,7 +429,7 @@ impl Gen {
     }
 
     /// A ramp or stair in stack coordinates (axis Y stacks only: `rise` is a world direction).
-    fn sloped(
+    pub(crate) fn sloped(
         &mut self,
         tag: &'static str,
         lo: V3,
@@ -432,7 +456,7 @@ impl Gen {
         self.push(tag, shape, material, FeatureKind::RAMP, PrimFlags::NONE);
     }
 
-    fn push(
+    pub(crate) fn push(
         &mut self,
         tag: &'static str,
         shape: Shape,
@@ -456,14 +480,14 @@ impl Gen {
             prim: Primitive {
                 shape,
                 material,
-                kind,
+                kind: self.kind.unwrap_or(kind),
                 flags,
             },
         });
     }
 
     /// Lattice cells `(p, q)` of pitch `pitch` that overlap the cell's footprint.
-    fn lattice(&self, pitch: i64) -> Vec<(i64, i64)> {
+    pub(crate) fn lattice(&self, pitch: i64) -> Vec<(i64, i64)> {
         let (s0, t0) = (self.s0(), self.t0());
         let (p0, p1) = (s0.div_euclid(pitch), (s0 + L1_M - 1).div_euclid(pitch));
         let (q0, q1) = (t0.div_euclid(pitch), (t0 + L1_M - 1).div_euclid(pitch));
@@ -490,7 +514,7 @@ impl Gen {
     }
 
     /// The run's extent along `a` at plane position `(s, t)`.
-    fn extent(&self, run: &Run, s: i64, t: i64) -> (i64, i64) {
+    pub(crate) fn extent(&self, run: &Run, s: i64, t: i64) -> (i64, i64) {
         let sh = self.shift(s, t);
         (run.lo + sh, run.hi + sh)
     }
@@ -1237,7 +1261,7 @@ struct Site {
     q: i64,
 }
 
-fn cell_clip() -> QAabb {
+pub(crate) fn cell_clip() -> QAabb {
     let e = (L1_M * Q) as i32;
     QAabb::new(QVec3::new(0, 0, 0), QVec3::new(e, e, e))
 }

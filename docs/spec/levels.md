@@ -462,6 +462,37 @@ All pieces are clipped to the cell (`§1.4`). Collision: tethers, drips, spires,
 
 **Budget.** A cell reads up to nine runs' lattices; the Normal case is 16 sites per run. The underside lights are the large item: at most 4096 candidate hashes per run and about 5 % of them emit. Meshing cost is measured when the Web L1 lands (PW.2.5).
 
+### 4W.6.2 Crust surfaces and the skin (PW.2.4: SURF-01..04, HOR-02)
+
+*Code: `worldgen::l1_surface`. Same keys and rules as §4W.6.1: everything hangs on a Between run and a lattice site, so every cell derives the same feature.*
+
+Every run has two surfaces: its floor `lo`, the top of the crust below, and its ceiling `hi`, the underside of the crust above. Each surface has one **kind**, drawn from the run key:
+
+| Surface | Kinds (chance) |
+|---|---|
+| Floor `lo` | Roofscape (70 %, SURF-01), Skin (30 %, SURF-04) |
+| Ceiling `hi` | Ceiling-scape (65 %, SURF-02), Skin (35 %, SURF-04) |
+
+**The skin plate.** Every surface carries a plate of 16 m, the **skin**: `[lo − 16, lo)` under a floor, `[hi, hi + 16)` over a ceiling. It is one box per cell cut into rectangles around the **openings** (below). In a Tilted stack the plate is one `Oriented` slab in the frame of the stack (`Frame::table(yaw, tilt)`). Its surface and the stack agree because `tilt_shift` uses the same `sqrt` as the frame's axes (`regimes.md` §8.2). A Tilted surface has **no openings and no dressing** yet (rotated lattices: PW.2.4b). Flat and Vertical stacks have both. **Wrap.** A Tilted stack's last Between and its first form one run across the wrap (`levels.md` §4W.6.1 runs), so no plate stands between them.
+
+**Openings (HOR-02).** Large features are L1 data: every opening wider than 32 m in a skin is decided here, and L2 may add only narrower ones (§5W.7). A lattice of pitch 1024 m in `(s, t)`; a site holds an opening with chance 0.35 (Roofscape and Ceiling-scape surfaces) or 0.2 (Skin surfaces, which are near blank); the size is `8 · range(4, 26)` m (32–200 m) square-ish, or for a Skin surface `8 · range(8, 51)` m (64–400 m); the position is any multiple of 8 m inside the lattice cell that keeps the opening inside it. The openings of a cell are available as data (`surface_openings`) for the children: they are `KeepOut`-free (they must stay open) and L2 may route through them.
+
+**Roofscape (SURF-01).** On lots of 64 m: a building with chance 0.55 (skipped if it touches an opening): footprint `8 · range(2, 8)` m, height `4 · range(1, 8)` m, one in twenty a tower of `60 + 4 · below(16)` m; a **terrace** (a second, set-back tier of footprint −12 m and `4 · range(1, 4)` m) on 60 %. **Antenna forests:** a block of 256 m draws one with chance 0.25: `6 + below(15)` masts (cylinders of radius 1 m and height `20 + below(101)` m) at positions inside the block, 30 % of them with a BEACON box of 2 m on the tip. Buildings wider than 24 m are `FAR_VISIBLE`.
+
+**Ceiling-scape (SURF-02).** Coffers: ribs hanging from the plate, 6 m wide and 10 m deep, along `s` and along `t` at every 64 m; hanging machinery (a box of `8 · range(1, 5)` m, 12–40 m deep) at chance 0.3 per 256 m block; pipe runs along `s` every 128 m (cylinders of radius 2 m, 14 m below the plate) at chance 0.5; hanging lamps (an EMISSIVE box of 2 m on a 1 m chain cylinder, 6–30 m long) at chance 0.1 per 32 m lattice site.
+
+**Skin surface (SURF-04).** Nothing but the plate and its panel seams (1 m wide strips, 1 m deep, along both axes every 128 m) and the openings.
+
+**Section cliff (SURF-03).** Where a crust is cut by a face, here an L0 side face on which the neighbour's stack has a Between (or the other side of a rift, PW.2.6, which calls the same generator), the cut is a **wall of floors**. Each cell on an L0 side face (`coordinate mod 8 ∈ {0, 7}` across a side) samples its face on a 64 m grid with both stacks: a sample is **exposed** when the point just inside is in a crust and the point just outside is not. Exposed samples are merged (down each column, then across equal columns) into rectangles, and each emits:
+- a wall plate 5 m thick set back 3 m from the face (`[F − 8, F − 3)`);
+- floor slabs, one per 4 m of height: 1 m thick, 3 m deep (`[F − 3, F)`), over the width of the rectangle;
+- lit windows on every other floor (every 8 m): EMISSIVE strips of `8 · range(2, 6)` m × 2 m × 1 m on the wall, one draw per 256 m block of the face with chance 0.3. The cliff's window draws are keyed by the face and the floor, so a cut face drawn from either cell gives the same lights.
+Nothing leaves the cell. A cliff face is generated only on the side that holds the crust, so each cut is drawn once.
+
+**Collision and flags.** The plate, buildings, ribs, wall plates and floors collide; antennas, lamps, seams, windows and pipes do not. `FAR_VISIBLE`: the plates, buildings over 24 m, cliff plates and floor slabs.
+
+**Budget.** A roofscape cell holds up to ≈ 5 000 pieces (4 096 lots), and only the cell that holds the surface draws it. A full cliff face holds about 3 000. Both are measured when the Web L1 lands (PW.2.5).
+
 ### 4W.7 Salts and draw order
 
 Salts added in the L1 block (`0x0200–0x02FF`), append-only:
@@ -480,6 +511,10 @@ Salts added in the L1 block (`0x0200–0x02FF`), append-only:
 | `BETWEEN_LIGHT` | `0x0219` | `(block p, block q, run key)` | density of a 256 m block of underside windows |
 | `BETWEEN_NET` | `0x021A` | `(p, q, run key)` | net patches |
 | `BETWEEN_WINDOW` | `0x021B` | `(p, q, run key)` | one underside window |
+| `SURFACE_KIND` | `0x021C` | `(which, 0, run key)` | kind of a surface (§4W.6.2) |
+| `SURFACE_OPENING` | `0x021D` | `(p, q, run key + which)` | openings of a skin |
+| `SURFACE_LOT` | `0x021E` | `(p, q, run key + which)` | roof lots, ceiling blocks and lamps |
+| `CLIFF_WINDOW` | `0x021F` | `(block, row, face key)` | cliff window blocks |
 | `LINE_L0` | `0x0120` | `(p, q, i)` (level 0) | Bore, Road, River lines |
 | `SPINE` | `0x0121` | ColumnKey (L0) | spine placement |
 | `WELL` | `0x0122` | cell (L0) | gravity well centres (`gravity.md`) |

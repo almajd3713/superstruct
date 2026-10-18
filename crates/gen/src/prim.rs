@@ -233,6 +233,8 @@ impl FeatureKind {
     pub const TETHER: Self = Self(13);
     pub const CABLE: Self = Self(14);
     pub const WINDOW: Self = Self(15);
+    /// The skin of a crust and the walls of a section cliff (SURF-03, SURF-04).
+    pub const SKIN: Self = Self(16);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

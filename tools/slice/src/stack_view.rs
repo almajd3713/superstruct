@@ -75,6 +75,10 @@ fn tag_colour(tag: &str) -> Rgb<u8> {
         "STR-09" => Rgb([255, 120, 120]),
         "STR-10" => Rgb([150, 110, 255]),
         "STR-11" => Rgb([255, 255, 255]),
+        "SURF-01" => Rgb([200, 150, 90]),
+        "SURF-02" => Rgb([60, 170, 170]),
+        "SURF-03" => Rgb([230, 80, 40]),
+        "SURF-04" => Rgb([120, 130, 170]),
         _ => Rgb([255, 0, 255]),
     }
 }
@@ -134,7 +138,9 @@ pub fn render_content(seed: WorldSeed, view: &View) -> RgbImage {
                     continue;
                 }
                 let origin = l1 * 4096;
-                for (i, w) in between_content(seed, l1).iter().enumerate() {
+                let mut pieces = between_content(seed, l1);
+                pieces.extend(worldgen::l1_surface::surface_content(seed, l1));
+                for (i, w) in pieces.iter().enumerate() {
                     let b = w.prim.aabb();
                     let m = |a: i32| f64::from(a) / 16.0;
                     let (wx0, wx1) = (origin.x as f64 + m(b.min.x), origin.x as f64 + m(b.max.x));
@@ -173,8 +179,8 @@ pub fn render_content(seed: WorldSeed, view: &View) -> RgbImage {
 
 fn rank(tag: &str) -> u8 {
     match tag {
-        "STR-11" => 0,
-        "STR-03" => 1,
+        "SURF-04" => 0,
+        "STR-11" | "STR-03" => 1,
         "STR-10" => 2,
         "STR-09" => 9,
         _ => 5,

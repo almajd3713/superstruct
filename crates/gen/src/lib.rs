@@ -15,6 +15,7 @@ pub mod l1_port;
 pub mod l1_query;
 pub mod l1_rim;
 pub mod l1_stair;
+pub mod l1_surface;
 pub mod l2;
 pub mod l2_attach;
 pub mod l2_column;

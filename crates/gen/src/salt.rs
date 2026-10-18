@@ -64,6 +64,14 @@ salts! {
     BETWEEN_NET = 0x021A;
     /// `(p, q, run key)`: one underside window.
     BETWEEN_WINDOW = 0x021B;
+    /// `(which, 0, run key)`: the kind of a crust surface.
+    SURFACE_KIND = 0x021C;
+    /// `(p, q, run key + which)`: openings of a skin.
+    SURFACE_OPENING = 0x021D;
+    /// `(p, q, run key + which)`: roof lots, ceiling blocks and lamps.
+    SURFACE_LOT = 0x021E;
+    /// `(block, row, face key)`: window blocks of a section cliff.
+    CLIFF_WINDOW = 0x021F;
 
     // L2 districts: 0x03xx
     MASS = 0x0301;

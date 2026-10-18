@@ -268,13 +268,16 @@ impl Stack {
 
 /// How far a Tilted stack's strata are raised at plane position `(x, z)` (metres inside the L0
 /// cell): the plane through the cell's centre leaning by slope `s/64` towards heading `yaw`.
+#[allow(clippy::cast_possible_truncation)] // a shift is below 2^20 m
 pub fn tilt_shift(tilt: u8, yaw: u8, x: i64, z: i64) -> i64 {
     let s = i64::from(TILT_SLOPE[usize::from(tilt)]);
     let (a, b) = heading(yaw);
     let (a, b) = (i64::from(a), i64::from(b));
-    let len = (a * a + b * b).isqrt();
-    let along = a * (x - HALF_M) + b * (z - HALF_M);
-    (s * along).div_euclid(64 * len)
+    // The heading's length is the one `sqrt` of the frame `Frame::table(yaw, tilt)`, so a skin
+    // slab in that frame lies on the surface of the stack (`primitives.md` §9.1).
+    let len = ((a * a + b * b) as f64).sqrt();
+    let along = (a * (x - HALF_M) + b * (z - HALF_M)) as f64;
+    (s as f64 * along / (64.0 * len)).floor() as i64
 }
 
 /// `oct3` of `gravity.md` §2: `max(m∞, 4·S/7)`.
