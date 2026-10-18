@@ -214,3 +214,24 @@ fn gpu_culling_matches_the_cpu_frustum() {
         .unwrap();
     assert_eq!(renderer.read_visible_count(&h.device), expected);
 }
+
+#[test]
+fn direct_and_indirect_draw_paths_render_identically() {
+    let Some(h) = headless() else { return };
+    let size = (160, 90);
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = cam.pos.offset(Vec3::new(0.0, 1.65, -54.0)).unwrap();
+    cam.yaw = std::f32::consts::PI;
+    let scene = demo_scene_at(I64Vec3::ZERO);
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    let params = FrameParams::default();
+    let indirect = h
+        .render_with(&mut renderer, &cam, size, params, &[])
+        .unwrap();
+    renderer.set_force_direct(true);
+    let direct = h
+        .render_with(&mut renderer, &cam, size, params, &[])
+        .unwrap();
+    assert_eq!(image_diff(&indirect, &direct), (0, 0.0));
+}

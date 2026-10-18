@@ -209,6 +209,8 @@ pub struct Renderer {
     cull: CullPass,
     /// Whether indirect draws may use a non-zero first instance.
     indirect_first_instance: bool,
+    /// Debug override: draw with plain `draw_indexed` even when indirect draws are available.
+    force_direct: bool,
     scene_layout: wgpu::PipelineLayout,
     lines_layout: wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
@@ -346,6 +348,7 @@ impl Renderer {
             ),
             instances_buf,
             indirect_buf,
+            force_direct: false,
             indirect_first_instance: device
                 .features()
                 .contains(wgpu::Features::INDIRECT_FIRST_INSTANCE),
@@ -464,6 +467,11 @@ impl Renderer {
             p.vertices.free(c.vertices);
             p.indices.free(c.indices);
         }
+    }
+
+    /// Switches between the indirect path and the direct fallback, which must look the same.
+    pub fn set_force_direct(&mut self, on: bool) {
+        self.force_direct = on;
     }
 
     /// Instances that survived frustum culling in the last submitted frame. Blocks on the GPU;
@@ -691,7 +699,7 @@ impl Renderer {
                 let page = &self.pages[run.page];
                 pass.set_vertex_buffer(0, page.vertex_buf.slice(..));
                 pass.set_index_buffer(page.index_buf.slice(..), wgpu::IndexFormat::Uint32);
-                if self.indirect_first_instance {
+                if self.indirect_first_instance && !self.force_direct {
                     pass.multi_draw_indexed_indirect(
                         &self.indirect_buf,
                         u64::from(run.start) * stride,
