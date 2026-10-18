@@ -372,7 +372,7 @@ The design is in `docs/proposals/the-web.md` (architecture) and `docs/proposals/
 *Phase exit (PW.12):* walking feels like an endless dense web on every axis, with rare long views, and every far landmark reached holds something new. 🎮
 
 ### PW.0 Specs (before any code)
-- [ ] **PW.0.1** `regimes.md`: strata (orientation, crust thickness, Between depth), stratum character, fill, weave, grain, orientation policy, form, support and path palettes per style. *Done when:* the spec has the fields, ranges and draw order.
+- [x] **PW.0.1** `regimes.md`: strata (orientation, crust thickness, Between depth), stratum character, fill, weave, grain, orientation policy, form, support and path palettes per style. *Done when:* the spec has the fields, ranges and draw order. (2026-10-18)
 - [x] **PW.0.2** `primitives.md` and `hashing.md`: integer orientations from constant tables, oriented shapes, clip boxes, SDF, and a proof that no transcendental function runs in `gen`. *Done when:* the spec covers them, and axis-aligned output is shown to be unchanged. (2026-10-18)
 - [x] **PW.0.3** `levels.md` §3–4 and `ports.md` §6: strata, Frame (line keys, oblique beams, knots), voids, fill field, arteries, Roads and Spines, and the new backbone connectivity argument. *Done when:* the lemmas are written and the lift-core guarantee is replaced. (2026-10-18)
 - [x] **PW.0.4** `levels.md` §5: tissue order (reserve, route, grow, dress), supports, forms, path types, engulfable routes, the dead-end payoff rule, skin coverage, ID tagging. *Done when:* the framework is specified; individual catalogue entries are specified by the items that own them. (2026-10-18)
