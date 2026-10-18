@@ -22,6 +22,7 @@ use crate::camera::Camera;
 use crate::cellscene::busiest_l2_cell;
 use crate::controller::{Controller, EYE_HEIGHT, MoveInput};
 use crate::debugcmd::Command;
+use crate::fartram::FarTrams;
 use crate::gpu::{Gpu, GpuError};
 use crate::gpu_timer::GpuTimer;
 use crate::input::{Action, Bindings, InputState};
@@ -92,6 +93,7 @@ struct App {
     beacon_draw: BeaconDraw,
     trams: TramSystem,
     tram_draw: TramDraw,
+    far_trams: FarTrams,
     /// `SUPERSTRUCT_TRAM=auto`: a scripted ride for hitch captures.
     tram_auto: Option<TramAuto>,
     lift_results_tx: crossbeam_channel::Sender<PlanResult>,
@@ -633,6 +635,13 @@ impl App {
             &self.trams,
             &render_camera.pos,
         );
+        self.far_trams.update(
+            &mut running.renderer,
+            &running.gpu.queue,
+            WorldSeed(self.settings.seed),
+            self.trams.time(),
+            &render_camera.pos,
+        );
         self.parts_ms[2] = t_draws.elapsed().as_secs_f64() * 1000.0;
         self.box_scratch.clear();
         if self.debug_boxes {
@@ -925,6 +934,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         beacon_draw: BeaconDraw::default(),
         trams: TramSystem::new(WorldSeed(settings_seed)),
         tram_draw: TramDraw::default(),
+        far_trams: FarTrams::default(),
         tram_auto: (std::env::var("SUPERSTRUCT_TRAM").as_deref() == Ok("auto"))
             .then(|| TramAuto::new(WorldSeed(settings_seed))),
         lift_results_tx,

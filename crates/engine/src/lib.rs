@@ -15,6 +15,7 @@ pub mod cull;
 pub mod debugcmd;
 pub mod demo;
 pub mod farinst;
+pub mod fartram;
 pub mod fasthash;
 pub mod gpu;
 pub mod gpu_timer;

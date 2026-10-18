@@ -267,7 +267,7 @@ At 100 m/s the camera crosses the 1024 m L2 full radius in about 10 s, and a 512
 
 ## 8. Horizon and far band
 
-Rails, strips and station marks are `NO_COLLIDE` and not `FAR_VISIBLE`. They are drawn only by the L1 full chunk (within 4 km), never by the far band or the SDF horizon. Cars are drawn only for attached sessions (within 4 km). **Explicit limitation:** a line cannot be seen from more than 4 km away. This is consistent with the horizon promise, which covers far-visible structure: nothing seen from afar changes up close, and a line only appears as near detail, like narrow bridges or core walls. Slow lights moving far away are P5.2.5.
+Rails, strips and station marks are `NO_COLLIDE` and not `FAR_VISIBLE`. They are drawn only by the L1 full chunk (within 4 km), never by the far band or the SDF horizon. Cars are drawn only for attached sessions (within 4 km). **Explicit limitation:** a line cannot be seen from more than 4 km away. This is consistent with the horizon promise, which covers far-visible structure: nothing seen from afar changes up close, and a line only appears as near detail, like narrow bridges or core walls. Slow lights moving far away are P5.2.5: the cars of lines 3.5 to 60 km away are drawn as growing light blocks from the same schedule (`engine::fartram`), so the lights are the trams you can ride.
 
 ## 9. Tests that define "done"
 

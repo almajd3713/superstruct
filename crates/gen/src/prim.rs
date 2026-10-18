@@ -203,6 +203,8 @@ impl MaterialId {
     pub const WARM: Self = Self(5);
     /// Player beacons: drawn by the engine, mostly through fog. Never emitted by the generator.
     pub const BEACON: Self = Self(6);
+    /// Far light trains: drawn by the engine, mostly through haze. Never emitted by the generator.
+    pub const TRAIN_LIGHT: Self = Self(7);
 }
 
 /// What a primitive belongs to. Append-only.

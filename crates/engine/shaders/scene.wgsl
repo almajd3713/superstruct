@@ -205,6 +205,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (in.material == 6u) {
         // Beacons stay readable through the haze.
         colour = mix(colour, globals.materials[6].rgb * 1.5, 0.9);
+    } else if (in.material == 7u) {
+        // So do the lights of far trains, a little fainter.
+        colour = mix(colour, globals.materials[7].rgb * 1.2, 0.75);
     }
     return vec4<f32>(colour, 1.0);
 }

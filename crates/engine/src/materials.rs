@@ -37,6 +37,7 @@ pub const TABLE: [Material; SLOTS] = {
     t[MaterialId::PIPE.0 as usize] = m([0.27, 0.29, 0.29], 0.55, 0.0);
     t[MaterialId::WARM.0 as usize] = m([0.62, 0.46, 0.3], 0.8, 0.25);
     t[MaterialId::BEACON.0 as usize] = m([1.0, 0.8, 0.45], 1.0, 1.0);
+    t[MaterialId::TRAIN_LIGHT.0 as usize] = m([0.75, 0.9, 1.0], 1.0, 1.0);
     t
 };
 
@@ -65,6 +66,7 @@ mod tests {
             MaterialId::PIPE,
             MaterialId::WARM,
             MaterialId::BEACON,
+            MaterialId::TRAIN_LIGHT,
         ] {
             let mat = TABLE[usize::from(id.0)];
             assert_ne!(mat, FALLBACK, "id {} has no entry", id.0);
@@ -93,9 +95,14 @@ mod tests {
     fn only_the_emissive_materials_glow() {
         for (i, mat) in TABLE.iter().enumerate() {
             let glows = mat.emissive > 0.0;
-            let expect = [MaterialId::EMISSIVE, MaterialId::WARM, MaterialId::BEACON]
-                .iter()
-                .any(|m| usize::from(m.0) == i);
+            let expect = [
+                MaterialId::EMISSIVE,
+                MaterialId::WARM,
+                MaterialId::BEACON,
+                MaterialId::TRAIN_LIGHT,
+            ]
+            .iter()
+            .any(|m| usize::from(m.0) == i);
             assert_eq!(glows, expect, "id {i}");
         }
     }
