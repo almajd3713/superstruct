@@ -35,7 +35,30 @@ How the player moves, and the dimensions the generator must respect so that ever
 
 If a jump is wanted later, a small hop (0.5 m apex) is the conservative choice. It would not change any generator dimension.
 
+### 2.2 Climbing (PW.0.6; CLB-01..07)
+
+*The user approved ladders at 0.8 m/s on 2026-10-18; speeds are tunable later. Crouch height 1.2 m is still provisional.*
+
+There is no new button.
+
+| Parameter | Value | Notes |
+|---|---|---|
+| Start (CLB-01) | walk into a ladder while facing it | within 0.5 m of the ladder's face, the view within 50° of the ladder's normal |
+| Move (CLB-02) | forward moves you along the view's component on the ladder axis | looking up climbs, looking down descends; backward is the opposite; sideways is ignored |
+| Climb speed (CLB-05) | **0.8 m/s** | for rungs and staples; ship's ladders (60–70°) 1.0 m/s along the slope; chain ladders 0.6 m/s |
+| Ends (CLB-03) | reaching the top or bottom steps the player off onto the landing | a short scripted step of 0.6 m over 0.4 s, onto a landing at least 1.2 × 1.2 m |
+| No falls (CLB-04) | leaving a ladder mid-way is impossible | the only exits are the two ends. Movement keys that do not move along the ladder do nothing |
+| Rests (CLB-06) | a rest cage or platform every ≤ 30 m | the generator places one when a ladder is longer than 30 m (`levels.md` §4W.5.3, ladder chain, and L4) |
+| Ladder dimensions | rung spacing 0.30 m; clear width 0.5–0.8 m; cage inner radius 0.45 m; clearance in front of the rungs ≥ 0.7 m | generator-facing (§6) |
+| Capsule on a ladder | held 0.4 m from the rungs, upright along the local up | collision against the walls is off while on the ladder; the cage is a visual |
+
+A ladder is a line of climb points with an axis and two end landings (a **ladder segment**). The ladder families (LAD-01..15) are built from segments; nothing about the mechanic depends on the family. A ladder in a gravity gate (LAD-14) or in a lull tube (LAD-15) follows the local `up` (`gravity.md`).
+
+**Auto-crouch (CLB-07).** Where the clear height is below 1.9 m the capsule shrinks to **1.2 m** by itself, with eye height 1.05 m and a walk speed of 0.9 m/s *(provisional)*. It stands up again when the clear height allows 1.8 m. Crawl ducts, vents and gaps under machines have a clear height of **at least 1.3 m** (the generator minimum, §6); between 1.3 and 1.9 m the player crouches. Below 1.3 m a passage is not walkable and the generator never makes one (`primitives.md` §6 clearance rule, per capsule height 1.2 m + 0.1 m).
+
 ## 3. Falling and death
+
+**With gravity wells** the fall rule is measured along the local down and scaled by the field's strength (`gravity.md` §7). The numbers below are for standard gravity, the default field; a fall in another field accumulates the fall energy `e = Σ strength/256 · Δ(distance along down)` and dies at `e > 15 m`.
 
 | Parameter | Value | Notes |
 |---|---|---|
@@ -81,3 +104,6 @@ Derived from §1 and §2. The generator uses these (`levels.md`, `ports.md`), so
 | Stair tower rise / tread | 0.125 m / 0.3125 m (2 Q / 5 Q) | towers only (`levels.md` §5.2): a 4 m flight must divide the L2 cell, which 3 Q steps cannot |
 | Guarded-edge threshold | drop > 15 m | equals the fall-death height |
 | Narrowest walkable patch | must contain a disk of radius 0.3 m | `primitives.md` §6 |
+| Crawl duct clear height | ≥ 1.3 m (crouch 1.2 m + 0.1 m) | §2.2; a duct under 1.9 m makes the player crouch |
+| Ladder | rung spacing 0.30 m, clear width 0.5–0.8 m, landing ≥ 1.2 × 1.2 m, rest every ≤ 30 m | §2.2 |
+| Walkable "up" | the local `up` of `gravity.md` §1; slopes and step-up are measured against it, and a surface is not walkable where the field strength is below 64/256 | `gravity.md` §6 |
