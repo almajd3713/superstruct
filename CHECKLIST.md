@@ -330,7 +330,7 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [ ] **P5.2.1** Sanctuary interiors: warm low light, props (bench, plants, lamp), framed vista. *Done when:* 🎮 the user reviews one in game. (2026-10-18: built, awaiting review. `worldgen::sanctuary_room` puts a 24 m `WARM` room, 6 m high, 4 m inside the zone (door 3 m wide on a random side, 12 m vista opening opposite) into the L2 cell; `l4::sanctuary_modules` adds two benches facing the opening, four plants and two warm lamps (new kit pieces, warm point lights). `GEN_VERSION` is 5, goldens regenerated. Viewpoints: `cargo test -p engine --release --lib print_sanctuary_viewpoints -- --ignored --nocapture`, e.g. `SUPERSTRUCT_SECTOR=-18,1,-8 SUPERSTRUCT_LOCAL=800.0,385.7,704.0 SUPERSTRUCT_YAW=0`. The opening faces a random side, not yet the nearest void.)
 - [ ] **P5.2.2** Giant-cavity rare event rendered and traversable around its rim. *Done when:* found by teleport and reviewed. (2026-10-18: the cavity and its walkable rim already came from P0.7/P0.8; found with `cargo test -p engine --release --lib print_cavity_rim_viewpoints -- --ignored --nocapture`, e.g. `SUPERSTRUCT_SECTOR=-117,46,-109 SUPERSTRUCT_LOCAL=1018.0,641.7,992.0 SUPERSTRUCT_YAW=270 SUPERSTRUCT_WALK=1`. Seen on Windows: deck edge, then haze void with far-wall structure across it; looking down it is pure haze. No railing on rim edges. Awaiting review.)
 - [ ] **P5.2.3** Infinite-staircase event. *Done when:* implemented and reviewed. (2026-10-18: implemented, awaiting review. `l1_stair::stair_pieces`, see `regimes.md` §5.2; `GEN_VERSION` 6. Viewpoints: `cargo test -p engine --release --lib print_staircase_viewpoints -- --ignored --nocapture`, e.g. `SUPERSTRUCT_SECTOR=-1260,0,-612 SUPERSTRUCT_LOCAL=1000.0,780.0,704.0 SUPERSTRUCT_YAW=270 SUPERSTRUCT_PITCH=12`. Flights are solid wedges and have no railings; the far band and the SDF horizon still draw the column as a plain block.)
-- [ ] **P5.2.4** 🧭 Gravity regions: decide whether gravity can change direction (this affects the controller and the ports spec). *Done when:* the decision is recorded and, if yes, broken into new items.
+- [x] **P5.2.4** 🧭 Gravity regions: decide whether gravity can change direction (this affects the controller and the ports spec). *Done when:* the decision is recorded and, if yes, broken into new items. (2026-10-18: yes, as gravity wells where any direction can be down; PLAN.md §10.4, items PW.0.6 and PW.6.)
 - [ ] **P5.2.5** Distant slow movers: light trains, Builder silhouettes and trams in the far band and horizon. *Done when:* visible movement at kilometre scale. (2026-10-18: trams only. `fartram::FarTrams` draws the cars of every tram line 3.5 to 60 km away as bright blocks that grow with distance (about 3 px), from the same `Schedule` as the real cars, as one far-band instance chunk rebuilt four times a second (new `TRAIN_LIGHT` material, mostly unfogged). On Windows about 100 lights showed along the horizon from a deck. The clock is the tram system's, which only runs in walk mode. Builder silhouettes and generic light trains are not done. Movement not yet watched live; awaiting review.)
 
 ### P5.3 Audio
@@ -344,6 +344,71 @@ The ordered list of atomic tasks for building Superstruct. Rules for working thr
 - [x] **P5.4.1** Altimeter and coordinates readout toggle (absurd numbers welcome). *Done when:* it toggles. (2026-10-18: Tab toggles a quiet two-line readout, absolute altitude and x/z in whole metres, independent of the F1 overlay; `SUPERSTRUCT_READOUT=1` starts it on. Checked in a Windows screenshot.)
 - [x] **P5.4.2** Droppable beacons, visible from distance through fog, persisted in the save file. *Done when:* they survive a restart. (2026-10-18: B drops a 4 m x 600 m pillar of the new `BEACON` material (drawn 90 % through fog) at the player's feet and writes `save.toml` (`SUPERSTRUCT_SAVE`); P6.2.2 extends the same file. Checked on Windows: a save with one beacon loaded at start and the pillar showed through the haze from 300 m. Beacons cannot be removed yet, and have no light.)
 - [x] **P5.4.3** Photo mode: free camera within a radius, HUD hidden, FOV and exposure controls. *Done when:* it works. (2026-10-18: P toggles photo mode: the player and sim stay put, the camera roams within 40 m, overlay and readout hide and are restored on leaving; PageUp/PageDown FOV 20 to 120 degrees, `.`/`,` exposure in half stops, +-3, applied in the post pass (which now also runs when exposure is not zero). Checked on Windows with `SUPERSTRUCT_PHOTO=-1.5`: darker image, HUD hidden. Not done: a lift or tram under the player keeps moving it.)
+
+---
+
+## Phase W: the Web (generator redesign, added 2026-10-18)
+
+The design is in `docs/proposals/the-web.md`, and the decision is PLAN.md §10.4. This phase comes before Phase 6. Each stage ends with a review: slices, `web-report` numbers, and in-game screenshots from fixed viewpoints.
+
+*Phase exit:* walking feels like an endless dense web on every axis, with rare long views, and every far landmark reached holds something new. 🎮
+
+### PW.0 Specs (before any code)
+- [ ] **PW.0.1** `regimes.md`: strata (orientation, crust thickness, Between depth), fill, weave, grain, orientation policy, form, support and path palettes per style. *Done when:* the spec has the fields, ranges and draw order.
+- [ ] **PW.0.2** `primitives.md` and `hashing.md`: integer orientations from constant tables, oriented shapes, clip boxes, SDF, and a proof that no transcendental function runs in `gen`. *Done when:* the spec covers them, and axis-aligned output is shown to be unchanged.
+- [ ] **PW.0.3** `levels.md` §3–4 and `ports.md` §6: strata, Frame (line keys, oblique beams, knots), voids, fill field, arteries, and the new backbone connectivity argument. *Done when:* the lemmas are written and the lift-core guarantee is replaced.
+- [ ] **PW.0.4** `levels.md` §5: tissue order (reserve, route, grow, dress), supports, the first forms and path types, engulfable routes, the dead-end payoff rule, skin coverage. *Done when:* the spec is complete for the first catalogue (6 forms × 5 supports, 12 path types).
+- [ ] **PW.0.5** `levels.md` §6: L3 with any number of entrances on any face or storey, a skeleton over all of them, interior archetypes. *Done when:* the spec and its connectivity argument are written.
+- [ ] **PW.0.6** `traversal.md` and a new `gravity.md`: ladders, auto-crouch, gravity field `g(p)`, well kinds, gates, lulls, fall rule under any down. 🧭 The user approves ladder speed, crouch height and speed, gate roll timing, well frequency. *Done when:* the specs are written and the numbers approved.
+- [ ] **PW.0.7** `web-report` tool spec: the metrics of the proposal §14 and how each is measured. *Done when:* the spec is written.
+
+### PW.1 Oriented primitives
+- [ ] **PW.1.1** `gen`: rotation tables, oriented box, ramp, stair run, cylinder on any axis, clip boxes, `contains` and `sdf`. *Done when:* unit and proptest coverage passes, and axis-aligned frames give bit-identical output (goldens unchanged).
+- [ ] **PW.1.2** Engine: meshing with clipping, collision for oriented shapes, far-band and SDF horizon support. *Done when:* a test scene of rotated pieces renders and collides correctly (screenshot inspected).
+- [ ] **PW.1.3** Walkability and nav on oriented plates. *Done when:* `walk.rs` validates a rotated test cell.
+
+### PW.2 L0 and L1
+- [ ] **PW.2.1** Strata and Betweens. *Done when:* slices show crusts and gaps at the regime's proportions.
+- [ ] **PW.2.2** Frame: beams on every axis and oblique, knots. *Done when:* slices show them and line-key agreement holds across faces (proptest).
+- [ ] **PW.2.3** Voids: valley, hall, shaft, rift, bore, lungs, funnel. *Done when:* each appears in slices.
+- [ ] **PW.2.4** Fill field and crust skin with its large openings. *Done when:* neighbouring cells agree and the field matches the regime means.
+- [ ] **PW.2.5** Arteries with types, `GEN_VERSION` 7. *Done when:* 10⁴ L1 cells pass the backbone connectivity check.
+- [ ] **PW.2.6** `web-report` tool, first metrics (built fraction, sightlines). *Done when:* it reports on a 32 km region.
+
+### PW.3 L2 tissue
+- [ ] **PW.3.1** Routes on the slot lattice from ports, artery ends and anchors. *Done when:* every cell connects all its ports (10⁴ cells).
+- [ ] **PW.3.2** Supports and the first 6 forms, accretion to the fill density. *Done when:* built fraction is within ±10 % of the field and skin coverage ≥ 90 %.
+- [ ] **PW.3.3** Path types (first 12), modifiers, engulfed routes as structure ports. *Done when:* ≥ 8 distinct types per km on bot walks.
+- [ ] **PW.3.4** Set pieces and the dead-end payoff rule. *Done when:* the validator finds 0 unpaid dead ends.
+- [ ] **PW.3.5** Grains: one yaw per L1 cell, then per L2 cell, with collision wedges. *Done when:* slices and screenshots show grains meeting.
+- [ ] **PW.3.6** Stream the new L1/L2 into the game. *Done when:* 🎮 the user walks it and reviews.
+
+### PW.4 L3 interiors
+- [ ] **PW.4.1** Multi-entrance plans. *Done when:* every entrance of every mass reaches every other (10⁴ blocks).
+- [ ] **PW.4.2** Interior archetypes and the new corridor kinds. *Done when:* reviewed in game.
+
+### PW.5 Climbing
+- [ ] **PW.5.1** Ladder mechanic (attach, climb, dismount, rests). *Done when:* controller tests pass and 🎮 it feels right.
+- [ ] **PW.5.2** Auto-crouch in low ducts. *Done when:* controller tests pass.
+- [ ] **PW.5.3** Ladder families in the generator and the kit. *Done when:* reviewed in game.
+
+### PW.6 Gravity wells
+- [ ] **PW.6.1** `g(p)` field from keyed wells. *Done when:* pure-function tests pass.
+- [ ] **PW.6.2** Controller, respawn, lifts and camera on a local up; gravity gates. *Done when:* tests pass walking on all six faces of a test block.
+- [ ] **PW.6.3** First well: a line well with radial tissue. *Done when:* 🎮 the user walks round it.
+- [ ] **PW.6.4** Remaining well kinds (point, shell, tube, plane, twin, seam, fold, damaged, tidal). *Done when:* each is reviewed.
+
+### PW.7 Far field
+- [ ] **PW.7.1** Far bands and SDF horizon for frame, crust surfaces, tethers and envelopes, with matching window lights. *Done when:* the far-vs-near silhouette test passes at 5 km against 300 m.
+- [ ] **PW.7.2** Knot landmarks: far signatures and hubs. *Done when:* every knot has both, and a teleport tour is reviewed.
+- [ ] **PW.7.3** Performance pass on Windows against PLAN.md §11.4. *Done when:* numbers are recorded.
+
+### PW.8 Kit
+- [ ] **PW.8.1** Exterior kit: windows, ledges, ribs, undersides, cables, lamps, glyphs, masts. *Done when:* reviewed in game.
+- [ ] **PW.8.2** Rebuild the infinite staircase: open flights, railings, landing beams, core; helical variant. *Done when:* reviewed in game.
+
+### PW.9 Widen the catalogues
+- [ ] **PW.9.1** The rest of the forms, supports, paths, places and rare events of the proposal, regime by regime. *Done when:* each regime is reviewed.
 
 ---
 

@@ -209,6 +209,17 @@ What it does need, a general engine handles badly:
 - **Death:** triggered by a fall height threshold (for example more than ~15 m), or by falling for a set time into a void with no ground below. Let the fall play out for a moment, fade to black, then respawn. The only penalty is lost progress since the checkpoint.
 - **Consequence for generation:** edges must be readable, so railing density and lighting along drops matter. Some deliberately unguarded edges keep tension.
 
+### 10.4 The Web: generator redesign (decided 2026-10-18)
+
+Playing the Phase 5 build showed the world was mostly empty air: deck slabs kilometres apart with sparse boxes on them, and one-door buildings that were dead ends. The user chose a redesign, written up in `docs/proposals/the-web.md`. It replaces the L1 and L2 content described in §2 and in `docs/spec/levels.md`; the specs are rewritten before any code (CHECKLIST Phase W).
+
+- **Built is the default; air is carved.** Strata are dense crusts, 70–90 % built, separated by Betweens: gaps that show how far the structure extends. Breathing space comes at every scale. Big views are rare and earned.
+- **An infinite web on every axis.** Random walks at three scales (arteries over L2 cells, routes over slots, rooms in L3). Structures grow on any support (standing, hanging, spanning, sideways and more). Buildings have entrances on many floors and are through-routes.
+- **Free orientation.** This reverses the 2026-10-17 axis-aligned decision. Rotations are integer-keyed and drawn from constant tables, and every primitive is clipped to its owning cell, so determinism and the ownership rule hold.
+- **Ladders and climbing**, with no extra button.
+- **Gravity wells**, in the spirit of Toha Heavy Industries: "down" may point in any direction near a furnace. This answers P5.2.4.
+- **Horizon promise in a dense world.** Far-visible things are a fixed set of L0/L1 features. Openings and relief large enough to see from afar are L1 data. Every far landmark is a knot that has a route to it and a hub to find there.
+
 ---
 
 ## 11. Engine architecture
