@@ -115,6 +115,8 @@ pub struct TileSet {
     weights: Vec<u32>,
     /// `masks[side][socket]`: the tiles with that socket on that side.
     masks: [[Domain; MAX_SOCKETS]; SIDES],
+    /// `used[side]`: the sockets that at least one tile has on that side.
+    used: [Vec<u8>; SIDES],
 }
 
 impl TileSet {
@@ -129,7 +131,13 @@ impl TileSet {
                 masks[side][usize::from(s[side])][t / 64] |= 1 << (t % 64);
             }
         }
+        let used = std::array::from_fn(|side| {
+            (0..u8::try_from(MAX_SOCKETS).unwrap_or(u8::MAX))
+                .filter(|&s| !is_empty(&masks[side][usize::from(s)]))
+                .collect()
+        });
         Self {
+            used,
             sockets: tiles.iter().map(|t| t.0).collect(),
             weights: tiles.iter().map(|t| t.1).collect(),
             masks,
@@ -161,7 +169,8 @@ impl TileSet {
     /// opposite side equals some socket that `d` still has on `side`.
     fn allowed(&self, d: &Domain, side: usize) -> Domain {
         let mut out = EMPTY;
-        for s in 0..MAX_SOCKETS {
+        for &s in &self.used[side] {
+            let s = usize::from(s);
             if intersects(d, &self.masks[side][s]) {
                 or_assign(&mut out, &self.masks[opposite(side)][s]);
             }
@@ -183,6 +192,10 @@ pub struct Scratch {
     queued: Vec<bool>,
     weights: Vec<u32>,
     tiles: Vec<usize>,
+    /// Tiles left per slot, kept current by the loop in [`solve_active`].
+    counts: Vec<u16>,
+    /// Slots that may still hold more than one tile, in index order.
+    open: Vec<usize>,
 }
 
 /// Restricts `domains` until every slot agrees with its neighbours (AC-3, FIFO, seeded in slot
@@ -228,6 +241,9 @@ fn run_queue(
                 if is_empty(&next) {
                     return Err(Contradiction { slot: j });
                 }
+                if scratch.counts.len() == dims.len() {
+                    scratch.counts[j] = u16::try_from(count(&next)).unwrap_or(u16::MAX);
+                }
                 domains[j] = next;
                 if !scratch.queued[j] {
                     scratch.queued[j] = true;
@@ -267,13 +283,25 @@ pub fn solve_active(
     if let Some(i) = (0..dims.len()).find(|&i| on(i) && is_empty(&domains[i])) {
         return Err(Contradiction { slot: i });
     }
+    scratch.counts.clear();
     propagate_all(ts, dims, domains, active, scratch)?;
+    scratch.counts.extend(
+        domains
+            .iter()
+            .map(|d| u16::try_from(count(d)).unwrap_or(u16::MAX)),
+    );
+    scratch.open.clear();
+    scratch
+        .open
+        .extend((0..dims.len()).filter(|&i| on(i) && scratch.counts[i] > 1));
     loop {
         // Fewest remaining tiles above one, lowest index on ties.
-        let mut pick: Option<(u32, usize)> = None;
-        for (i, d) in domains.iter().enumerate() {
-            let n = count(d);
-            if on(i) && n > 1 && pick.is_none_or(|(best, _)| n < best) {
+        let counts = &scratch.counts;
+        scratch.open.retain(|&i| counts[i] > 1);
+        let mut pick: Option<(u16, usize)> = None;
+        for &i in &scratch.open {
+            let n = counts[i];
+            if pick.is_none_or(|(best, _)| n < best) {
                 pick = Some((n, i));
             }
         }
@@ -290,9 +318,8 @@ pub fn solve_active(
         }
         let k = rng.pick_weighted(&scratch.weights).unwrap_or(0);
         domains[i] = domain_of([scratch.tiles[k]]);
-        scratch.queue.clear();
-        scratch.queued.clear();
-        scratch.queued.resize(dims.len(), false);
+        scratch.counts[i] = 1;
+        // Every flag is false again after a clean run, so the queue only needs the new slot.
         scratch.queue.push_back(i);
         scratch.queued[i] = true;
         run_queue(ts, dims, domains, active, scratch)?;
