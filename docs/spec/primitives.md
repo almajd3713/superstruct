@@ -190,7 +190,7 @@ pub enum Frame {
 }
 ```
 
-`Frame::Table { yaw: 0, tilt: 0 }` and `Frame::Id` are the same frame (a constructor normalises it to `Id`, and the shape code treats `Id` as "emit the old axis-aligned primitive").
+`Frame::Table { yaw: 0, tilt: 0 }` and `Frame::Id` are the same frame (`Frame::table` normalises it to `Id`). `Shape::oriented` with an `Id` frame returns the plain axis-aligned variant when the solid lies inside its clip; if it crosses the clip it stays `Oriented` (with the `Id` frame) so the clip is kept.
 
 #### 9.1.1 Headings
 
@@ -255,7 +255,7 @@ pub struct Oriented {
 | Cylinder on any axis | `Cylinder` along frame X, Y or Z, so with `Frame::Dir` it lies along any of the 49 directions |
 | Faceted helix, polygons | built from the above (§9.3) |
 
-`Primitive.shape` becomes `enum Shape { …§3…, Oriented(Box<Oriented>) }` (append-only). A primitive whose frame is `Id` is never stored as `Oriented`. It keeps the old variant, so old output is bit-identical and the golden tests stay valid (§9.6).
+`Primitive.shape` becomes `enum Shape { …§3…, Oriented(Box<Oriented>) }` (append-only). A primitive whose frame is `Id` and whose solid lies inside its clip is never stored as `Oriented`. It keeps the old variant, so old output is bit-identical and the golden tests stay valid (§9.6). As implemented (`worldgen::orient`, PW.1.1): `LocalShape` (the four solid shapes, all `Copy`) and `Oriented { frame, origin, local, clip }` are stored inline in `Shape::Oriented`, `contains`/`sdf` transform the point into the frame and reuse the axis-aligned code, and `Frame::Dir` accepts any small integer direction.
 
 ### 9.3 Faceted helix and curves (TEC-04)
 

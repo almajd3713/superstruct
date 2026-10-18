@@ -684,6 +684,7 @@ pub fn cell_window(parent: &[Primitive], origin: [Q; 3], size: Q) -> Vec<Primiti
                     length,
                     radius,
                 },
+                Shape::Oriented(or) => Shape::Oriented(or.translated(shift)),
                 Shape::Ramp { rise, .. } => Shape::Ramp {
                     aabb: crate::prim::QAabb::new(lo, hi),
                     rise,

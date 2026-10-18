@@ -130,6 +130,8 @@ pub enum Shape {
     LiftShaft {
         aabb: QAabb,
     },
+    /// A shape in a frame, clipped to its cell (`primitives.md` §9). Append-only.
+    Oriented(crate::orient::Oriented),
 }
 
 impl Shape {
@@ -160,6 +162,7 @@ impl Shape {
             | Self::Ramp { aabb, .. }
             | Self::StairRun { aabb, .. }
             | Self::LiftShaft { aabb } => aabb,
+            Self::Oriented(o) => o.aabb(),
             Self::Cylinder {
                 axis,
                 base,

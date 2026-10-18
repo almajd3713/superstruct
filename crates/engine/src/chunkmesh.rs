@@ -218,7 +218,8 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
                 });
             }
             Shape::Ramp { .. } | Shape::Cylinder { .. } => primmesh::add_primitive(&mut mesh, p),
-            Shape::LiftShaft { .. } => {}
+            // Oriented pieces are meshed with clipping in PW.1.2; the generator emits none yet.
+            Shape::LiftShaft { .. } | Shape::Oriented(_) => {}
         }
     }
     let stats = ChunkMeshStats {

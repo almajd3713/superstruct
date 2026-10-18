@@ -381,8 +381,8 @@ The design is in `docs/proposals/the-web.md` (architecture) and `docs/proposals/
 - [x] **PW.0.7** `web-report` tool spec: the metrics of the proposal §14, the census by registry ID, the sample region. *Done when:* the spec is written. (2026-10-18)
 
 ### PW.1 Oriented primitives
-- [ ] **PW.1.1** `gen`: rotation tables, oriented box, ramp, stair run, cylinder on any axis, faceted helix, clip boxes, `contains` and `sdf`. Covers: TEC-01..04. *Done when:* standard, plus unit and proptest coverage, and axis-aligned frames give bit-identical output (goldens unchanged).
-- [ ] **PW.1.2** Engine: meshing with clipping, collision for oriented shapes, far-band and SDF horizon support. Covers: TEC-05, TEC-07. *Done when:* standard, plus a test scene of rotated pieces renders and collides correctly.
+- [x] **PW.1.1** `gen`: rotation tables, oriented box, ramp, stair run, cylinder on any axis, faceted helix, clip boxes, `contains` and `sdf`. Covers: TEC-01..04. *Done when:* standard, plus unit and proptest coverage, and axis-aligned frames give bit-identical output (goldens unchanged). (2026-10-18: code, 16 unit and 2 proptest tests in `orient.rs`, goldens unchanged, no-transcendental scan test. TEC-01..04 are exercised by those tests; their screenshots are taken in PW.1.2's rendered test scene, because nothing can draw an oriented piece before the engine meshes them.)
+- [ ] **PW.1.2** Engine: meshing with clipping, collision for oriented shapes, far-band and SDF horizon support. Covers: TEC-05, TEC-07. *Done when:* standard, plus a test scene of rotated pieces renders and collides correctly, and the screenshots of TEC-01..04 (frames, oriented box, ramp, stair run, cylinder, helix) are inspected there.
 - [ ] **PW.1.3** Walkability and nav on oriented plates. Covers: TEC-06. *Done when:* standard, plus `walk.rs` validates a rotated test cell.
 
 ### PW.2 L0 and L1

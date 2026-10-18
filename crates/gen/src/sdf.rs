@@ -54,6 +54,7 @@ impl Shape {
                 q.y < (step + 1.0) * size.y / n
             }
             Self::LiftShaft { .. } => false,
+            Self::Oriented(o) => o.contains(p),
         }
     }
 
@@ -95,6 +96,7 @@ impl Shape {
                     .fold(f32::INFINITY, f32::min)
             }
             Self::LiftShaft { .. } => f32::INFINITY,
+            Self::Oriented(o) => o.sdf(p),
         }
     }
 }

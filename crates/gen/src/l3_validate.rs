@@ -55,6 +55,9 @@ fn shift_prim(p: &Primitive, o: [Q; 3]) -> Primitive {
             steps,
         },
         Shape::LiftShaft { aabb } => Shape::LiftShaft { aabb: sh(aabb) },
+        Shape::Oriented(or) => {
+            Shape::Oriented(or.translated(|q| QVec3::new(q.x + o[0], q.y + o[1], q.z + o[2])))
+        }
         Shape::Cylinder {
             axis,
             base,

@@ -33,7 +33,8 @@ pub fn add_primitive(mesh: &mut Mesh, prim: &Primitive) {
             radius,
         } => add_cylinder(mesh, axis, v3(base), m(length), m(radius), material),
         Shape::StairRun { aabb, rise, steps } => add_stairs(mesh, aabb, rise, steps, material),
-        Shape::LiftShaft { .. } => {}
+        // Oriented pieces are meshed with clipping in PW.1.2; the generator emits none yet.
+        Shape::LiftShaft { .. } | Shape::Oriented(_) => {}
     }
 }
 
