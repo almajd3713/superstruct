@@ -120,6 +120,29 @@ pub const TRUNK_MIN_RADIUS: Q = 96 * M;
 /// 16 m in quanta, for stepping the radius down.
 const RADIUS_STEP: usize = 256;
 
+/// Chance that a column span has a trunk, by the L0 cell's verticality.
+pub fn trunk_chance(verticality: u8) -> f32 {
+    lerp(0.30, 0.80, f32::from(verticality) / 255.0)
+}
+
+/// Chance that a column span has a shaft, by the L0 cell's density.
+pub fn shaft_chance(density: u8) -> f32 {
+    lerp(0.40, 0.10, f32::from(density) / 255.0)
+}
+
+/// Chance that an L1 cell has a chasm, by the L0 cell's density.
+pub fn chasm_chance(density: u8) -> f32 {
+    lerp(0.30, 0.05, f32::from(density) / 255.0)
+}
+
+/// Weights for 0 to 3 decks in a layer cell, by the L0 cell's density. Integer weights round
+/// toward zero (§2).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // weights in [0, 4]
+pub fn deck_weights(density: u8) -> [u32; 4] {
+    let d = f32::from(density) / 255.0;
+    [lerp(4.0, 1.0, d), 4.0, lerp(1.0, 3.0, d), lerp(0.0, 2.0, d)].map(|w| w as u32)
+}
+
 /// The trunk of a column span, if any.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // range(0, 8) < 8
 pub fn trunk(seed: WorldSeed, span: ColumnSpanKey) -> Option<Trunk> {
@@ -129,9 +152,8 @@ pub fn trunk(seed: WorldSeed, span: ColumnSpanKey) -> Option<Trunk> {
         span.sy,
         floor_div_pow2(span.z, 3),
     );
-    let v = f32::from(regime(seed, l0).verticality) / 255.0;
     let mut rng = Rng::new(hash(seed.0, Level::L1, span.hash_coords(), salt::TRUNK));
-    if !rng.chance(lerp(0.30, 0.80, v)) {
+    if !rng.chance(trunk_chance(regime(seed, l0).verticality)) {
         return None;
     }
     let drawn_radius = rng.range_i32(6, 26) * 16 * M;
@@ -218,10 +240,8 @@ pub fn decks(seed: WorldSeed, layer: LayerKey) -> Vec<Deck> {
         floor_div_pow2(layer.y, 3),
         floor_div_pow2(layer.rz, shift),
     );
-    let d = f32::from(regime(seed, l0).density) / 255.0;
     let mut rng = Rng::new(hash(seed.0, Level::L1, layer.hash_coords(), salt::DECK));
-    // Integer weights round toward zero (§2).
-    let weights = [lerp(4.0, 1.0, d), 4.0, lerp(1.0, 3.0, d), lerp(0.0, 2.0, d)].map(|w| w as u32);
+    let weights = deck_weights(regime(seed, l0).density);
     let n = rng.pick_weighted(&weights).unwrap_or(0) as Q;
     let step = 4 * M;
     (0..n)
@@ -278,9 +298,8 @@ pub fn shaft(seed: WorldSeed, span: ColumnSpanKey) -> Option<Rect> {
         span.sy,
         floor_div_pow2(span.z, 3),
     );
-    let d = f32::from(regime(seed, l0).density) / 255.0;
     let mut rng = Rng::new(hash(seed.0, Level::L1, span.hash_coords(), salt::SHAFT));
-    if !rng.chance(lerp(0.40, 0.10, d)) {
+    if !rng.chance(shaft_chance(regime(seed, l0).density)) {
         return None;
     }
     let step = 16 * M;
@@ -299,9 +318,8 @@ pub fn shaft(seed: WorldSeed, span: ColumnSpanKey) -> Option<Rect> {
 pub fn chasm(seed: WorldSeed, cell: CellKey) -> Option<Rect> {
     debug_assert_eq!(cell.level, Level::L1);
     let l0 = cell.parent().map_or(I64Vec3::ZERO, |p| p.coords);
-    let d = f32::from(regime(seed, l0).density) / 255.0;
     let mut rng = Rng::new(hash(seed.0, Level::L1, cell.coords, salt::CHASM));
-    if !rng.chance(lerp(0.30, 0.05, d)) {
+    if !rng.chance(chasm_chance(regime(seed, l0).density)) {
         return None;
     }
     let step = 64 * M;
