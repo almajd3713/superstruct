@@ -212,7 +212,10 @@ fn gpu_culling_matches_the_cpu_frustum() {
     renderer.set_scene(&h.device, &h.queue, &scene);
     h.render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
         .unwrap();
-    assert_eq!(renderer.read_visible_count(&h.device), expected);
+    renderer.set_occlusion(false);
+    h.render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
+        .unwrap();
+    assert_eq!(renderer.read_drawn_counts(&h.device), (expected, 0));
 }
 
 #[test]
@@ -318,6 +321,8 @@ fn hiz_levels_are_conservative_minimums_and_debug_view_draws() {
     cam.yaw = std::f32::consts::PI;
     let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
     renderer.set_scene(&h.device, &h.queue, &demo_scene_at(I64Vec3::ZERO));
+    // With history the first frame's set A is empty, so its pyramid would be too.
+    renderer.set_occlusion(false);
     let params = FrameParams::default();
     let plain = h
         .render_with(&mut renderer, &cam, size, params, &[])
@@ -342,4 +347,55 @@ fn hiz_levels_are_conservative_minimums_and_debug_view_draws() {
     let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out/hiz-level2.png");
     std::fs::create_dir_all(out.parent().unwrap()).unwrap();
     save_png(&out, size.0, size.1, &debug).unwrap();
+}
+
+/// A wide wall with 300 cubes hidden behind it.
+fn hidden_behind_wall() -> (Camera, Vec<(WorldPos, Mesh)>) {
+    let cam = camera_at(I64Vec3::new(1, 0, -4));
+    let mut scene = vec![wall(&cam, 5.0, 40.0, 1)];
+    let mut cube = Mesh::default();
+    cube.add_box(Vec3::splat(-0.5), Vec3::splat(0.5), 0);
+    for i in 0..300u32 {
+        let x = (i % 15) as f32 - 7.0;
+        let y = ((i / 15) % 5) as f32 - 2.0;
+        let z = -12.0 - (i / 75) as f32 * 9.0;
+        scene.push((cam.pos.offset(Vec3::new(x, y, z)).unwrap(), cube.clone()));
+    }
+    (cam, scene)
+}
+
+#[test]
+fn occlusion_culling_drops_hidden_instances_without_changing_the_image() {
+    let Some(h) = headless() else { return };
+    let (cam, scene) = hidden_behind_wall();
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, SIZE);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+
+    renderer.set_occlusion(false);
+    let reference = h
+        .render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
+        .unwrap();
+    let (frustum_only, _) = renderer.read_drawn_counts(&h.device);
+    assert!(
+        frustum_only >= 250,
+        "scene should have many instances in view: {frustum_only}"
+    );
+
+    renderer.set_occlusion(true);
+    let mut drawn = Vec::new();
+    for frame in 0..4 {
+        let img = h
+            .render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
+            .unwrap();
+        let (a, b) = renderer.read_drawn_counts(&h.device);
+        drawn.push(a + b);
+        // No popping: whatever the history says, the picture is the same.
+        assert_eq!(image_diff(&img, &reference), (0, 0.0), "frame {frame}");
+    }
+    eprintln!("drawn per frame with occlusion: {drawn:?}, frustum only: {frustum_only}");
+    let settled = *drawn.last().unwrap();
+    assert!(
+        settled * 5 <= frustum_only,
+        "wanted at least 5x fewer instances: {settled} vs {frustum_only}"
+    );
 }

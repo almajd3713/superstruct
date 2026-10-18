@@ -36,24 +36,48 @@ impl Frustum {
     }
 }
 
+/// Everything a frame's culling passes need besides the buffers.
+pub struct CullParams {
+    pub frustum: Frustum,
+    pub view_proj: Mat4,
+    pub screen: (u32, u32),
+    pub count: u32,
+    pub hiz_levels: u32,
+    /// Two-phase occlusion culling instead of frustum-only.
+    pub occlusion: bool,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Params {
     planes: [[f32; 4]; 6],
+    view_proj: [[f32; 4]; 4],
+    screen: [f32; 2],
     count: u32,
+    hiz_levels: u32,
+    mode: u32,
     _pad: [u32; 3],
 }
 
 const WORKGROUP: u32 = 64;
 
 pub struct CullPass {
-    pipeline: wgpu::ComputePipeline,
+    phase1: wgpu::ComputePipeline,
+    phase2: wgpu::ComputePipeline,
+    bgl: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
+    instances: wgpu::Buffer,
     params_buf: wgpu::Buffer,
-    counter_buf: wgpu::Buffer,
-    counter_read: wgpu::Buffer,
+    counters: wgpu::Buffer,
+    counters_read: wgpu::Buffer,
+    /// Last frame's per-slot visibility, rewritten by phase 2.
+    visible: wgpu::Buffer,
     /// Indirect arguments as the CPU wrote them, before culling.
     pub src_buf: wgpu::Buffer,
+    /// Set A: drawn first, from last frame's visible set.
+    pub args_a: wgpu::Buffer,
+    /// Set B: newly visible after the Hi-Z test.
+    pub args_b: wgpu::Buffer,
 }
 
 fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
@@ -69,33 +93,69 @@ fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
     }
 }
 
-fn build_pipeline(
+fn build_pipelines(
     device: &wgpu::Device,
     source: &str,
     layout: &wgpu::PipelineLayout,
-) -> wgpu::ComputePipeline {
+) -> (wgpu::ComputePipeline, wgpu::ComputePipeline) {
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("cull"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     });
-    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("cull"),
-        layout: Some(layout),
-        module: &module,
-        entry_point: Some("cs_main"),
-        compilation_options: wgpu::PipelineCompilationOptions::default(),
-        cache: None,
+    let make = |entry| {
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(entry),
+            layout: Some(layout),
+            module: &module,
+            entry_point: Some(entry),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        })
+    };
+    (make("cs_phase1"), make("cs_phase2"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn make_bind_group(
+    device: &wgpu::Device,
+    bgl: &wgpu::BindGroupLayout,
+    params: &wgpu::Buffer,
+    instances: &wgpu::Buffer,
+    src: &wgpu::Buffer,
+    a: &wgpu::Buffer,
+    b: &wgpu::Buffer,
+    visible: &wgpu::Buffer,
+    counters: &wgpu::Buffer,
+    hiz: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    let buffers = [params, instances, src, a, b, visible, counters];
+    let mut entries: Vec<_> = buffers
+        .iter()
+        .enumerate()
+        .map(|(i, buf)| wgpu::BindGroupEntry {
+            binding: i as u32,
+            resource: buf.as_entire_binding(),
+        })
+        .collect();
+    entries.push(wgpu::BindGroupEntry {
+        binding: 7,
+        resource: wgpu::BindingResource::TextureView(hiz),
+    });
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("cull bg"),
+        layout: bgl,
+        entries: &entries,
     })
 }
 
 impl CullPass {
-    /// `instances` and `out_args` are the renderer's buffers; `max_draws` sizes the argument
-    /// buffers (20 bytes each).
+    /// `instances` is the renderer's instance buffer, `hiz` a view of every pyramid level, and
+    /// `max_draws` sizes the argument and visibility buffers.
     pub fn new(
         device: &wgpu::Device,
         source: &str,
         instances: &wgpu::Buffer,
-        out_args: &wgpu::Buffer,
+        hiz: &wgpu::TextureView,
         max_draws: usize,
     ) -> Self {
         let buf = |label, size: u64, usage| {
@@ -106,28 +166,24 @@ impl CullPass {
                 mapped_at_creation: false,
             })
         };
+        let storage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
+        let args_size = (max_draws * 20) as u64;
         let params_buf = buf(
             "cull params",
             std::mem::size_of::<Params>() as u64,
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         );
-        let counter_buf = buf(
-            "cull visible count",
-            4,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        );
-        let counter_read = buf(
-            "cull count readback",
-            4,
+        let counters = buf("cull counters", 8, storage | wgpu::BufferUsages::COPY_SRC);
+        let counters_read = buf(
+            "cull counters readback",
+            8,
             wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         );
-        let src_buf = buf(
-            "cull source args",
-            (max_draws * 20) as u64,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        );
+        let visible = buf("cull visible", (max_draws * 4) as u64, storage);
+        let src_buf = buf("cull source args", args_size, storage);
+        let indirect = storage | wgpu::BufferUsages::INDIRECT;
+        let args_a = buf("cull args A", args_size, indirect);
+        let args_b = buf("cull args B", args_size, indirect);
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("cull bgl"),
             entries: &[
@@ -145,99 +201,157 @@ impl CullPass {
                 storage_entry(2, true),
                 storage_entry(3, false),
                 storage_entry(4, false),
+                storage_entry(5, false),
+                storage_entry(6, false),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("cull bg"),
-            layout: &bgl,
-            entries: &[
-                params_buf.as_entire_binding(),
-                instances.as_entire_binding(),
-                src_buf.as_entire_binding(),
-                out_args.as_entire_binding(),
-                counter_buf.as_entire_binding(),
-            ]
-            .into_iter()
-            .enumerate()
-            .map(|(i, resource)| wgpu::BindGroupEntry {
-                binding: i as u32,
-                resource,
-            })
-            .collect::<Vec<_>>(),
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("cull layout"),
             bind_group_layouts: &[Some(&bgl)],
             immediate_size: 0,
         });
+        let (phase1, phase2) = build_pipelines(device, source, &layout);
+        let bind_group = make_bind_group(
+            device,
+            &bgl,
+            &params_buf,
+            instances,
+            &src_buf,
+            &args_a,
+            &args_b,
+            &visible,
+            &counters,
+            hiz,
+        );
         Self {
-            pipeline: build_pipeline(device, source, &layout),
+            phase1,
+            phase2,
+            bgl,
             bind_group,
+            instances: instances.clone(),
             params_buf,
-            counter_buf,
-            counter_read,
+            counters,
+            counters_read,
+            visible,
             src_buf,
+            args_a,
+            args_b,
         }
     }
 
-    /// Rebuilds the pipeline; on a compile error keeps the old one and returns the message.
+    /// Points phase 2 at a rebuilt pyramid.
+    pub fn rebind_hiz(&mut self, device: &wgpu::Device, hiz: &wgpu::TextureView) {
+        self.bind_group = make_bind_group(
+            device,
+            &self.bgl,
+            &self.params_buf,
+            &self.instances,
+            &self.src_buf,
+            &self.args_a,
+            &self.args_b,
+            &self.visible,
+            &self.counters,
+            hiz,
+        );
+    }
+
+    /// Rebuilds the pipelines; on a compile error keeps the old ones and returns the message.
     pub fn reload(&mut self, device: &wgpu::Device, source: &str) -> Result<(), String> {
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let layout = self.pipeline.get_bind_group_layout(0);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("cull layout"),
-            bind_group_layouts: &[Some(&layout)],
+            bind_group_layouts: &[Some(&self.bgl)],
             immediate_size: 0,
         });
-        let pipeline = build_pipeline(device, source, &layout);
+        let pipelines = build_pipelines(device, source, &layout);
         if let Some(err) = pollster::block_on(scope.pop()) {
             return Err(err.to_string());
         }
-        self.pipeline = pipeline;
+        (self.phase1, self.phase2) = pipelines;
         Ok(())
     }
 
-    /// Culls `count` instances against `frustum`. The visible total lands in the counter, which
-    /// is copied for [`CullPass::read_visible_count`].
-    pub fn record(
+    /// Marks a freshly assigned slot as not drawn last frame.
+    pub fn clear_slot(&self, queue: &wgpu::Queue, slot: u32) {
+        queue.write_buffer(&self.visible, u64::from(slot) * 4, &0u32.to_le_bytes());
+    }
+
+    /// Frustum test (and, in two-phase mode, the last-frame filter) into set A.
+    pub fn record_phase1(
         &self,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        frustum: &Frustum,
-        count: u32,
+        p: &CullParams,
         timestamps: Option<wgpu::ComputePassTimestampWrites<'_>>,
     ) {
         let params = Params {
-            planes: frustum.planes.map(|p| p.to_array()),
-            count,
+            planes: p.frustum.planes.map(|v| v.to_array()),
+            view_proj: p.view_proj.to_cols_array_2d(),
+            screen: [p.screen.0 as f32, p.screen.1 as f32],
+            count: p.count,
+            hiz_levels: p.hiz_levels,
+            mode: u32::from(p.occlusion),
             _pad: [0; 3],
         };
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&params));
-        queue.write_buffer(&self.counter_buf, 0, &0u32.to_le_bytes());
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("cull"),
-                timestamp_writes: timestamps,
-            });
-            if count > 0 {
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.bind_group, &[]);
-                pass.dispatch_workgroups(count.div_ceil(WORKGROUP), 1, 1);
-            }
+        queue.write_buffer(&self.counters, 0, &[0; 8]);
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("cull phase 1"),
+            timestamp_writes: timestamps,
+        });
+        if p.count > 0 {
+            pass.set_pipeline(&self.phase1);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.dispatch_workgroups(p.count.div_ceil(WORKGROUP), 1, 1);
         }
-        encoder.copy_buffer_to_buffer(&self.counter_buf, 0, &self.counter_read, 0, 4);
     }
 
-    /// Blocks until the last submitted frame's visible count can be read. For tests and tools.
-    pub fn read_visible_count(&self, device: &wgpu::Device) -> u32 {
-        let slice = self.counter_read.slice(..);
+    /// Hi-Z test of everything in the frustum into set B. Uses the parameters of phase 1.
+    pub fn record_phase2(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        count: u32,
+        timestamps: Option<wgpu::ComputePassTimestampWrites<'_>>,
+    ) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("cull phase 2"),
+            timestamp_writes: timestamps,
+        });
+        if count > 0 {
+            pass.set_pipeline(&self.phase2);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.dispatch_workgroups(count.div_ceil(WORKGROUP), 1, 1);
+        }
+    }
+
+    /// Copies the set sizes for [`CullPass::read_counts`]; record after the last culling pass.
+    pub fn resolve(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.copy_buffer_to_buffer(&self.counters, 0, &self.counters_read, 0, 8);
+    }
+
+    /// Blocks until the last submitted frame's set sizes (A, B) can be read. For tests and
+    /// tools.
+    pub fn read_counts(&self, device: &wgpu::Device) -> (u32, u32) {
+        let slice = self.counters_read.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        let n = slice.get_mapped_range().map_or(0, |v| {
-            u32::from_le_bytes(v[..4].try_into().unwrap_or([0; 4]))
+        let counts = slice.get_mapped_range().map_or((0, 0), |v| {
+            let word =
+                |i: usize| u32::from_le_bytes(v[i * 4..i * 4 + 4].try_into().unwrap_or([0; 4]));
+            (word(0), word(1))
         });
-        self.counter_read.unmap();
-        n
+        self.counters_read.unmap();
+        counts
     }
 }
 

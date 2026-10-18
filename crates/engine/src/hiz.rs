@@ -32,6 +32,7 @@ struct Targets {
     init_bg: wgpu::BindGroup,
     reduce_bgs: Vec<wgpu::BindGroup>,
     debug_bg: wgpu::BindGroup,
+    all_levels: wgpu::TextureView,
 }
 
 pub struct HizPass {
@@ -279,6 +280,7 @@ impl HizPass {
             init_bg,
             reduce_bgs,
             debug_bg,
+            all_levels: all,
         }
     }
 
@@ -307,6 +309,11 @@ impl HizPass {
         }
         self.pipelines = pipelines;
         Ok(())
+    }
+
+    /// A view of every level, for sampling the pyramid.
+    pub fn all_levels(&self) -> &wgpu::TextureView {
+        &self.targets.all_levels
     }
 
     pub fn levels(&self) -> u32 {

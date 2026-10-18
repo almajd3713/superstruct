@@ -5,7 +5,7 @@ use glam::{Mat4, Vec3, Vec4};
 use worldgen::coord::WorldPos;
 
 use crate::camera::{Camera, camera_relative};
-use crate::cull::{CullPass, Frustum};
+use crate::cull::{CullParams, CullPass, Frustum};
 use crate::gpu_timer::{GpuTimer, Zone};
 use crate::hiz::HizPass;
 use crate::mesh::Mesh;
@@ -155,6 +155,8 @@ struct GpuChunk {
     vertices: Range,
     indices: Range,
     bounds: [f32; 4],
+    /// Stable index into the culling pass's per-chunk visibility history.
+    slot: u32,
     bytes: u64,
     visible: bool,
 }
@@ -199,6 +201,8 @@ impl Default for FrameParams {
     }
 }
 
+// The flags are independent debug toggles, not states of one machine.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Renderer {
     depth_view: wgpu::TextureView,
     depth_size: (u32, u32),
@@ -209,8 +213,11 @@ pub struct Renderer {
     globals_bg: wgpu::BindGroup,
     instances_buf: wgpu::Buffer,
     instances_bg: wgpu::BindGroup,
-    indirect_buf: wgpu::Buffer,
     cull: CullPass,
+    /// Two-phase occlusion culling (needs the prepass and indirect draws).
+    occlusion: bool,
+    free_slots: Vec<u32>,
+    next_slot: u32,
     /// Whether indirect draws may use a non-zero first instance.
     indirect_first_instance: bool,
     /// Debug override: draw with plain `draw_indexed` even when indirect draws are available.
@@ -290,12 +297,6 @@ impl Renderer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let indirect_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("indirect args"),
-            size: (MAX_DRAWS * std::mem::size_of::<IndirectArgs>()) as u64,
-            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
         let draws_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("draws bgl"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -346,6 +347,13 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        let cull = CullPass::new(
+            device,
+            &sources.cull,
+            &instances_buf,
+            hiz.all_levels(),
+            MAX_DRAWS,
+        );
         Self {
             depth_view,
             depth_size: size,
@@ -354,15 +362,11 @@ impl Renderer {
             globals_buf,
             globals_bg,
             instances_bg: draws_bg,
-            cull: CullPass::new(
-                device,
-                &sources.cull,
-                &instances_buf,
-                &indirect_buf,
-                MAX_DRAWS,
-            ),
+            cull,
+            occlusion: true,
+            free_slots: Vec::new(),
+            next_slot: 0,
             instances_buf,
-            indirect_buf,
             force_direct: false,
             indirect_first_instance: device
                 .features()
@@ -423,6 +427,11 @@ impl Renderer {
             tracing::error!("no room for a chunk of {nv} vertices and {ni} indices; not drawn");
             return (handle, 0);
         };
+        let slot = self.free_slots.pop().unwrap_or_else(|| {
+            self.next_slot += 1;
+            self.next_slot - 1
+        });
+        self.cull.clear_slot(queue, slot.min(MAX_DRAWS as u32 - 1));
         let p = &self.pages[page];
         queue.write_buffer(
             &p.vertex_buf,
@@ -446,6 +455,7 @@ impl Renderer {
             vertices,
             indices,
             bounds: bounding_sphere(&mesh.vertices),
+            slot,
             bytes,
             visible: true,
         });
@@ -481,6 +491,7 @@ impl Renderer {
             let p = &mut self.pages[c.page];
             p.vertices.free(c.vertices);
             p.indices.free(c.indices);
+            self.free_slots.push(c.slot);
         }
     }
 
@@ -489,10 +500,15 @@ impl Renderer {
         self.force_direct = on;
     }
 
-    /// Instances that survived frustum culling in the last submitted frame. Blocks on the GPU;
-    /// for tests and tools.
-    pub fn read_visible_count(&self, device: &wgpu::Device) -> u32 {
-        self.cull.read_visible_count(device)
+    /// Instances drawn from set A and from set B in the last submitted frame. Blocks on the
+    /// GPU; for tests and tools.
+    pub fn read_drawn_counts(&self, device: &wgpu::Device) -> (u32, u32) {
+        self.cull.read_counts(device)
+    }
+
+    /// Turns two-phase occlusion culling on or off; frustum culling always runs.
+    pub fn set_occlusion(&mut self, on: bool) {
+        self.occlusion = on;
     }
 
     /// Hidden chunks stay resident but are not drawn.
@@ -566,6 +582,7 @@ impl Renderer {
             self.depth_view = create_depth(device, size.0, size.1);
             self.depth_size = size;
             self.hiz.resize(device, &self.depth_view, size);
+            self.cull.rebind_hiz(device, self.hiz.all_levels());
         }
     }
 
@@ -583,7 +600,7 @@ impl Renderer {
             let r = camera_relative(&c.origin, cam);
             let base_vertex = c.vertices.offset.cast_signed();
             self.instance_scratch.push(Instance {
-                origin: [r.x, r.y, r.z, 0.0],
+                origin: [r.x, r.y, r.z, f32::from_bits(c.slot)],
                 bounds: c.bounds,
                 mesh: [
                     c.indices.offset,
@@ -623,10 +640,21 @@ impl Renderer {
     }
 
     /// Issues the culled indirect draws (or the direct fallback) with `pipeline`.
-    fn draw_chunks(&self, pass: &mut wgpu::RenderPass<'_>, pipeline: &wgpu::RenderPipeline) {
-        if self.runs.is_empty() {
+    fn draw_chunks(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        pipeline: &wgpu::RenderPipeline,
+        set: DrawSet,
+    ) {
+        let indirect = self.indirect_first_instance && !self.force_direct;
+        // The direct fallback draws everything unculled in set A, so B has nothing left.
+        if self.runs.is_empty() || (!indirect && set == DrawSet::B) {
             return;
         }
+        let args = match set {
+            DrawSet::A => &self.cull.args_a,
+            DrawSet::B => &self.cull.args_b,
+        };
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &self.globals_bg, &[]);
         pass.set_bind_group(1, &self.instances_bg, &[]);
@@ -635,12 +663,8 @@ impl Renderer {
             let page = &self.pages[run.page];
             pass.set_vertex_buffer(0, page.vertex_buf.slice(..));
             pass.set_index_buffer(page.index_buf.slice(..), wgpu::IndexFormat::Uint32);
-            if self.indirect_first_instance && !self.force_direct {
-                pass.multi_draw_indexed_indirect(
-                    &self.indirect_buf,
-                    u64::from(run.start) * stride,
-                    run.count,
-                );
+            if indirect {
+                pass.multi_draw_indexed_indirect(args, u64::from(run.start) * stride, run.count);
             } else {
                 let range = run.start as usize..(run.start + run.count) as usize;
                 for (a, i) in self.indirect_scratch[range].iter().zip(run.start..) {
@@ -649,6 +673,35 @@ impl Renderer {
                 }
             }
         }
+    }
+
+    /// Depth-only pass over one draw set. The first pass clears depth, a second one adds to it.
+    fn prepass_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        set: DrawSet,
+        clear: bool,
+        timer: Option<&GpuTimer>,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("depth prepass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: if clear {
+                        wgpu::LoadOp::Clear(DEPTH_CLEAR)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: timer.and_then(|t| t.pass_writes(Zone::Prepass)),
+            ..Default::default()
+        });
+        self.draw_chunks(&mut pass, &self.pipelines.prepass, set);
     }
 
     /// Draws one Hi-Z level over the whole frame; `None` turns it off.
@@ -703,11 +756,22 @@ impl Renderer {
         queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
         self.write_instances(queue, &camera.pos);
-        self.cull.record(
+        let count = self.instance_scratch.len() as u32;
+        // Occlusion culling needs a depth pass to build the pyramid from and GPU-written
+        // draw arguments to act on.
+        let two_phase =
+            self.occlusion && self.prepass && self.indirect_first_instance && !self.force_direct;
+        self.cull.record_phase1(
             queue,
             encoder,
-            &Frustum::from_view_proj(view_proj),
-            self.instance_scratch.len() as u32,
+            &CullParams {
+                frustum: Frustum::from_view_proj(view_proj),
+                view_proj,
+                screen: size,
+                count,
+                hiz_levels: self.hiz.levels(),
+                occlusion: two_phase,
+            },
             timer.and_then(|t| t.compute_pass_writes(Zone::Cull)),
         );
 
@@ -730,27 +794,21 @@ impl Renderer {
         }
 
         if self.prepass {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("depth prepass"),
-                color_attachments: &[],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(DEPTH_CLEAR),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: timer.and_then(|t| t.pass_writes(Zone::Prepass)),
-                ..Default::default()
-            });
-            self.draw_chunks(&mut pass, &self.pipelines.prepass);
-            drop(pass);
+            self.prepass_pass(encoder, DrawSet::A, true, timer);
             self.hiz.record(
                 encoder,
                 timer.and_then(|t| t.compute_pass_writes(Zone::HiZ)),
             );
+            if two_phase {
+                self.cull.record_phase2(
+                    encoder,
+                    count,
+                    timer.and_then(|t| t.compute_pass_writes(Zone::Occlusion)),
+                );
+                self.prepass_pass(encoder, DrawSet::B, false, None);
+            }
         }
+        self.cull.resolve(encoder);
         // Without the prepass the colour pass clears and writes depth itself; with it the depth
         // is already final and the colour pass only tests against it.
         let prepassed = self.prepass;
@@ -790,7 +848,10 @@ impl Renderer {
         } else {
             &self.pipelines.scene
         };
-        self.draw_chunks(&mut pass, scene);
+        self.draw_chunks(&mut pass, scene, DrawSet::A);
+        if two_phase {
+            self.draw_chunks(&mut pass, scene, DrawSet::B);
+        }
         if !self.lines_scratch.is_empty() {
             pass.set_pipeline(&self.pipelines.lines);
             pass.set_bind_group(0, &self.globals_bg, &[]);
@@ -801,6 +862,15 @@ impl Renderer {
             self.hiz.draw_debug(queue, &mut pass, level);
         }
     }
+}
+
+/// Which culling result a draw consumes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DrawSet {
+    /// Last frame's visible set, drawn before the Hi-Z exists.
+    A,
+    /// Newly visible after the Hi-Z test.
+    B,
 }
 
 /// How a pipeline treats the depth buffer.
