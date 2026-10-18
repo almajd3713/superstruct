@@ -378,7 +378,7 @@ The design is in `docs/proposals/the-web.md` (architecture) and `docs/proposals/
 - [x] **PW.0.4** `levels.md` §5: tissue order (reserve, route, grow, dress), supports, forms, path types, engulfable routes, the dead-end payoff rule, skin coverage, ID tagging. *Done when:* the framework is specified; individual catalogue entries are specified by the items that own them. (2026-10-18)
 - [x] **PW.0.5** `levels.md` §6: L3 with any number of entrances on any face or storey, a skeleton over all of them, interior archetypes. *Done when:* the spec and its connectivity argument are written. (2026-10-18)
 - [x] **PW.0.6** `traversal.md` and a new `gravity.md`: ladders, auto-crouch, gravity field `g(p)`, well kinds, gates, lulls, free drift, fall rule under any down. Approved 2026-10-18: ladders 0.8 m/s (speeds tunable later), wells about every 50 km, a smooth camera roll at gates, lulls with both handrails and free drift. Crouch height 1.2 m is still provisional. *Done when:* the specs are written with these numbers. (2026-10-18)
-- [ ] **PW.0.7** `web-report` tool spec: the metrics of the proposal §14, the census by registry ID, the sample region. *Done when:* the spec is written.
+- [x] **PW.0.7** `web-report` tool spec: the metrics of the proposal §14, the census by registry ID, the sample region. *Done when:* the spec is written. (2026-10-18)
 
 ### PW.1 Oriented primitives
 - [ ] **PW.1.1** `gen`: rotation tables, oriented box, ramp, stair run, cylinder on any axis, faceted helix, clip boxes, `contains` and `sdf`. Covers: TEC-01..04. *Done when:* standard, plus unit and proptest coverage, and axis-aligned frames give bit-identical output (goldens unchanged).
