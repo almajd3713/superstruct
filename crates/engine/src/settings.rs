@@ -52,6 +52,8 @@ pub struct Settings {
     pub seed: u64,
     /// Draw the ray-marched horizon beyond the far band.
     pub horizon: bool,
+    /// March the horizon at half resolution and upsample it with depth awareness.
+    pub horizon_half_res: bool,
     /// Band radii in metres; see `StreamConfig`.
     pub band_l2_m: f64,
     pub band_l2_mid_m: f64,
@@ -71,6 +73,7 @@ impl Default for Settings {
             mouse_sensitivity: 0.0022,
             seed: 0,
             horizon: true,
+            horizon_half_res: false,
             band_l2_m: bands.l2_radius_m,
             band_l2_mid_m: bands.l2_mid_radius_m,
             band_l1_full_m: bands.l1_full_radius_m,

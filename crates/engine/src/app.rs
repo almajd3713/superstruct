@@ -107,6 +107,7 @@ impl App {
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
         renderer.set_world_seed(self.settings.seed);
         renderer.set_horizon_enabled(self.settings.horizon);
+        renderer.set_horizon_half_res(self.settings.horizon_half_res);
         self.place_camera();
         if !self.fly_mode {
             self.enter_walk_mode();

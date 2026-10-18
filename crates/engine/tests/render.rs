@@ -827,6 +827,17 @@ fn horizon_cost() {
         };
         report(&format!("horizon {on}, steady"), &times);
     }
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_horizon_enabled(true);
+    renderer.set_horizon_half_res(true);
+    renderer.set_world_seed(WorldSeed(0).0);
+    let times = h.gpu_times(&mut renderer, &cam, size, params, 30).unwrap();
+    let half = times
+        .iter()
+        .find(|(z, _)| z.name() == "horizon half")
+        .map_or(0.0, |t| t.1);
+    report("horizon true, half resolution, steady", &times);
+    eprintln!("half-resolution march pass {half:.3} ms");
     // A new seed every frame forces a refill of the cell records each time.
     let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
     renderer.set_horizon_enabled(true);
@@ -836,4 +847,52 @@ fn horizon_cost() {
         })
         .unwrap();
     report("horizon true, refilling every frame", &times);
+}
+
+#[test]
+fn half_resolution_horizon_matches_full_resolution() {
+    use worldgen::seed::WorldSeed;
+    let Some(h) = headless() else { return };
+    let size = (640, 360);
+    let start = WorldPos::new(I64Vec3::new(-2, -2, -3), Vec3::new(10.0, 745.0, 584.0)).unwrap();
+    let params = FrameParams {
+        fog_density: 0.0,
+        ..PLAIN
+    };
+    let mut full = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    let mut half = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    for r in [&mut full, &mut half] {
+        r.set_horizon_enabled(true);
+        r.set_world_seed(WorldSeed(0).0);
+    }
+    half.set_horizon_half_res(true);
+    for (n, yaw) in [0.0_f32, 1.6, 3.2].into_iter().enumerate() {
+        let mut cam = Camera::new(start, 70.0);
+        cam.yaw = yaw;
+        cam.pitch = 0.02;
+        let a = h.render_with(&mut full, &cam, size, params, &[]).unwrap();
+        let b = h.render_with(&mut half, &cam, size, params, &[]).unwrap();
+        let clear = h.render(&[], &cam, size, params, &[]).unwrap();
+        let drawn = |img: &[u8], i: usize| img[i * 4..i * 4 + 4] != clear[i * 4..i * 4 + 4];
+        let pixels = (size.0 * size.1) as usize;
+        let (mut both, mut either) = (0usize, 0usize);
+        for i in 0..pixels {
+            let (x, y) = (drawn(&a, i), drawn(&b, i));
+            both += usize::from(x && y);
+            either += usize::from(x || y);
+        }
+        let overlap = both as f64 / either as f64;
+        let (max, mean) = image_diff(&a, &b);
+        eprintln!("yaw {yaw}: coverage overlap {overlap:.4}, mean diff {mean:.3}, max {max}");
+        save_png(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(format!("../../out/horizon-half-{n}.png")),
+            size.0,
+            size.1,
+            &b,
+        )
+        .unwrap();
+        assert!(overlap > 0.95, "coverage overlap {overlap}");
+        assert!(mean < 6.0, "mean difference {mean}");
+    }
 }

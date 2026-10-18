@@ -15,10 +15,12 @@ pub enum Zone {
     Occlusion = 5,
     /// Refilling the horizon's cell records; written every frame the horizon is on.
     HorizonCache = 6,
+    /// The half-resolution horizon march.
+    HorizonHalf = 7,
 }
 
 impl Zone {
-    pub const ALL: [Zone; 7] = [
+    pub const ALL: [Zone; 8] = [
         Zone::Scene,
         Zone::Ui,
         Zone::Cull,
@@ -26,6 +28,7 @@ impl Zone {
         Zone::HiZ,
         Zone::Occlusion,
         Zone::HorizonCache,
+        Zone::HorizonHalf,
     ];
 
     pub fn name(self) -> &'static str {
@@ -37,6 +40,7 @@ impl Zone {
             Zone::HiZ => "hiz",
             Zone::Occlusion => "occlusion",
             Zone::HorizonCache => "horizon cache",
+            Zone::HorizonHalf => "horizon half",
         }
     }
 }

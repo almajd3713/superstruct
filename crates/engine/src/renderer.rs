@@ -552,7 +552,7 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
-        let horizon = HorizonPass::new(device, &sources, format, DEPTH_FORMAT, &globals_bgl);
+        let horizon = HorizonPass::new(device, &sources, format, DEPTH_FORMAT, &globals_bgl, size);
         let cull = CullPass::new(
             device,
             &sources.cull,
@@ -791,6 +791,11 @@ impl Renderer {
         self.horizon.enabled = on;
     }
 
+    /// Marches the horizon at half resolution and upsamples it.
+    pub fn set_horizon_half_res(&mut self, on: bool) {
+        self.horizon.half_res = on;
+    }
+
     /// Where the horizon starts, metres from the camera (the far band's reach).
     pub fn set_horizon_start(&mut self, metres: f32) {
         self.horizon.t_start = metres;
@@ -940,6 +945,7 @@ impl Renderer {
             self.depth_size = size;
             self.hiz.resize(device, &self.depth_view, size);
             self.cull.rebind_hiz(device, self.hiz.all_levels());
+            self.horizon.resize(device, size);
         }
     }
 
@@ -1178,6 +1184,11 @@ impl Renderer {
             size,
             self.world_seed,
             timer.and_then(|t| t.compute_pass_writes(Zone::HorizonCache)),
+        );
+        self.horizon.encode_half(
+            encoder,
+            &self.globals_bg,
+            timer.and_then(|t| t.pass_writes(Zone::HorizonHalf)),
         );
         let two_phase = self.occlusion
             && self.frozen.is_none()

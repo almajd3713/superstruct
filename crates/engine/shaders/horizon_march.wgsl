@@ -19,6 +19,10 @@ struct HorizonParams {
 @group(1) @binding(0) var<uniform> hz: HorizonParams;
 @group(1) @binding(1) var<storage, read> records: array<u32>;
 
+// Half-resolution result for the upsample: colour with alpha 1 on a hit, and reversed-Z depth.
+@group(2) @binding(0) var half_colour: texture_2d<f32>;
+@group(2) @binding(1) var half_depth: texture_2d<f32>;
+
 const CELL_M: f32 = 4096.0;
 const MAX_STEPS: i32 = 256;
 
@@ -220,5 +224,81 @@ fn fs_march(@builtin(position) frag: vec4<f32>) -> FsOut {
     var out: FsOut;
     out.colour = vec4<f32>(colour, 1.0);
     out.depth = clip.z / clip.w;
+    return out;
+}
+
+// Same march into half-size targets; a miss is alpha 0 and depth 0.
+struct HalfOut {
+    @location(0) colour: vec4<f32>,
+    @location(1) depth: f32,
+};
+
+@fragment
+fn fs_march_half(@builtin(position) frag: vec4<f32>) -> HalfOut {
+    // The target is half the screen, so its pixel centres are twice as far apart in screen terms.
+    let screen_xy = frag.xy * 2.0;
+    let ndc = vec2<f32>(screen_xy.x / hz.screen.x * 2.0 - 1.0, 1.0 - screen_xy.y / hz.screen.y * 2.0);
+    let pn = hz.inv_view_proj * vec4<f32>(ndc, 1.0, 1.0);
+    let dir = normalize(pn.xyz / pn.w);
+    let o = vec3<f32>(f32(hz.half) * CELL_M) + hz.cam_local;
+    let hit = march(o, dir);
+    var out: HalfOut;
+    if (hit.t >= 1.0e29) {
+        out.colour = vec4<f32>(0.0);
+        out.depth = 0.0;
+        return out;
+    }
+    let rel = dir * hit.t;
+    out.colour = vec4<f32>(apply_fog(lit_colour(normalize(hit.n), 0u), rel), 1.0);
+    let clip = globals.view_proj * vec4<f32>(rel, 1.0);
+    out.depth = clip.z / clip.w;
+    return out;
+}
+
+// Draws the half-resolution result at full size. For each pixel it takes the one of the four
+// nearest half-res samples whose depth is closest to the bilinear estimate over the samples
+// that hit, so a surface never borrows colour from a different surface behind or in front of it.
+@fragment
+fn fs_upsample(@builtin(position) frag: vec4<f32>) -> FsOut {
+    let hp = frag.xy * 0.5 - vec2<f32>(0.5);
+    let base = vec2<i32>(floor(hp));
+    let f = hp - floor(hp);
+    let dims = vec2<i32>(textureDimensions(half_colour));
+    var depth: array<f32, 4>;
+    var weight: array<f32, 4>;
+    var texel: array<vec2<i32>, 4>;
+    var wsum = 0.0;
+    var dsum = 0.0;
+    for (var k = 0; k < 4; k = k + 1) {
+        let off = vec2<i32>(k & 1, k >> 1);
+        let t = clamp(base + off, vec2<i32>(0), dims - vec2<i32>(1));
+        texel[k] = t;
+        depth[k] = textureLoad(half_depth, t, 0).x;
+        let wx = select(1.0 - f.x, f.x, off.x == 1);
+        let wy = select(1.0 - f.y, f.y, off.y == 1);
+        weight[k] = wx * wy;
+        if (depth[k] > 0.0) {
+            wsum = wsum + weight[k];
+            dsum = dsum + weight[k] * depth[k];
+        }
+    }
+    if (wsum <= 0.0) {
+        discard;
+    }
+    let expected = dsum / wsum;
+    var best = -1;
+    var best_err = 1.0e30;
+    for (var k = 0; k < 4; k = k + 1) {
+        if (depth[k] > 0.0) {
+            let err = abs(depth[k] - expected);
+            if (err < best_err) {
+                best_err = err;
+                best = k;
+            }
+        }
+    }
+    var out: FsOut;
+    out.colour = vec4<f32>(textureLoad(half_colour, texel[best], 0).rgb, 1.0);
+    out.depth = depth[best];
     return out;
 }
