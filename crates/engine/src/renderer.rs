@@ -5,6 +5,7 @@ use glam::{Mat4, Vec3, Vec4};
 use worldgen::coord::WorldPos;
 
 use crate::camera::{Camera, camera_relative};
+use crate::cull::{CullPass, Frustum};
 use crate::gpu_timer::{GpuTimer, Zone};
 use crate::mesh::Mesh;
 use crate::shaders::ShaderSources;
@@ -205,6 +206,7 @@ pub struct Renderer {
     instances_buf: wgpu::Buffer,
     instances_bg: wgpu::BindGroup,
     indirect_buf: wgpu::Buffer,
+    cull: CullPass,
     /// Whether indirect draws may use a non-zero first instance.
     indirect_first_instance: bool,
     scene_layout: wgpu::PipelineLayout,
@@ -284,7 +286,7 @@ impl Renderer {
         let indirect_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("indirect args"),
             size: (MAX_DRAWS * std::mem::size_of::<IndirectArgs>()) as u64,
-            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
         let draws_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -319,13 +321,9 @@ impl Renderer {
             bind_group_layouts: &[Some(&globals_bgl)],
             immediate_size: 0,
         });
-        let (scene_pipeline, lines_pipeline) = build_pipelines(
-            device,
-            &ShaderSources::embedded(),
-            &scene_layout,
-            &lines_layout,
-            format,
-        );
+        let sources = ShaderSources::embedded();
+        let (scene_pipeline, lines_pipeline) =
+            build_pipelines(device, &sources, &scene_layout, &lines_layout, format);
         let lines_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("debug lines"),
             size: (MAX_LINE_VERTICES * std::mem::size_of::<LineVertex>()) as u64,
@@ -338,8 +336,15 @@ impl Renderer {
             depth_size: size,
             globals_buf,
             globals_bg,
-            instances_buf,
             instances_bg: draws_bg,
+            cull: CullPass::new(
+                device,
+                &sources.cull,
+                &instances_buf,
+                &indirect_buf,
+                MAX_DRAWS,
+            ),
+            instances_buf,
             indirect_buf,
             indirect_first_instance: device
                 .features()
@@ -461,6 +466,12 @@ impl Renderer {
         }
     }
 
+    /// Instances that survived frustum culling in the last submitted frame. Blocks on the GPU;
+    /// for tests and tools.
+    pub fn read_visible_count(&self, device: &wgpu::Device) -> u32 {
+        self.cull.read_visible_count(device)
+    }
+
     /// Hidden chunks stay resident but are not drawn.
     pub fn set_chunk_visible(&mut self, handle: ChunkHandle, visible: bool) {
         if let Some(c) = self.chunks.iter_mut().find(|c| c.handle == handle) {
@@ -505,6 +516,11 @@ impl Renderer {
         if let Some(err) = pollster::block_on(scope.pop()) {
             let msg = err.to_string();
             tracing::error!("shader reload failed, keeping previous pipelines:\n{msg}");
+            self.shader_error = Some(msg.clone());
+            return Err(msg);
+        }
+        if let Err(msg) = self.cull.reload(device, &sources.cull) {
+            tracing::error!("cull shader reload failed, keeping previous pipeline:\n{msg}");
             self.shader_error = Some(msg.clone());
             return Err(msg);
         }
@@ -567,7 +583,7 @@ impl Renderer {
                 bytemuck::cast_slice(&self.instance_scratch),
             );
             queue.write_buffer(
-                &self.indirect_buf,
+                &self.cull.src_buf,
                 0,
                 bytemuck::cast_slice(&self.indirect_scratch),
             );
@@ -613,6 +629,13 @@ impl Renderer {
         queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
 
         self.write_instances(queue, &camera.pos);
+        self.cull.record(
+            queue,
+            encoder,
+            &Frustum::from_view_proj(view_proj),
+            self.instance_scratch.len() as u32,
+            timer.and_then(|t| t.compute_pass_writes(Zone::Cull)),
+        );
 
         self.lines_scratch.clear();
         for b in boxes {

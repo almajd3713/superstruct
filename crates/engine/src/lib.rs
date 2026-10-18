@@ -9,6 +9,7 @@ pub mod cellscene;
 pub mod chunkmesh;
 pub mod collision;
 pub mod controller;
+pub mod cull;
 pub mod debugcmd;
 pub mod demo;
 pub mod gpu;

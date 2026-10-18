@@ -6,12 +6,14 @@ use std::sync::mpsc::{Receiver, channel};
 const COMMON: &str = include_str!("../shaders/common.wgsl");
 const SCENE: &str = include_str!("../shaders/scene.wgsl");
 const LINES: &str = include_str!("../shaders/lines.wgsl");
+const CULL: &str = include_str!("../shaders/cull.wgsl");
 
 /// Fully composed WGSL for each pipeline.
 #[derive(Debug, Clone)]
 pub struct ShaderSources {
     pub scene: String,
     pub lines: String,
+    pub cull: String,
 }
 
 fn compose(common: &str, body: &str) -> String {
@@ -23,6 +25,7 @@ impl ShaderSources {
         Self {
             scene: compose(COMMON, SCENE),
             lines: compose(COMMON, LINES),
+            cull: CULL.to_owned(),
         }
     }
 
@@ -39,6 +42,7 @@ impl ShaderSources {
         Self {
             scene: compose(&common, &read("scene.wgsl", SCENE)),
             lines: compose(&common, &read("lines.wgsl", LINES)),
+            cull: read("cull.wgsl", CULL),
         }
     }
 }

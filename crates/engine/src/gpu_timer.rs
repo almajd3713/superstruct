@@ -9,15 +9,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub enum Zone {
     Scene = 0,
     Ui = 1,
+    Cull = 2,
 }
 
 impl Zone {
-    pub const ALL: [Zone; 2] = [Zone::Scene, Zone::Ui];
+    pub const ALL: [Zone; 3] = [Zone::Scene, Zone::Ui, Zone::Cull];
 
     pub fn name(self) -> &'static str {
         match self {
             Zone::Scene => "scene",
             Zone::Ui => "ui",
+            Zone::Cull => "cull",
         }
     }
 }
@@ -122,6 +124,18 @@ impl GpuTimer {
         q.current?;
         let base = zone as u32 * 2;
         Some(wgpu::RenderPassTimestampWrites {
+            query_set: &q.set,
+            beginning_of_pass_write_index: Some(base),
+            end_of_pass_write_index: Some(base + 1),
+        })
+    }
+
+    /// Like [`GpuTimer::pass_writes`] for a compute pass.
+    pub fn compute_pass_writes(&self, zone: Zone) -> Option<wgpu::ComputePassTimestampWrites<'_>> {
+        let q = self.inner.as_ref()?;
+        q.current?;
+        let base = zone as u32 * 2;
+        Some(wgpu::ComputePassTimestampWrites {
             query_set: &q.set,
             beginning_of_pass_write_index: Some(base),
             end_of_pass_write_index: Some(base + 1),

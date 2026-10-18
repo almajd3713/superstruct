@@ -172,3 +172,45 @@ fn broken_shader_keeps_the_old_pipeline() {
         .unwrap();
     assert!(renderer.shader_error().is_none());
 }
+
+#[test]
+fn gpu_culling_matches_the_cpu_frustum() {
+    use engine::camera::camera_relative;
+    use engine::cull::Frustum;
+    let Some(h) = headless() else { return };
+    let mut cam = camera_at(I64Vec3::new(3, -2, 5));
+    cam.look(0.7, 0.2);
+    let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+    let mut rnd = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f32 / (1u64 << 53) as f32 * 200.0 - 100.0
+    };
+    let mut cube = Mesh::default();
+    cube.add_box(Vec3::splat(-1.0), Vec3::splat(1.0), 0);
+    let scene: Vec<_> = (0..500)
+        .map(|_| {
+            let d = Vec3::new(rnd(), rnd(), rnd());
+            (cam.pos.offset(d).unwrap(), cube.clone())
+        })
+        .collect();
+    let frustum = Frustum::from_view_proj(cam.view_proj(1.0));
+    let expected = u32::try_from(
+        scene
+            .iter()
+            .filter(|(o, _)| frustum.sphere_visible(camera_relative(o, &cam.pos), 3.0_f32.sqrt()))
+            .count(),
+    )
+    .unwrap();
+    assert!(
+        expected > 20 && expected < 400,
+        "degenerate scene: {expected}"
+    );
+
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, SIZE);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    h.render_with(&mut renderer, &cam, SIZE, PLAIN, &[])
+        .unwrap();
+    assert_eq!(renderer.read_visible_count(&h.device), expected);
+}
