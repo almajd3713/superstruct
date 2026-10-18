@@ -13,7 +13,7 @@ pub(crate) const fn mix(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-const fn absorb(h: u64, v: u64) -> u64 {
+pub(crate) const fn absorb(h: u64, v: u64) -> u64 {
     mix((h ^ v).wrapping_add(GAMMA))
 }
 

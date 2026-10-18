@@ -35,7 +35,15 @@ fn path() -> PathBuf {
 /// The digest of one cell: L0 regime, L1 output, or L2 output.
 fn digest(cell: CellKey) -> u64 {
     match cell.level {
-        Level::L0 => fnv(&format!("{:?}", regime(SEED, cell.coords))),
+        Level::L0 => {
+            // The Web fields have no consumer yet and their own pinned test in `regime_web`;
+            // the digest keeps the version-6 fields so the goldens stay valid until a consumer lands.
+            let r = regime(SEED, cell.coords);
+            fnv(&format!(
+                "Regime {{ style: {:?}, density: {:?}, verticality: {:?}, palette: {:?}, visibility_m: {:?}, light: {:?}, event: {:?} }}",
+                r.style, r.density, r.verticality, r.palette, r.visibility_m, r.light, r.event
+            ))
+        }
         Level::L1 => fnv(&format!("{:?}", l1_cell(SEED, cell))),
         Level::L2 => fnv(&format!(
             "{:?}",

@@ -234,12 +234,14 @@ An RNG seeded with `hash(seed, 0, cell, REGIME_WEB)`, after the regime has its `
 3. `weave` = `range` likewise.
 4. `grain_log2` = `range` likewise.
 5. `orientation` = `pick_weighted(orientation weights)`, then, for `TiltedGrain`, `max_tilt` (draw only when picked; the extra draw is the last of this step).
-6. `stack` = `pick_weighted(stack weights)` (§8.1). Tilted and Curved are redrawn as Flat when the geometry cannot apply: `Curved` requires a gravity well within 16 km of the cell, else Flat.
+6. `stack` = `pick_weighted(stack weights)` (§8.1), then `tilt` = `range` over the style's tilt column (§8.4), always drawn and used only for `Tilted`. Tilted and Curved are redrawn as Flat when the geometry cannot apply: `Curved` requires a gravity well within 16 km of the cell, else Flat (no further draw).
 7. `crust_units.0` and `.1`: two draws from the style's low and high ranges (§8.2).
 8. `between_mix[0..5]`: five draws, each `range` over the style's range (§8.3).
 9. `forms[0..7]`, `supports[0..11]`, `paths[0..6]`, `quarters[0..16]`, `mutations[0..6]`: in this order, one draw per entry: `max(0, base + range(−2, 3))` clamped to 8, where `base` is the style's entry in §9. A style entry of 0 is a **ban** and stays 0 without a draw being skipped (the draw is still made, the result is discarded), so the draw count never depends on the table.
 
-Unused draws are still made when a field does not apply (for example `max_tilt`), except for the one conditional draw named in step 5, so the sequence is stable.
+Unused draws are still made when a field does not apply, except for the one conditional draw named in step 5, so the sequence is stable. Steps 6–8 are nine draws in all (stack 1, tilt 1, crust bounds 2, Between weights 5). Until PW.2.2 implements them, `regime_web::draw_web` burns those nine draws (`RESERVED_STACK_DRAWS`) so step 9 already has its final values.
+
+**Implementation (PW.2.1).** `worldgen::regime_web`: `WebFields`, `OrientationPolicy`, the per-style table `WEB_STYLES` (§7.6, §9.1) and `draw_web`. After step 9 the fallback rules of §9 are applied without a draw: WALK and STAIR path weights are at least 1, and forms and supports keep at least one nonzero entry. Frames: `WebFields::frame_at` (a structure's anchor in integer metres), `frame_l1`, `frame_l2`. Grain cells use `div_euclid` at `2^grain_log2` m; the grain size is folded into the key with `absorb(hash, grain_log2)`. `Radial` returns the identity until wells exist (PW.6). The golden digest of L0 keeps the version-6 fields only; the Web fields have their own pinned test, because no generator output reads them yet.
 
 ### 7.6 Per-style ranges (inclusive)
 

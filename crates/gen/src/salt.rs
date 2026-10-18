@@ -22,6 +22,10 @@ salts! {
     RARE_STAIR = 0x0104;
     /// Per L1 cell, used by the L0 cavity voxelization.
     CAVITY_NOISE = 0x0105;
+    /// Keyed by the L0 cell: the Web fields (`regimes.md` §7.5).
+    REGIME_WEB = 0x0110;
+    /// Keyed by an L1 cell or a grain cell, with the grain size absorbed: frame yaw (§7.4).
+    ORI_YAW = 0x0116;
 
     // L1 megaforms: 0x02xx
     /// Keyed by `ColumnSpanKey(L1)`.

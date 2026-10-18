@@ -34,6 +34,7 @@ pub mod orient;
 pub mod port;
 pub mod prim;
 pub mod regime;
+pub mod regime_web;
 pub mod rng;
 pub mod salt;
 pub mod sanctuary;

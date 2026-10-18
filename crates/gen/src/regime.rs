@@ -6,6 +6,7 @@ use glam::I64Vec3;
 use crate::cell::Level;
 use crate::hash::hash;
 use crate::key::ColumnKey;
+use crate::regime_web::{WebFields, draw_web};
 use crate::rng::Rng;
 use crate::salt;
 use crate::seed::WorldSeed;
@@ -24,6 +25,8 @@ pub struct Regime {
     /// Baseline light level, 0 = black.
     pub light: u8,
     pub event: RareEvent,
+    /// The Web fields (`regimes.md` §7), drawn from their own RNG.
+    pub web: WebFields,
 }
 
 /// Append-only.
@@ -171,6 +174,7 @@ pub fn regime(seed: WorldSeed, cell: I64Vec3) -> Regime {
         visibility_m,
         light,
         event,
+        web: draw_web(seed, cell, style_index),
     }
 }
 
@@ -270,6 +274,7 @@ mod tests {
                     visibility_m: 2250,
                     light: 0,
                     event: RareEvent::Blackout,
+                    web: WebFields::NONE,
                 },
             ),
             (
@@ -283,6 +288,7 @@ mod tests {
                     visibility_m: 2000,
                     light: 59,
                     event: RareEvent::None,
+                    web: WebFields::NONE,
                 },
             ),
             (
@@ -296,6 +302,7 @@ mod tests {
                     visibility_m: 6500,
                     light: 76,
                     event: RareEvent::None,
+                    web: WebFields::NONE,
                 },
             ),
             (
@@ -309,6 +316,7 @@ mod tests {
                     visibility_m: 2250,
                     light: 0,
                     event: RareEvent::Blackout,
+                    web: WebFields::NONE,
                 },
             ),
             (
@@ -322,6 +330,7 @@ mod tests {
                     visibility_m: 5750,
                     light: 41,
                     event: RareEvent::GiantCavity,
+                    web: WebFields::NONE,
                 },
             ),
             (
@@ -335,11 +344,17 @@ mod tests {
                     visibility_m: 11750,
                     light: 71,
                     event: RareEvent::None,
+                    web: WebFields::NONE,
                 },
             ),
         ];
         for &(seed, cell, expected) in cases {
             let got = regime(WorldSeed(seed), I64Vec3::from_array(cell));
+            // The Web fields have their own pinned test in `regime_web`.
+            let got = Regime {
+                web: expected.web,
+                ..got
+            };
             assert_eq!(got, expected, "seed {seed} cell {cell:?}");
         }
     }
