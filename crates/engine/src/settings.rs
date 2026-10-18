@@ -4,6 +4,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::stream::StreamConfig;
+
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
     #[error("settings io: {0}")]
@@ -48,10 +50,16 @@ pub struct Settings {
     /// Radians of rotation per raw mouse count.
     pub mouse_sensitivity: f32,
     pub seed: u64,
+    /// Band radii in metres; see `StreamConfig`.
+    pub band_l2_m: f64,
+    pub band_l2_mid_m: f64,
+    pub band_l1_full_m: f64,
+    pub band_l1_far_m: f64,
 }
 
 impl Default for Settings {
     fn default() -> Self {
+        let bands = StreamConfig::default();
         Self {
             width: 1600,
             height: 900,
@@ -60,11 +68,39 @@ impl Default for Settings {
             fov_deg: 90.0,
             mouse_sensitivity: 0.0022,
             seed: 0,
+            band_l2_m: bands.l2_radius_m,
+            band_l2_mid_m: bands.l2_mid_radius_m,
+            band_l1_full_m: bands.l1_full_radius_m,
+            band_l1_far_m: bands.l1_far_radius_m,
         }
     }
 }
 
 impl Settings {
+    /// The band radii as a streaming config, kept ordered (each band reaches at least as far as
+    /// the one inside it).
+    pub fn stream_config(&self) -> StreamConfig {
+        StreamConfig {
+            l2_radius_m: self.band_l2_m,
+            l2_mid_radius_m: self.band_l2_mid_m,
+            l1_full_radius_m: self.band_l1_full_m,
+            l1_far_radius_m: self.band_l1_far_m,
+        }
+        .ordered()
+    }
+
+    pub fn set_stream_config(&mut self, cfg: &StreamConfig) {
+        self.band_l2_m = cfg.l2_radius_m;
+        self.band_l2_mid_m = cfg.l2_mid_radius_m;
+        self.band_l1_full_m = cfg.l1_full_radius_m;
+        self.band_l1_far_m = cfg.l1_far_radius_m;
+    }
+
+    pub fn save(&self, path: &Path) -> Result<(), SettingsError> {
+        std::fs::write(path, toml::to_string_pretty(self)?)?;
+        Ok(())
+    }
+
     /// Reads `path`, or writes and returns the defaults if it does not exist.
     pub fn load_or_create(path: &Path) -> Result<Self, SettingsError> {
         match std::fs::read_to_string(path) {
@@ -89,6 +125,21 @@ mod tests {
         assert!((s.fov_deg - 100.0).abs() < 1e-6);
         assert_eq!(s.vsync, VsyncMode::Mailbox);
         assert_eq!(s.width, Settings::default().width);
+    }
+
+    #[test]
+    fn band_radii_round_trip_and_stay_ordered() {
+        let mut s = Settings::default();
+        let mut cfg = s.stream_config();
+        assert_eq!(cfg, StreamConfig::default());
+        // An inconsistent request is pulled into order rather than rejected.
+        cfg.l2_radius_m = 2000.0;
+        cfg.l2_mid_radius_m = 1000.0;
+        s.set_stream_config(&cfg);
+        let back = s.stream_config();
+        assert!(back.l2_mid_radius_m >= back.l2_radius_m);
+        let text = toml::to_string_pretty(&s).unwrap();
+        assert_eq!(toml::from_str::<Settings>(&text).unwrap(), s);
     }
 
     #[test]

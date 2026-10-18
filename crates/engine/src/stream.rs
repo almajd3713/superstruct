@@ -97,6 +97,16 @@ pub struct StreamConfig {
     pub l1_far_radius_m: f64,
 }
 
+impl StreamConfig {
+    /// Makes each band reach at least as far as the one inside it.
+    #[must_use]
+    pub fn ordered(mut self) -> Self {
+        self.l2_mid_radius_m = self.l2_mid_radius_m.max(self.l2_radius_m);
+        self.l1_far_radius_m = self.l1_far_radius_m.max(self.l1_full_radius_m);
+        self
+    }
+}
+
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {

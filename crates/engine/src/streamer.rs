@@ -153,6 +153,15 @@ impl Streamer {
         &self.cfg
     }
 
+    /// Changes the band radii live; the next update re-targets with them.
+    pub fn set_stream_config(&mut self, stream: StreamConfig) {
+        let stream = stream.ordered();
+        if stream != self.cfg.stream {
+            self.cfg.stream = stream;
+            self.last_cell = None;
+        }
+    }
+
     pub fn stats(&self) -> StreamStats {
         StreamStats {
             wanted: self.wanted.len(),
@@ -618,5 +627,42 @@ mod tests {
             Duration::from_secs(10)
         };
         assert!(took < budget, "took {took:?}");
+    }
+
+    #[test]
+    fn band_radii_change_live() {
+        let mut s = streamer(StreamerConfig {
+            stream: small(),
+            upload_budget_bytes: 8 << 20,
+            memory_budget_bytes: u64::MAX,
+        });
+        let mut sink = FakeSink::default();
+        let settle = |s: &mut Streamer, sink: &mut FakeSink| {
+            let t = Instant::now();
+            loop {
+                s.update(&pos(10.0, 0), Vec3::X, sink);
+                let st = s.stats();
+                if st.pool.queued + st.pool.running + st.ready == 0 {
+                    return;
+                }
+                assert!(t.elapsed() < Duration::from_mins(2));
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        settle(&mut s, &mut sink);
+        let before = s.stats();
+        let mut cfg = small();
+        cfg.l1_far_radius_m = 2048.0;
+        cfg.l2_mid_radius_m = 600.0;
+        s.set_stream_config(cfg);
+        settle(&mut s, &mut sink);
+        let after = s.stats();
+        assert!(after.wanted < before.wanted, "{before:?} {after:?}");
+        assert!(after.visible < before.visible);
+        // Widening again brings the chunks back, loaded from the resident set or rebuilt.
+        s.set_stream_config(small());
+        settle(&mut s, &mut sink);
+        assert_eq!(s.stats().wanted, before.wanted);
+        assert_eq!(s.stats().visible, before.visible);
     }
 }

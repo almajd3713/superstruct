@@ -8,6 +8,7 @@ use winit::window::Window;
 
 use crate::debugcmd::Command;
 use crate::gpu_timer::{GpuTimer, Zone};
+use crate::stream::StreamConfig;
 use crate::streamer::StreamStats;
 
 const HISTORY: usize = 240;
@@ -24,6 +25,8 @@ pub struct OverlayInfo<'a> {
     pub gpu_bytes: u64,
     pub shader_error: Option<&'a str>,
     pub timer: &'a GpuTimer,
+    /// Band radii in force.
+    pub bands: StreamConfig,
 }
 
 pub struct Overlay {
@@ -37,6 +40,10 @@ pub struct Overlay {
     /// Debug commands the user asked for this frame; the app drains them.
     pub requests: Vec<Command>,
     pub status: String,
+    /// New band radii the user dragged to this frame; the app applies them live.
+    pub band_request: Option<StreamConfig>,
+    /// A slider was released, so the radii are worth saving to the settings file.
+    pub band_commit: bool,
 }
 
 struct Prepared {
@@ -68,6 +75,8 @@ impl Overlay {
             teleport_text: String::new(),
             requests: Vec::new(),
             status: String::new(),
+            band_request: None,
+            band_commit: false,
         }
     }
 
@@ -100,8 +109,15 @@ impl Overlay {
         let input = self.state.take_egui_input(window);
         let frame_ms = &self.frame_ms;
         let (text, requests, status) = (&mut self.teleport_text, &mut self.requests, &self.status);
+        let bands = (&mut self.band_request, &mut self.band_commit);
         let mut output = self.ctx.run_ui(input, |ui| {
-            draw(ui, frame_ms, info, (text, requests, status));
+            draw(
+                ui,
+                frame_ms,
+                info,
+                (text, requests, status),
+                (&mut *bands.0, &mut *bands.1),
+            );
         });
         self.state
             .handle_platform_output(window, output.platform_output);
@@ -173,6 +189,7 @@ fn draw(
     frame_ms: &VecDeque<f32>,
     info: &OverlayInfo<'_>,
     (text, requests, status): (&mut String, &mut Vec<Command>, &str),
+    bands: (&mut Option<StreamConfig>, &mut bool),
 ) {
     egui::Window::new("debug")
         .title_bar(false)
@@ -191,6 +208,7 @@ fn draw(
             ui.monospace(info.mode);
             debug_commands(ui, text, requests, status);
             stream_lines(ui, &info.stream, info.gpu_bytes);
+            band_sliders(ui, info.bands, bands);
             ui.monospace(format!(
                 "sector {} {} {}",
                 info.sector.x, info.sector.y, info.sector.z
@@ -269,6 +287,31 @@ fn stream_lines(ui: &mut egui::Ui, s: &StreamStats, gpu_bytes: u64) {
         "evicted {} | rejected {} | over budget {} | l1 checks {}",
         s.evictions, s.rejected, s.over_budget_frames, s.consistency_checks
     ));
+}
+
+/// Live band radii. Like the teleport box, dragging needs the cursor released (Esc).
+fn band_sliders(
+    ui: &mut egui::Ui,
+    current: StreamConfig,
+    (request, commit): (&mut Option<StreamConfig>, &mut bool),
+) {
+    let mut cfg = current;
+    let mut released = false;
+    ui.collapsing("bands (m)", |ui| {
+        let mut slider =
+            |ui: &mut egui::Ui, label: &str, v: &mut f64, range: std::ops::RangeInclusive<f64>| {
+                let r = ui.add(egui::Slider::new(v, range).logarithmic(true).text(label));
+                released |= r.drag_stopped() || r.lost_focus();
+            };
+        slider(ui, "full L2", &mut cfg.l2_radius_m, 256.0..=4096.0);
+        slider(ui, "mid L2", &mut cfg.l2_mid_radius_m, 512.0..=16384.0);
+        slider(ui, "full L1", &mut cfg.l1_full_radius_m, 2048.0..=16384.0);
+        slider(ui, "far L1", &mut cfg.l1_far_radius_m, 4096.0..=102_400.0);
+    });
+    if cfg != current {
+        *request = Some(cfg.ordered());
+    }
+    *commit |= released;
 }
 
 /// Teleport box and buttons. Needs the cursor released (Esc) to click or type; F5 and F6 work

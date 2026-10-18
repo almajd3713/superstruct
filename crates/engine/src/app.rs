@@ -198,6 +198,15 @@ impl App {
         }
         if let Some(running) = &mut self.running {
             cmds.append(&mut running.overlay.requests);
+            if let Some(bands) = running.overlay.band_request.take() {
+                self.streamer.set_stream_config(bands);
+                self.settings.set_stream_config(&bands);
+            }
+            if std::mem::take(&mut running.overlay.band_commit)
+                && let Err(err) = self.settings.save(&settings_path())
+            {
+                tracing::warn!("could not save band radii: {err}");
+            }
         }
         for cmd in cmds {
             let cmd = match cmd {
@@ -416,6 +425,7 @@ impl App {
                 gpu_bytes: running.renderer.gpu_bytes(),
                 shader_error: running.renderer.shader_error(),
                 timer: &running.timer,
+                bands: self.streamer.config().stream,
             };
             crate::zone!("overlay prepare");
             running.overlay.prepare(
@@ -585,6 +595,7 @@ impl ApplicationHandler for App {
 pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
     let settings_fov = settings.fov_deg;
     let settings_seed = settings.seed;
+    let settings_bands = settings.stream_config();
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let now = Instant::now();
@@ -604,7 +615,10 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         fly_mode: std::env::var_os("SUPERSTRUCT_WALK").is_none(),
         fly_speed: 20.0,
         streamer: Streamer::new(
-            StreamerConfig::default(),
+            StreamerConfig {
+                stream: settings_bands,
+                ..StreamerConfig::default()
+            },
             MeshPool::with_default_threads(WorldSeed(settings_seed)),
         ),
         debug_boxes: std::env::var_os("SUPERSTRUCT_DEBUG_BOXES").is_some(),
