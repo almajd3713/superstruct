@@ -4,7 +4,7 @@ use glam::{I64Vec3, Vec3};
 
 use crate::cell::{Level, floor_div_pow2, floor_mod_pow2};
 use crate::coord::{SECTOR_SIZE, SECTOR_SIZE_LOG2, WorldPos};
-use crate::regime::{RareEvent, Regime, regime};
+use crate::regime::{RareEvent, Regime, StyleId, regime};
 use crate::seed::WorldSeed;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -18,6 +18,11 @@ pub struct Atmosphere {
     pub accent: Vec3,
     /// `light / 255`.
     pub light: f32,
+    /// How much thicker than Koschmieder's the haze is felt: the engine uses `sigma * haze`.
+    /// It is what makes Pipeworks close and oppressive and Hollow Expanse airy.
+    pub haze: f32,
+    /// Height falloff of the fog per metre.
+    pub height_k: f32,
 }
 
 /// One palette: fog, ambient, emissive and accent.
@@ -116,6 +121,33 @@ pub fn regime_atmosphere(r: &Regime) -> Atmosphere {
         emissive,
         accent,
         light: f32::from(r.light) / 255.0,
+        haze: style_haze(r.style),
+        height_k: style_height_k(r.style),
+    }
+}
+
+/// Aerial perspective per style (P5.1.5, first guesses for the art review): the haze factor on
+/// the regime's extinction.
+fn style_haze(style: StyleId) -> f32 {
+    match style {
+        StyleId::PIPEWORKS => 3.0,
+        StyleId::PILLAR_FOREST => 1.2,
+        StyleId::HOLLOW_EXPANSE => 0.5,
+        StyleId::OVERGROWTH => 2.0,
+        // Concrete Strata, and any style added later, read as plain Koschmieder haze.
+        _ => 1.0,
+    }
+}
+
+/// How fast the fog thins with height, per metre: close fog hugs the floor, airy regimes keep it
+/// high.
+fn style_height_k(style: StyleId) -> f32 {
+    match style {
+        StyleId::PIPEWORKS => 1.0 / 150.0,
+        StyleId::PILLAR_FOREST => 1.0 / 800.0,
+        StyleId::HOLLOW_EXPANSE => 1.0 / 2000.0,
+        StyleId::OVERGROWTH => 1.0 / 250.0,
+        _ => 1.0 / 500.0,
     }
 }
 
@@ -144,6 +176,8 @@ pub fn atmosphere_at(seed: WorldSeed, pos: &WorldPos) -> Atmosphere {
                     out.emissive += a.emissive * w;
                     out.accent += a.accent * w;
                     out.light += a.light * w;
+                    out.haze += a.haze * w;
+                    out.height_k += a.height_k * w;
                 }
             }
         }
@@ -170,6 +204,57 @@ fn smoothstep(t: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P5.1.5: every style has its own aerial perspective, Pipeworks the closest and Hollow
+    /// Expanse the airiest, and the blend carries haze and falloff like the other fields.
+    #[test]
+    fn styles_have_distinct_aerial_perspective() {
+        let seed = WorldSeed(0);
+        let mut seen: std::collections::BTreeMap<u8, (f32, f32)> =
+            std::collections::BTreeMap::new();
+        for x in -20..20i64 {
+            for z in -20..20i64 {
+                let r = regime(seed, I64Vec3::new(x, 0, z));
+                let a = regime_atmosphere(&r);
+                assert!(a.haze > 0.0 && a.height_k > 0.0);
+                seen.insert(r.style.0, (a.haze, a.height_k));
+            }
+        }
+        assert_eq!(seen.len(), 5, "all five styles occur");
+        let haze = |s: StyleId| seen[&s.0].0;
+        assert!(haze(StyleId::PIPEWORKS) > haze(StyleId::OVERGROWTH));
+        assert!(haze(StyleId::OVERGROWTH) > haze(StyleId::PILLAR_FOREST));
+        assert!(haze(StyleId::PILLAR_FOREST) > haze(StyleId::CONCRETE_STRATA));
+        assert!(haze(StyleId::CONCRETE_STRATA) > haze(StyleId::HOLLOW_EXPANSE));
+        // At an L0 face the blend is an even mix of the two sides.
+        let a = atmosphere_at(
+            seed,
+            &WorldPos::new(I64Vec3::ZERO, glam::Vec3::splat(512.0)).unwrap(),
+        );
+        assert!(a.haze > 0.0 && a.height_k > 0.0);
+    }
+
+    /// Diagnostic: the first L0 cell of each style, for regime tours (`-- --ignored --nocapture`).
+    #[test]
+    #[ignore = "diagnostic"]
+    fn print_a_cell_of_each_style() {
+        let seed = WorldSeed(0);
+        let mut shown = std::collections::BTreeSet::new();
+        for x in -20..20i64 {
+            for z in -20..20i64 {
+                let r = regime(seed, I64Vec3::new(x, 0, z));
+                if shown.insert(r.style.0) {
+                    println!(
+                        "style {} palette {} at L0 ({x}, 0, {z}): sector {} 0 {}",
+                        r.style.0,
+                        r.palette.0,
+                        x * 32 + 16,
+                        z * 32 + 16
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn linear_palette_matches_srgb() {

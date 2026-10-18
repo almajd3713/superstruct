@@ -129,6 +129,7 @@ impl App {
         );
         let gpu = Gpu::new(&window, s.vsync)?;
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
+        renderer.set_volumetric_fog(true);
         if let Ok(list) = std::env::var("SUPERSTRUCT_POST") {
             renderer.set_post(crate::post::PostSettings::parse(&list));
         }
@@ -891,14 +892,13 @@ fn parse_floats(text: &str) -> Option<Vec3> {
 }
 
 /// Fog, sky and light for the regime around the camera.
-/// Fog thins by 1/e every 1/k metres above the camera.
-const FOG_HEIGHT_K: f32 = 1.0 / 400.0;
-
 fn frame_params(seed: WorldSeed, cam: &WorldPos, fade: f32) -> FrameParams {
     let atm = worldgen::atmosphere::atmosphere_at(seed, cam);
     FrameParams {
-        fog_density: atm.sigma,
-        fog_height_k: FOG_HEIGHT_K,
+        // Koschmieder's extinction scaled by the style's haze: Pipeworks close, Hollow airy.
+        fog_density: atm.sigma * atm.haze,
+        // Fog thins by 1/e every 1/k metres above the camera.
+        fog_height_k: atm.height_k,
         fog_color: atm.fog_color.to_array(),
         ambient: atm.ambient.to_array(),
         light: atm.light,

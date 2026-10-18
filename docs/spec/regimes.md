@@ -73,6 +73,8 @@ pub struct Atmosphere {
     pub emissive: Vec3,      // linear RGB
     pub accent: Vec3,        // linear RGB
     pub light: f32,          // light / 255
+    pub haze: f32,           // multiplies sigma; the style's aerial perspective
+    pub height_k: f32,       // fog height falloff per metre
 }
 ```
 
@@ -90,6 +92,16 @@ At a face, both sides evaluate to a 50/50 mix, so the field is **continuous** ev
 Example (x only): at 1024 m inside cell X from its lower face, `w_lower = 0.5 · s(0.75) = 0.5 · 0.84375 = 0.421875` and `w_self = 0.578125`. At the face itself, `a = 0` gives 0.5 / 0.5.
 
 Blackout cells (§5) blend like any other cell, so darkness falls gradually as you approach one. A Blackout cell's own atmosphere has `light = 0` and `emissive = 0` ("emissive suppressed").
+
+**Aerial perspective per style (P5.1.5, first guesses for the art review).** The engine uses `sigma · haze` and `height_k`; both blend like the other fields.
+
+| Style | haze | height_k (per m) |
+|---|---|---|
+| Concrete Strata | 1.0 | 1/500 |
+| Pipeworks | 3.0 | 1/150 |
+| Pillar Forest | 1.2 | 1/800 |
+| Hollow Expanse | 0.5 | 1/2000 |
+| Overgrowth | 2.0 | 1/250 |
 
 **Linear colours** are pinned as constants in `worldgen::atmosphere`, because the sRGB curve needs `powf`, which `hashing.md` §6 bans. A test re-derives them from this table's hex values.
 
