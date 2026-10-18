@@ -5,7 +5,8 @@
 //!
 //! | Band | Chunk | Within |
 //! |---|---|---|
-//! | Near / mid | L2 cell, full | `l2_radius_m` |
+//! | Near | L2 cell, full | `l2_radius_m` |
+//! | Mid | L2 cell, envelope masses only | `l2_mid_radius_m` |
 //! | Near | L1 cell, full | `l1_full_radius_m` |
 //! | Far | L1 cell, far-visible subset | `l1_far_radius_m` |
 
@@ -19,6 +20,8 @@ pub enum Detail {
     Full,
     /// The `FAR_VISIBLE` subset (`l1_far_primitives`); L1 only.
     Far,
+    /// The `ENVELOPE` primitives (exterior masses) of an L2 cell; L2 only.
+    Mid,
 }
 
 /// A chunk's identity: a generator cell and a detail choice. The same id always yields the same
@@ -37,6 +40,13 @@ impl ChunkId {
         }
     }
 
+    pub const fn l2_mid(coords: I64Vec3) -> Self {
+        Self {
+            key: CellKey::new(Level::L2, coords),
+            detail: Detail::Mid,
+        }
+    }
+
     pub const fn l1(coords: I64Vec3, detail: Detail) -> Self {
         Self {
             key: CellKey::new(Level::L1, coords),
@@ -46,6 +56,7 @@ impl ChunkId {
 
     pub fn band(&self) -> Band {
         match (self.key.level, self.detail) {
+            (Level::L2, Detail::Mid) => Band::Mid,
             (Level::L2, _) => Band::Near,
             (_, Detail::Full) => Band::Mid,
             _ => Band::Far,
@@ -80,6 +91,8 @@ pub enum Band {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StreamConfig {
     pub l2_radius_m: f64,
+    /// Beyond `l2_radius_m` and up to this, L2 cells draw their envelope masses only.
+    pub l2_mid_radius_m: f64,
     pub l1_full_radius_m: f64,
     pub l1_far_radius_m: f64,
 }
@@ -88,6 +101,7 @@ impl Default for StreamConfig {
     fn default() -> Self {
         Self {
             l2_radius_m: 1024.0,
+            l2_mid_radius_m: 3072.0,
             l1_full_radius_m: 4096.0,
             l1_far_radius_m: 12288.0,
         }
@@ -147,9 +161,18 @@ pub fn desired_set(cfg: &StreamConfig, cam: &WorldPos, view_dir: Vec3, out: &mut
             }
         }
     };
-    around(Level::L2, cfg.l2_radius_m, &mut |k, d| {
-        add(ChunkId::l2(k.coords), d);
-    });
+    around(
+        Level::L2,
+        cfg.l2_mid_radius_m.max(cfg.l2_radius_m),
+        &mut |k, d| {
+            let id = if d <= cfg.l2_radius_m {
+                ChunkId::l2(k.coords)
+            } else {
+                ChunkId::l2_mid(k.coords)
+            };
+            add(id, d);
+        },
+    );
     around(Level::L1, cfg.l1_far_radius_m, &mut |k, d| {
         let detail = if d <= cfg.l1_full_radius_m {
             Detail::Full
@@ -202,6 +225,9 @@ mod tests {
             let d = distance_to_cell(&cam, w.id.key).unwrap();
             match w.id.band() {
                 Band::Near => assert!(d <= cfg.l2_radius_m),
+                Band::Mid if w.id.key.level == Level::L2 => {
+                    assert!(d > cfg.l2_radius_m && d <= cfg.l2_mid_radius_m);
+                }
                 Band::Mid => assert!(d <= cfg.l1_full_radius_m),
                 Band::Far => assert!(d > cfg.l1_full_radius_m && d <= cfg.l1_far_radius_m),
             }
@@ -214,13 +240,20 @@ mod tests {
         // 511.5 m and 512.5 m along x: one L2 cell apart.
         let a = ids(&set(&cfg, &at([0, 0, 0], [511.5, 256.0, 256.0])));
         let b = ids(&set(&cfg, &at([0, 0, 0], [512.5, 256.0, 256.0])));
-        let removed: Vec<_> = a.difference(&b).collect();
-        let added: Vec<_> = b.difference(&a).collect();
-        assert!(!added.is_empty() || !removed.is_empty());
         assert!(a.intersection(&b).count() > a.len() / 2);
-        // Everything that left is on the -x side, everything that arrived on the +x side.
-        assert!(removed.iter().all(|id| id.key.coords.x <= 0));
-        assert!(added.iter().all(|id| id.key.coords.x >= 1));
+        // A cell whose detail changes (mid to full) swaps chunk ids without leaving, so compare
+        // cells: everything that left is on the -x side, everything that arrived on the +x side.
+        let cells = |s: &std::collections::BTreeSet<ChunkId>| {
+            s.iter()
+                .map(|id| id.key)
+                .collect::<std::collections::HashSet<_>>()
+        };
+        let (ca, cb) = (cells(&a), cells(&b));
+        let removed: Vec<_> = ca.difference(&cb).collect();
+        let added: Vec<_> = cb.difference(&ca).collect();
+        assert!(!added.is_empty() || !removed.is_empty());
+        assert!(removed.iter().all(|k| k.coords.x <= 0));
+        assert!(added.iter().all(|k| k.coords.x >= 1));
         // Walking back restores the original set.
         assert_eq!(a, ids(&set(&cfg, &at([0, 0, 0], [511.5, 256.0, 256.0]))));
     }

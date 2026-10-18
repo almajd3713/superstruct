@@ -256,6 +256,20 @@ fn far_digest(id: ChunkId, prims: &[Primitive]) -> Option<u64> {
     Some(h.finish())
 }
 
+/// The mid band draws an L2 cell's exterior masses only: the `ENVELOPE` primitives, which are
+/// exactly what the finer levels refine, so the silhouette matches the full chunk's.
+pub fn mid_primitives(mut prims: Vec<Primitive>) -> Vec<Primitive> {
+    prims.retain(|p| p.flags.contains(PrimFlags::ENVELOPE));
+    prims
+}
+
+/// Mid-band budgets (P3.2.1): resident triangles over all mid chunks, and per chunk. Measured
+/// at 0.8k to 5.4k and 72 on the Phase 2 generator; the headroom is for denser L2 content.
+#[cfg(test)]
+const MID_BAND_TRIANGLE_BUDGET: usize = 200_000;
+#[cfg(test)]
+const MID_CELL_TRIANGLE_BUDGET: usize = 1_000;
+
 /// `None` when the job went stale before meshing; the result is not wanted any more.
 fn build(seed: WorldSeed, cache: &L1Cache, id: ChunkId, stale: &AtomicBool) -> Option<JobResult> {
     zone!("mesh job");
@@ -265,6 +279,7 @@ fn build(seed: WorldSeed, cache: &L1Cache, id: ChunkId, stale: &AtomicBool) -> O
     };
     let t0 = Instant::now();
     let prims: Vec<Primitive> = match (id.key.level, id.detail) {
+        (Level::L2, Detail::Mid) => mid_primitives(l2_cell_in(seed, cache, id.key).primitives),
         (Level::L2, _) => l2_cell_in(seed, cache, id.key).primitives,
         (_, Detail::Far) => l1_far_primitives(seed, id.key),
         _ => l1_cell(seed, id.key).primitives,
@@ -310,6 +325,18 @@ mod tests {
         assert_eq!(got.id, id);
         assert_eq!(got.mesh.vertices, direct.vertices);
         assert_eq!(got.mesh.indices, direct.indices);
+    }
+
+    #[test]
+    fn mid_chunk_is_the_envelope_subset_of_the_full_chunk() {
+        let key = worldgen::cell::CellKey::new(Level::L2, I64Vec3::new(4, -4, 4));
+        let full = l2_cell_in(WorldSeed(0), &L1Cache::default(), key).primitives;
+        let mid = mid_primitives(full.clone());
+        assert!(!mid.is_empty() && mid.len() < full.len());
+        assert!(mid.iter().all(|p| full.contains(p)));
+        assert!(mid.iter().all(|p| p.flags.contains(PrimFlags::ENVELOPE)));
+        let tris = |p: &[Primitive]| mesh_primitives(p).0.indices.len() / 3;
+        assert!(tris(&mid) < tris(&full));
     }
 
     #[test]
@@ -368,5 +395,52 @@ mod tests {
             .map(|_| pool.recv().unwrap().unwrap().id.key.coords.x)
             .collect();
         assert_eq!(&order[1..], &[1, 2, 3]);
+    }
+
+    /// Triangle totals of the mid band, checked against the budgets at a few spots. Run with
+    /// `cargo test --release -p engine --lib mid_band -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measurement"]
+    fn mid_band_triangle_totals() {
+        use crate::stream::{Detail, StreamConfig, desired_set};
+        use glam::Vec3;
+        use worldgen::coord::WorldPos;
+        let cfg = StreamConfig::default();
+        let pool = MeshPool::new(WorldSeed(0), 8);
+        for (sector, local) in [
+            ([0, 0, 0], [512.0, 512.0, 512.0]),
+            ([3, -2, 5], [100.0, 800.0, 300.0]),
+            ([-2, -2, -3], [10.0, 745.0, 584.0]),
+            ([40, 7, -9], [900.0, 20.0, 450.0]),
+        ] {
+            let cam = WorldPos::new(I64Vec3::from_array(sector), Vec3::from_array(local)).unwrap();
+            let mut wanted = Vec::new();
+            desired_set(&cfg, &cam, Vec3::NEG_Z, &mut wanted);
+            let mid: Vec<_> = wanted
+                .iter()
+                .filter(|w| w.id.detail == Detail::Mid)
+                .collect();
+            for w in &mid {
+                pool.submit(w.id, w.priority);
+            }
+            let (mut tris, mut max_cell) = (0usize, 0usize);
+            for _ in 0..mid.len() {
+                let t = pool.recv().unwrap().unwrap().mesh.indices.len() / 3;
+                tris += t;
+                max_cell = max_cell.max(t);
+            }
+            eprintln!(
+                "{sector:?}: {} mid cells, {tris} triangles, busiest cell {max_cell}",
+                mid.len()
+            );
+            assert!(
+                tris <= MID_BAND_TRIANGLE_BUDGET,
+                "{tris} triangles over budget"
+            );
+            assert!(
+                max_cell <= MID_CELL_TRIANGLE_BUDGET,
+                "busiest cell {max_cell}"
+            );
+        }
     }
 }

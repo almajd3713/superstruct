@@ -183,6 +183,7 @@ impl Streamer {
             detail: match chunk.id.detail {
                 Detail::Full => Detail::Far,
                 Detail::Far => Detail::Full,
+                Detail::Mid => return,
             },
             ..chunk.id
         };
@@ -374,6 +375,7 @@ mod tests {
     fn small() -> StreamConfig {
         StreamConfig {
             l2_radius_m: 600.0,
+            l2_mid_radius_m: 1536.0,
             l1_full_radius_m: 2048.0,
             l1_far_radius_m: 4096.0,
         }
@@ -492,6 +494,41 @@ mod tests {
         assert!(
             !sink.live[&handle.0].1,
             "far chunk still drawn under the full one"
+        );
+    }
+
+    #[test]
+    fn mid_to_full_swap_hides_the_mid_chunk_and_keeps_it_out_of_collision() {
+        let mut s = streamer(StreamerConfig {
+            stream: small(),
+            upload_budget_bytes: 8 << 20,
+            memory_budget_bytes: u64::MAX,
+        });
+        let mut sink = FakeSink::default();
+        let settle = |s: &mut Streamer, sink: &mut FakeSink, cam: &WorldPos| {
+            let t = Instant::now();
+            loop {
+                s.update(cam, Vec3::X, sink);
+                let st = s.stats();
+                if st.pool.queued + st.pool.running + st.ready == 0 {
+                    return;
+                }
+                assert!(t.elapsed() < Duration::from_mins(2));
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+        // L2 cell x = 2 spans 1024..1536 m: 1014 m away is mid, 424 m away is near.
+        let cell = I64Vec3::new(2, 0, 0);
+        let (mid, full) = (ChunkId::l2_mid(cell), ChunkId::l2(cell));
+        settle(&mut s, &mut sink, &pos(10.0, 0));
+        assert!(s.is_resident(&mid) && !s.is_resident(&full));
+        assert!(!s.collision().contains(&mid), "mid chunks never collide");
+        settle(&mut s, &mut sink, &pos(600.0, 0));
+        assert!(s.is_resident(&full));
+        let handle = s.resident[&mid].handle;
+        assert!(
+            !sink.live[&handle.0].1,
+            "mid chunk still drawn under the full one"
         );
     }
 }
