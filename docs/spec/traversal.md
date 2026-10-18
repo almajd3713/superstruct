@@ -1,6 +1,6 @@
 # Spec: traversal
 
-**Status: numbers approved by the user on 2026-10-17 (P0.2.8): no jump, 15 m fall-death height, 30 m/s lifts, everything else as drafted.**
+**Status: numbers approved by the user on 2026-10-17 (P0.2.8): no jump, 15 m fall-death height, 30 m/s lifts, everything else as drafted. Tram acceleration raised from 1.5 to 6 m/s² by the user on 2026-10-18, so that the tram trip time below holds.**
 
 How the player moves, and the dimensions the generator must respect so that every port and walkway is usable. Every number here is tunable, but player-feel numbers change only with the user's agreement (CLAUDE.md §8). Generator-facing numbers (§6) change output, so they also need a `GEN_VERSION` bump.
 
@@ -62,8 +62,8 @@ On respawn the player is placed at that position, facing the direction they face
 | Lift cruise speed | 30 m/s | One L1 cell (4096 m) takes about 2.5 min including acceleration. The ride is a set piece |
 | Lift acceleration | 1.5 m/s² | gentle, no jolt |
 | Short lift (L2 shafts, < 200 m) | 6 m/s | |
-| Tram cruise speed | 100 m/s | 20 km in about 3.5 min |
-| Tram acceleration | 1.5 m/s² | about 67 s to cruise speed |
+| Tram cruise speed | 100 m/s | 20 km in about 3.6 min: `d/V + V/A` = 200 s + 17 s, plus dwells |
+| Tram acceleration | 6 m/s² | about 17 s (833 m) to cruise speed. Horizontal only, and the player is carried by the car's displacement, so it does not affect grounding. How the 0.6 g start and stop feel is a playtest item (`trams.md` §10) |
 | Debug fly (noclip) | up to 1 km/s, adjustable | P2.4.5 |
 
 ## 6. Generator-facing dimensions

@@ -33,9 +33,11 @@ pub enum PortKind {
     DeckContinuation, // X/Z faces: an L1 deck crossing at the same height on both sides
     BridgeEnd,        // X/Z faces: an L1 bridge crossing
     StairLanding,     // Y faces: a stair passage
-    LiftStop,         // Y faces: a lift core passage; also internal stops (not on faces)
+    LiftStop,         // Y faces: a lift core passage
 }
 ```
+
+Every `Port` has a `FaceKey`: ports exist only on faces. A lift core's internal stops (one per deck or floor inside an L1 cell) are not `Port`s. The engine derives them from the generator's keyed features (`crates/engine/src/liftplan.rs`, `lifts.md` §2.2).
 
 **Geometry rules**
 
@@ -47,7 +49,7 @@ pub enum PortKind {
   - `BridgeEnd` is 8–32 m wide.
   - `DeckContinuation` spans the shared deck along the whole face.
   - `LiftStop` and `StairLanding` are at least 8 × 8 m.
-- **Margins.** Ports keep 64 m from face edges at L1 and 8 m at L2, so a port never touches an edge or corner shared with a third cell.
+- **Margins.** Ports a level draws itself keep **64 m** from the face edges at both L1 and L2, so they never touch an edge or corner shared with a third cell. At L1 that is `l1::SEPARATION`: `DeckContinuation` and `BridgeEnd` spans lie in `[64 m, 4032 m)`, and a `LiftStop` is the core footprint, which keeps the same 64 m. At L2 it is `l2_port::MARGIN`, which applies to own (`Walkway`) ports only. Cascaded L2 ports are L1 ports or L1 pieces clipped to the L2 tile, so they can touch the tile's edge (§4.2).
 
 ## 3. Deriving ports
 
@@ -89,7 +91,7 @@ The result is that **every face between two non-cavity L1 cells carries at least
 | **Own ports** `[PORT_FACE_*]` | 0–2 **Walkway** (skywalk) ports per X/Z face, with `chance(lerp(0.2, 0.6, d))` each. Allowed only where both sides have the **same L1 deck** under the face. The floor is that deck's top plus 4 m × `range(0, 8)`, one of the first 8 floors |
 
 **As implemented** (`worldgen::l2_port`, P0.8.3):
-- **Cascade on an L1 face:** every L1 port, clipped to the L2 tile, with the same kind. **Inside an L1 cell:** deck and bridge pieces that reach the plane from both sides, merged along the face, give `DeckContinuation` and `BridgeEnd` ports 4 m tall at the piece's top; the lift core gives a `LiftStop` on Y faces. Cascade ports are clipped to the tile and so can touch its edge: the 8 m margin applies to own ports only.
+- **Cascade on an L1 face:** every L1 port, clipped to the L2 tile, with the same kind. **Inside an L1 cell:** deck and bridge pieces that reach the plane from both sides, merged along the face, give `DeckContinuation` and `BridgeEnd` ports 4 m tall at the piece's top; the lift core gives a `LiftStop` on Y faces. Cascade ports are clipped to the tile and so can touch its edge: the 64 m margin applies to own ports only.
 - **Own ports:** two slots per X/Z face, each drawing (in order) presence, floor index `range(0, 8)`, width `2 m × range(2, 5)`, `u0` on a 2 m step inside a **64 m** margin, and the deck pick. The decks are those equal on both sides whose top and a floor both lie in the tile (the stair stands on the deck inside the cell). The 64 m margin equals the corridor depth below, so corridors on perpendicular faces never meet. A slot is dropped if the floor leaves the tile, the `u` range overlaps an earlier skywalk or the rect overlaps another port, or the **corridor** (below) does not fit on either side. Ports are 4 m tall.
 - **Corridor:** each side reserves a 64 m deep volume from the face, the port's width wide, from the deck top to 4 m above the floor (`l2_walk::Skywalk::corridor`). It fits if the footprint is fully on deck at the deck top and no L1 `KeepOut`, collidable solid or trunk meets it (`l2_mass::Parent::fits`). A fitting corridor guarantees the realization of P0.8.4 cannot fail.
 - Cascade ports whose midpoint lies inside a trunk are dropped: a trunk landing ends on the trunk's axis, and the buried part is not floor.

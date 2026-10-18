@@ -158,7 +158,7 @@ All salts live in `worldgen::salt` as named `pub const NAME: u64` values.
    | `0x0400–0x04FF` | L3 blocks |
    | `0x0500–0x05FF` | L4 modules |
    | `0x0600–0x06FF` | L5 dressing |
-   | `0x0F00–0x0FFF` | cross-level (ports, keys, sanctuaries, rare events) |
+   | `0x0F00–0x0FFF` | cross-level: the port face salts `PORT_FACE_X/Y/Z` (`0x0F01–0x0F03`), keyed by `FaceKey` at every level. Level-owned features stay in their level's block even when they are rare or cross cells: `RARE_EVENT`/`RARE_EVENT_PLACE` are `0x0102`/`0x0103` (L0), `SANCTUARY` is `0x0206` (L1) |
 
    The value is not derived from the name, so renaming a constant never changes output.
 4. **Append-only.** A salt that is no longer used moves to a `RETIRED` list in the same module, and its value is never reassigned.
