@@ -79,6 +79,8 @@ fn tag_colour(tag: &str) -> Rgb<u8> {
         "SURF-02" => Rgb([60, 170, 170]),
         "SURF-03" => Rgb([230, 80, 40]),
         "SURF-04" => Rgb([120, 130, 170]),
+        "FRM-13" => Rgb([255, 240, 80]),
+        t if t.starts_with("FRM-") => Rgb([90, 220, 255]),
         _ => Rgb([255, 0, 255]),
     }
 }
@@ -140,6 +142,7 @@ pub fn render_content(seed: WorldSeed, view: &View) -> RgbImage {
                 let origin = l1 * 4096;
                 let mut pieces = between_content(seed, l1);
                 pieces.extend(worldgen::l1_surface::surface_content(seed, l1));
+                pieces.extend(worldgen::l1_frame::frame_content(seed, l1));
                 for (i, w) in pieces.iter().enumerate() {
                     let b = w.prim.aabb();
                     let m = |a: i32| f64::from(a) / 16.0;

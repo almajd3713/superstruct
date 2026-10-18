@@ -284,6 +284,17 @@ A **beam** is the part of a span that lies in the cell. Its parameters, drawn fr
 - **Reservations.** A beam is a `KeepOut` for tissue except for the parts the kind says are inhabited (floors in an inhabited beam, the stair of a stair beam).
 - **Beam ties** (§4W.5.4) make every beam in a live cell reachable.
 
+#### 4W.2.1a As implemented (PW.2.5, `worldgen::l1_frame`)
+
+- **Lines.** Direction `i`, intercepts `u0 = p·2048 + 16·below(128)` and `v0` likewise, dominant axis made positive. The line RNG is `hash(seed, 1, (p, q, i), LINE_BEAM)`: draw 1 is `e = below(4096)` (the line's existence value), draws 2 and 3 are the jitters. A span of the line exists iff `e < E_i(weave of its home regime)` and its `present` draw passes (3/4). The home regime is the L0 cell holding the span's midpoint, so every cell agrees (`beams_of_cell`).
+- **Span draws** (`absorb(line, span)`): present, full, then for partial spans `a0`, `a1` and two end kinds, then width (`32 + 16·range(0, 24)`), section (square 50, flattened 20, round 30), kind, and the detail seed. A full span's end is `Continue` only if the next span exists and touches the boundary, otherwise `Stub`.
+- **Kinds.** Weights girder 30, inhabited 15, truss 20, conduit 10, rail 8, stepped 7, stair 60 (only directions in a vertical plane of X or Z with slope exactly 1/2, so the 64-tread stair of 16 m over 32 m fits), fallen 5 (directions with a vertical part). Stair directions are skew, the rarest class, so stair beams are rare.
+- **Pieces** are positioned from the beam's own start, never from the cell, so repeated parts (floors every 6 m, bays of `max(32, w/2)` m, steps, tram cars every 600 m) land identically in every cell. Conduits are seven parallel cylinders; trusses have four chords, frames and a diagonal on each side face (a box in the table direction nearest the brace); inhabited beams are a tube with floors; stepped beams drift up and down on a wave of eight; rail beams carry a rail and trams; stair beams are a staircase of 32 m blocks, each with a stair run.
+- **Ends.** Knot ends carry a junction block (FRM-13); stub ends carry three shards (FRM-04). Ends fall on L1 faces, so a solid-agreement test excludes the zones of ending beams.
+- **Knot.** Drawn in the inner box `[1, 7)³`, snapped to a beam within one L2 cell (ties: beam index, then cell index), a beam whose end is a knot in the cell winning outright. Hub family weights 40, 20, 25, 5, 10. The structure is a junction block with a beacon.
+- **Census.** `Beam::tags()` gives FRM-01, FRM-02 (oblique), FRM-03, the kind and FRM-04 per stub; `is_mega_bridge` gives FRM-14 (any sampled axis point inside a Between).
+- **Not in `l1_cell` yet:** assembled with the arteries at PW.2.8 (`GEN_VERSION` 7); beam density per cell is 1–6 at present (mean about 3), below the 4–10 of §4W.1.4 because spans are partial; the census (PW.2.11) may retune.
+
 #### 4W.2.2 Knots
 
 *Owners: FRM-13.*

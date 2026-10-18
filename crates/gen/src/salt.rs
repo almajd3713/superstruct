@@ -52,6 +52,10 @@ salts! {
     CAVITY_BITE = 0x0208;
     /// Keyed by `LayerKey(L1, W = 4)`: tram lines per deck.
     TRAM_LINE = 0x0209;
+    /// `(p, q, direction)`: a beam line (`levels.md` §4W.1).
+    LINE_BEAM = 0x0210;
+    /// Cell (L1): the knot draw.
+    KNOT = 0x0212;
     /// Cell (L0) with the Between index absorbed: identity of a run (`levels.md` §4W.6.1).
     BETWEEN_KEY = 0x0216;
     /// `(p, q, run key)`: the site draw of a Between lattice.

@@ -45,44 +45,30 @@ After playing the Phase 5 build, the user found the world empty and dull: deck s
 
 The user wants wild, varied ideas, not literal readings. Their examples, and the ones in these docs, are seeds. When implementing a family, multiply its variants. When stuck for ideas, research or ask the user.
 
-## State at handoff (updated 2026-10-18, end of PW.1)
+## State at handoff (updated 2026-10-18, end of PW.2.5)
 
-**Done and committed:** PW.0.1–PW.0.7 (all specs) and PW.1.1–PW.1.3 (oriented primitives). `GEN_VERSION` is still 6: nothing emits oriented pieces yet, and the goldens are unchanged. The game still runs the old generator. **Next item: PW.2.1** (regime fields and orientation policies), then the rest of PW.2 in order; `python3 scripts/coverage.py --todo` lists it.
+**Done and committed:** PW.0.1–PW.0.7, PW.1.1–PW.1.3, PW.2.1–PW.2.5. `GEN_VERSION` is still 6: nothing is assembled into `l1_cell` yet (the Web L1 is assembled at PW.2.8, which bumps to 7, puts `web` back into the L0 golden digest in `crates/gen/tests/golden.rs` and regenerates the goldens). **Next item: PW.2.6** (voids), then PW.2.7, PW.2.8…; `python3 scripts/coverage.py --todo` lists it. Also open: PW.2.4b (openings and dressing on Tilted skins).
 
-**Specs written (read before coding the matching item):**
-
-| File | Section | Covers |
+**New modules in `crates/gen/src`** (each has its spec section and tests):
+| Module | What | Spec |
 |---|---|---|
-| `docs/spec/regimes.md` | §7–§12 | Web fields on the regime, strata and Between kinds (64 m units, face-keyed seam Betweens), per-style palettes, stratum character, salts `0x0110–0x0117` |
-| `docs/spec/primitives.md` | §2, §9 | oriented shapes, integer frames, helix, clipping, bounds |
-| `docs/spec/hashing.md` | §6.1 | no transcendentals in `gen`, rotation tables |
-| `docs/spec/levels.md` | §1.4, §3W, §4W, §5W, §6W | L0 line features, L1 line machinery, frame, voids, fill, arteries, L2 tissue framework, L3 multi-entrance |
-| `docs/spec/ports.md` | §6W | new connectivity argument (Theorem W) |
-| `docs/spec/gravity.md` | all | `g(p)`, wells, gates, lulls, drift, fall rule |
-| `docs/spec/traversal.md` | §2.2, §3, §6 | ladders, auto-crouch, fall pointer |
-| `docs/spec/web-report.md` | all | metrics, census, bots |
+| `regime_web.rs` | `WebFields` on `Regime`, per-style tables, orientation policies and `frame_at/l1/l2` | `regimes.md` §7, §9 |
+| `stack.rs` | the stack of an L0 cell: crusts, Between kinds, face-keyed seams, `u_units` for Flat/Tilted/Vertical/Curved (Curved is Flat until wells, PW.6) | `regimes.md` §8 |
+| `l1_between.rs` | Between content STR-03..11 as `WebPiece { tag, prim }`; shares `Gen`, `Run`, `runs`, `begin` with the surface module | `levels.md` §4W.6.1 |
+| `l1_surface.rs` | skin plates with openings (HOR-02 as data), roofscape, ceiling-scape, skin, section cliff | `levels.md` §4W.6.2 |
+| `l1_frame.rs` | beams on every line, kinds, knots, mega-bridge census | `levels.md` §4W.2.1a |
 
-**Key design decisions made while specifying (change only with the user):**
-- **The skeleton carries connectivity, not the crusts.** Every face between two live L1 cells has at least 2 ports, every cell has a tree of arteries to its knot, and Betweens are live (catwalks, tethers). Arteries may cross air as spanning types, so the BFS fallback never fails. Theorem W does not depend on stack geometry, voids or the neighbouring regime.
-- **Stacks:** crusts and Betweens in 64 m units. The Between at an L0 face is derived from the face key and split half and half, so no crust touches an L0 face along the stack axis.
-- **Voids** stay in the inner 6×6×6 L1 cells; Bores are the exception.
-- **Oriented pieces** are `Shape::Oriented { frame, origin, local, clip }`. A frame is a key into constant tables (64 headings, 7 tilts, 49 directions); axes use `sqrt` only. Axis-aligned output is bit-identical.
-- **Gravity** is a vector sum of well contributions with integer max-norm-8 directions; lulls fall out of cancellation. Gates are L2 zones that override the field locally.
-- Provisional numbers waiting for the user's playtest: drift acceleration and decay, 90°/s re-orientation cap, 1.2 m crouch, tilt table steps.
+**Tools:** `slice --stack` (stacks) and `slice --between` (elevation of one L1 layer with Between, surface and frame pieces, one colour per ID; pieces are drawn as projected bounds). Pictures are in `out/` (git-ignored).
 
-**Code written:**
-- `crates/gen/src/orient.rs`: tables, `Frame`, `Oriented`, `helix_stair`, `facet_ring`, `beam_cylinder`, and a test that scans `gen` for banned float functions.
-- `crates/gen/src/walk_oriented.rs`: sample-graph nav for oriented pieces. `validate::check_cell` still uses the plate path only.
-- Engine: `primmesh::add_oriented` with `clip_polygon`; `FarInstance` is now 64 bytes with an origin and quaternion (far-band buffer 32 → 64 MB, **no timing measured**); WGSL `sdf_oriented_box` in `horizon.wgsl` (matches the CPU to 2e-5 m); collision works through the SDF with no change.
-
-**Still open from PW.1:**
-- Screenshots in `out/oriented-*.png` were taken natively on Windows (`scripts/win.sh test -p engine --test render oriented_pieces`). The far band draws oriented solids unclipped (documented in `primitives.md` §9.4).
-- The SDF horizon is still the port of the version-6 L1 rules. It gains oriented beams when the Web L1 lands (PW.2.5); it will need the shader port and a CPU-vs-GPU test for each new rule.
-- `streamer::tests::band_radii_change_live` failed once under heavy machine load and passes alone; treat it as timing-flaky.
-- The `Primitive` size grew (an inline `Oriented` roughly doubles `Shape`). Measure memory and generation time when the first oriented content ships, and box it if it hurts.
+**Decisions made while building (change only with the user):**
+- Features hang on a lattice site and a run key, never on the cell, so cells agree; lattice pitches divide 4096 so nothing crosses an L1 face sideways; nothing crosses an L0 side face (that is the section cliff).
+- A Tilted stack wraps: its last and first Betweens are one run. `tilt_shift` uses the frame's `sqrt` so skin slabs lie on the stack.
+- Between density is calibrated to `fill_between / 255` over 2–20 and saturates near 8 % above (a review note caught a first version that saturated at fb 10).
+- Beam density is about 3 per cell, below the 4–10 in the spec, because spans are partial; the census (PW.2.11) may retune.
+- Stair beams are rare (they need a skew direction at slope 1/2).
 
 **Practical notes:**
-- `scripts/check.sh` takes several minutes; run it in the background.
-- Render tests skip in WSL. Use `scripts/win.sh test -p engine --test render <name>` and read `out/*.png`.
-- Commit one item per commit, no AI attribution (user rule, overrides the harness reminder).
+- `scripts/check.sh` takes several minutes. `streamer::tests::band_radii_change_live` is timing-flaky and passes alone.
+- Face-agreement tests sample two points `2·eps` apart, so they allow about 1 % tangent differences and exclude beam ends, which fall on faces.
+- Commit one item per commit, no AI attribution (user rule).
 - Older open sign-offs from Phases 1–5 are unchanged; see `docs/handoff-phase5b.md`.
