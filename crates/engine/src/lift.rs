@@ -11,6 +11,10 @@ pub const LONG_CRUISE: f32 = 30.0;
 /// Cruise speed of a short L2 shaft lift (under 200 m).
 pub const SHORT_CRUISE: f32 = 6.0;
 pub const ACCEL: f32 = 1.5;
+/// Acceleration of an empty car answering a call: nobody aboard, so no comfort limit.
+pub const EMPTY_ACCEL: f32 = 4.0;
+/// Height of one L1 cell, the unit the base moves in when the car changes cell.
+pub const CELL_HEIGHT: f32 = 4096.0;
 /// Thickness of the car's floor slab, metres; its top is the stop height.
 pub const CAR_THICKNESS: f32 = 0.5;
 /// Share of `ACCEL` used for the braking curve.
@@ -26,10 +30,15 @@ pub struct Lift {
     /// Stop heights above `base`, ascending.
     stops: Vec<f32>,
     cruise: f32,
+    accel: f32,
     /// Floor height above `base`, and speed along y.
     y: f32,
+    /// Height at the start of the last update, for the platform velocity.
+    prev_y: f32,
     vel: f32,
     target: Option<f32>,
+    /// Brake to a stop and wait, keeping the target.
+    hold: bool,
 }
 
 impl Lift {
@@ -42,14 +51,74 @@ impl Lift {
         cruise: f32,
     ) -> Self {
         let y = stops.get(at).copied().unwrap_or(0.0);
+        Self::new_at(base, footprint, stops, y, cruise)
+    }
+
+    /// A car resting at `height`, which need not be a stop.
+    pub fn new_at(
+        base: WorldPos,
+        footprint: (Vec2, Vec2),
+        stops: Vec<f32>,
+        height: f32,
+        cruise: f32,
+    ) -> Self {
         Self {
             base,
             footprint,
             stops,
             cruise,
-            y,
+            accel: ACCEL,
+            y: height,
+            prev_y: height,
             vel: 0.0,
             target: None,
+            hold: false,
+        }
+    }
+
+    pub fn set_accel(&mut self, accel: f32) {
+        self.accel = accel;
+    }
+
+    pub fn accel(&self) -> f32 {
+        self.accel
+    }
+
+    /// Sends the car straight to `stop` (any height).
+    pub fn go_to(&mut self, stop: f32) {
+        self.target = Some(stop);
+    }
+
+    /// While held the car brakes to a standstill and waits, keeping its target.
+    pub fn set_hold(&mut self, hold: bool) {
+        self.hold = hold;
+    }
+
+    pub fn base(&self) -> WorldPos {
+        self.base
+    }
+
+    /// Distance the floor moved during the last update, metres.
+    pub fn step_displacement(&self) -> f32 {
+        self.y - self.prev_y
+    }
+
+    /// Replaces the stop list, keeping the car where it is and heading where it was.
+    pub fn set_stops(&mut self, stops: Vec<f32>) {
+        self.stops = stops;
+    }
+
+    /// Moves the base up by `cells` L1 cells and shifts every height down by the same exact
+    /// amount (a multiple of 4096 m, so the subtractions are exact), leaving the car where it is
+    /// in the world.
+    pub fn rebase(&mut self, cells: i64) {
+        let shift = cells as f32 * CELL_HEIGHT;
+        self.base = self.base.offset(Vec3::Y * shift).unwrap_or(self.base);
+        self.y -= shift;
+        self.prev_y -= shift;
+        self.target = self.target.map(|t| t - shift);
+        for s in &mut self.stops {
+            *s -= shift;
         }
     }
 
@@ -103,20 +172,28 @@ impl Lift {
     /// the current speed reaches the remaining distance, brake at exactly the rate that stops it
     /// on the target.
     pub fn update(&mut self, dt: f32) {
+        self.prev_y = self.y;
         let Some(target) = self.target else {
             self.vel = 0.0;
             return;
         };
+        if self.hold {
+            // Shed speed at the car's acceleration and wait where it stops.
+            let dv = self.accel * dt;
+            self.vel -= self.vel.clamp(-dv, dv);
+            self.y += self.vel * dt;
+            return;
+        }
         let remaining = target - self.y;
         let dir = remaining.signum();
         let dist = remaining.abs();
         // Speed towards the target; negative while still moving away from it.
         let mut speed = self.vel * dir;
         let needed = speed * speed / (2.0 * dist.max(1.0e-3));
-        if speed > 0.0 && needed >= BRAKE * ACCEL {
-            speed -= needed.min(ACCEL) * dt;
+        if speed > 0.0 && needed >= BRAKE * self.accel {
+            speed -= needed.min(self.accel) * dt;
         } else {
-            speed = (speed + ACCEL * dt).min(self.cruise);
+            speed = (speed + self.accel * dt).min(self.cruise);
         }
         if speed > 0.0 && speed * dt >= dist || dist < 1.0e-3 {
             self.y = target;
@@ -126,6 +203,28 @@ impl Lift {
         }
         self.vel = speed * dir;
         self.y += self.vel * dt;
+    }
+
+    /// The centre of the shaft at `height` above the base.
+    pub fn point_at(&self, height: f32) -> WorldPos {
+        let (min, size) = self.footprint;
+        self.base
+            .offset(Vec3::new(
+                min.x + size.x * 0.5,
+                height,
+                min.y + size.y * 0.5,
+            ))
+            .unwrap_or(self.base)
+    }
+
+    /// Distance the car needs to stop from its present speed, metres.
+    pub fn stopping_distance(&self) -> f32 {
+        self.vel * self.vel / (2.0 * BRAKE * self.accel)
+    }
+
+    /// The footprint of the car: minimum corner and size in x and z, metres from the base.
+    pub fn footprint(&self) -> (Vec2, Vec2) {
+        self.footprint
     }
 
     /// The floor slab's minimum corner.
@@ -268,5 +367,75 @@ mod tests {
         l.go(true);
         let (_, peak_v, _) = ride(&mut l);
         assert!((peak_v - SHORT_CRUISE).abs() < 0.05, "{peak_v}");
+    }
+
+    #[test]
+    fn an_empty_car_answers_a_call_in_about_six_seconds() {
+        let mut l = Lift::new_at(
+            WorldPos::ORIGIN,
+            (Vec2::new(100.0, 100.0), Vec2::new(16.0, 16.0)),
+            vec![0.0],
+            32.0,
+            LONG_CRUISE,
+        );
+        l.set_accel(EMPTY_ACCEL);
+        l.go_to(0.0);
+        let (secs, _, peak_a) = ride(&mut l);
+        assert!((5.0..=7.0).contains(&secs), "{secs} s");
+        assert!(peak_a <= EMPTY_ACCEL + 0.01, "{peak_a} m/s^2");
+        assert_eq!(l.height(), 0.0);
+    }
+
+    #[test]
+    fn rebasing_moves_nothing_in_the_world() {
+        let mut l = lift(&[0.0, 4200.0], LONG_CRUISE);
+        l.set_stops(vec![0.0, 4000.0, 4200.0]);
+        l.go_to(4200.0);
+        l.rebase(0);
+        let dt = 1.0 / 120.0;
+        // Ride from 0 towards 4200 (the 4000 m stop is passed); rebase once past 4096 m.
+        let mut rebased = false;
+        let mut last = l.car_origin();
+        let mut worst_gap = 0.0_f32;
+        while !l.idle() {
+            l.update(dt);
+            if !rebased && l.height() >= CELL_HEIGHT {
+                l.rebase(1);
+                rebased = true;
+            }
+            let now = l.car_origin();
+            let step = now.delta(&last).length() as f32;
+            worst_gap = worst_gap.max((step - l.velocity().abs() * dt).abs());
+            assert!(step < 0.3, "jumped {step} m");
+            last = now;
+        }
+        assert!(rebased);
+        // Landed exactly on the stop, now measured from the new base.
+        assert_eq!(l.height(), 4200.0 - CELL_HEIGHT);
+        assert!(worst_gap < 1.0e-3, "{worst_gap}");
+    }
+
+    #[test]
+    fn a_held_car_brakes_within_the_stopping_distance_and_resumes() {
+        let mut l = lift(&[0.0, 4096.0], LONG_CRUISE);
+        l.go(true);
+        let dt = 1.0 / 120.0;
+        while l.velocity() < LONG_CRUISE - 1.0e-3 {
+            l.update(dt);
+        }
+        let start = l.height();
+        l.set_hold(true);
+        let (mut peak_a, mut last) = (0.0_f32, l.velocity());
+        while l.velocity() > 0.0 {
+            l.update(dt);
+            peak_a = peak_a.max(((l.velocity() - last) / dt).abs());
+            last = l.velocity();
+        }
+        assert!(l.height() - start < 340.0, "{} m", l.height() - start);
+        assert!(peak_a <= ACCEL + 0.01, "{peak_a}");
+        assert_eq!(l.target(), Some(4096.0));
+        l.set_hold(false);
+        ride(&mut l);
+        assert_eq!(l.height(), 4096.0);
     }
 }

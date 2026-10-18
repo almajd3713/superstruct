@@ -21,6 +21,8 @@ use crate::camera::Camera;
 use crate::cellscene::busiest_l2_cell;
 use crate::controller::{Controller, EYE_HEIGHT, MoveInput};
 use crate::debugcmd::Command;
+use crate::liftplan::plan_cell;
+use crate::liftsys::{LiftInput, LiftSystem, PlanResult, PlayerView};
 use crate::gpu::{Gpu, GpuError};
 use crate::gpu_timer::GpuTimer;
 use crate::input::{Action, Bindings, InputState};
@@ -66,6 +68,11 @@ struct App {
     streamer: Streamer,
     walker: Controller,
     survival: Survival,
+    lifts: LiftSystem,
+    lift_results_tx: crossbeam_channel::Sender<PlanResult>,
+    lift_results_rx: crossbeam_channel::Receiver<PlanResult>,
+    /// Presses seen since the last fixed step, consumed by the first step of a frame.
+    lift_input: LiftInput,
     debug_tx: crossbeam_channel::Sender<crate::debugcmd::Outcome>,
     debug_rx: crossbeam_channel::Receiver<crate::debugcmd::Outcome>,
     sanctuary_pick: u64,
@@ -185,20 +192,63 @@ impl App {
                 },
                 run: steer && grabbed && self.input.held(Action::Sprint),
             };
+            self.step_lifts(dt);
             let world = self.streamer.collision();
-            self.walker.step(dt, input, world);
+            if !self.lifts.holds_controller(&self.walker.pos) {
+                self.walker.step(dt, input, world);
+            }
             if let Event::Respawn(spot) =
                 self.survival
                     .update(dt, &self.walker, self.camera.yaw, world)
                 && let Ok(eye) = spot.pos.offset(Vec3::Y * (EYE_HEIGHT + 0.05))
             {
                 self.walker.set_eye(eye);
+                self.lifts.drop_all();
                 self.camera.yaw = spot.yaw;
                 self.camera.pitch = 0.0;
                 self.prev_cam_pos = eye;
             }
             self.camera.pos = self.walker.eye();
         }
+    }
+
+    /// Runs the lift system for one fixed step: takes finished plans, sends new requests to
+    /// worker threads and gives the world its gates and cars.
+    fn step_lifts(&mut self, dt: f32) {
+        while let Ok(result) = self.lift_results_rx.try_recv() {
+            self.lifts.apply(result);
+        }
+        let view = PlayerView {
+            feet: self.walker.pos,
+            on_platform: self.walker.on_platform(),
+            controllable: self.survival.controllable(),
+        };
+        let input = std::mem::take(&mut self.lift_input);
+        let requests = self
+            .lifts
+            .update(dt, &view, input, self.streamer.collision());
+        let seed = WorldSeed(self.settings.seed);
+        for request in requests {
+            let tx = self.lift_results_tx.clone();
+            std::thread::spawn(move || {
+                crate::zone!("lift plan");
+                for cell_y in request.cells {
+                    let key = CellKey::new(
+                        Level::L1,
+                        I64Vec3::new(request.column.0, cell_y, request.column.1),
+                    );
+                    let _ = tx.send(PlanResult {
+                        column: request.column,
+                        generation: request.generation,
+                        cell_y,
+                        plan: plan_cell(seed, key),
+                    });
+                }
+            });
+        }
+        self.streamer
+            .collision_mut()
+            .set_dynamic(self.lifts.solids().to_vec());
     }
 
     /// Starts requested debug commands (overlay buttons and F5/F6) and applies finished ones.
@@ -247,6 +297,7 @@ impl App {
                         self.camera.pos = eye;
                         self.prev_cam_pos = eye;
                         self.walker.set_eye(eye);
+                        self.lifts.drop_all();
                         format!("teleported to sector {:?}", feet.sector().to_array())
                     }
                     Err(e) => e.to_string(),
@@ -493,6 +544,11 @@ impl App {
             self.camera.look(-(dx as f32) * k, -(dy as f32) * k);
         }
 
+        if self.cursor_grabbed {
+            self.lift_input.call |= self.input.pressed(Action::Interact);
+            self.lift_input.up |= self.input.pressed(Action::MoveUp);
+            self.lift_input.down |= self.input.pressed(Action::MoveDown);
+        }
         self.accumulator += frame_time;
         crate::zone!("simulate");
         while self.accumulator >= SIM_DT {
@@ -622,6 +678,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
     let start =
         WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 513.65, 458.0)).unwrap_or(WorldPos::ORIGIN);
     let (debug_tx, debug_rx) = crossbeam_channel::unbounded();
+    let (lift_results_tx, lift_results_rx) = crossbeam_channel::unbounded();
     let mut app = App {
         title: title.to_owned(),
         settings,
@@ -629,6 +686,10 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         failure: None,
         walker: Controller::new(start),
         survival: Survival::new(start),
+        lifts: LiftSystem::new(WorldSeed(settings_seed)),
+        lift_results_tx,
+        lift_results_rx,
+        lift_input: LiftInput::default(),
         debug_tx,
         debug_rx,
         sanctuary_pick: 0,

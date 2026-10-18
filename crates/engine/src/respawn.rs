@@ -156,6 +156,8 @@ impl Survival {
     fn edge_clear(&mut self, ctl: &Controller, src: &dyn SolidSource) -> bool {
         self.scratch.clear();
         src.gather(&ctl.pos, EDGE_RADIUS + 1.0, &mut self.scratch);
+        // A parked lift car must not make the spot beside its opening look like firm ground.
+        self.scratch.retain(|s| s.platform.is_none());
         (0..EDGE_RAYS).all(|k| {
             let a = std::f32::consts::TAU * k as f32 / EDGE_RAYS as f32;
             let start = Vec3::new(a.cos() * EDGE_RADIUS, EDGE_LIFT, a.sin() * EDGE_RADIUS);

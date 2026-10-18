@@ -109,13 +109,13 @@ impl CollisionChunk {
     }
 }
 
-/// A moving solid owned by the game rather than by a chunk (a lift car, a tram): a shape with
-/// its minimum corner at `origin`, moving at `velocity` m/s.
+/// A solid owned by the game rather than by a chunk (a lift car, a gate, a tram): a shape with
+/// its minimum corner at `origin`. `platform` is `Some(velocity)` for a moving platform.
 #[derive(Debug, Clone, Copy)]
 pub struct DynamicSolid {
     pub shape: Shape,
     pub origin: WorldPos,
-    pub velocity: Vec3,
+    pub platform: Option<Vec3>,
 }
 
 #[derive(Default)]
@@ -162,7 +162,7 @@ impl SolidSource for CollisionWorld {
                 out.push(Solid {
                     shape: d.shape,
                     offset,
-                    platform: Some(d.velocity),
+                    platform: d.platform,
                 });
             }
         }
@@ -274,7 +274,7 @@ pub(crate) mod tests {
         world.set_dynamic(vec![DynamicSolid {
             shape: slab,
             origin,
-            velocity: Vec3::new(0.0, 3.0, 0.0),
+            platform: Some(Vec3::new(0.0, 3.0, 0.0)),
         }]);
         let centre = origin.offset(Vec3::new(5.0, 0.5, 5.0)).unwrap();
         let mut out = Vec::new();

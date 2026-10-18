@@ -26,6 +26,8 @@ pub enum Action {
     TeleportPort,
     FreezeCulling,
     TeleportSanctuary,
+    /// Calls a lift at an opening.
+    Interact,
 }
 
 /// A physical key or mouse button.
@@ -64,6 +66,7 @@ impl Default for Bindings {
             (K::F5, A::TeleportPort),
             (K::F6, A::TeleportSanctuary),
             (K::F7, A::FreezeCulling),
+            (K::KeyE, A::Interact),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),
