@@ -10,7 +10,7 @@ use crate::prim::{FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb, QVec3
 use crate::rng::Rng;
 use crate::salt;
 use crate::seed::WorldSeed;
-use crate::walk::{solid_in_column, solid_top_below, surfaces};
+use crate::walk::{ColumnIndex, surfaces};
 
 const M: Q = 16;
 const CELL: Q = 512 * M;
@@ -26,6 +26,8 @@ const PROBE_CELL: Q = 2 * M;
 /// How far past the edge the drop is probed, and the headroom that must be free there.
 const PROBE: Q = 8;
 const GUARDED: f32 = 0.85;
+/// Plan buckets of 64 m for the point queries.
+const BUCKET_SHIFT: u32 = 10;
 
 /// What the railing pass saw, for tuning and tests.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -46,6 +48,7 @@ pub fn railings(
     let mut rng = Rng::new(hash(seed.0, Level::L2, cell.coords, salt::EDGE_GUARD));
     let mut out = Vec::new();
     let mut stats = EdgeStats::default();
+    let index = ColumnIndex::new(prims, CELL, BUCKET_SHIFT);
     for plate in surfaces(prims)
         .into_iter()
         .filter(|p| p.rise.is_none() && !p.lift && p.kind != FeatureKind::MASS)
@@ -78,8 +81,8 @@ pub fn railings(
                 } else {
                     (beyond, mid)
                 };
-                let wall = solid_in_column(prims, px, pz, y, y + 29);
-                let drop = y - solid_top_below(prims, px, pz, y).unwrap_or(y - 100 * CELL);
+                let wall = index.solid_in_column(px, pz, y, y + 29);
+                let drop = y - index.solid_top_below(px, pz, y).unwrap_or(y - 100 * CELL);
                 let is_drop = !wall && drop > FALL_THRESHOLD;
                 run = match (run, is_drop) {
                     (Some((s, _)), true) if b - s <= SEGMENT => Some((s, b)),
@@ -162,7 +165,7 @@ mod tests {
     use super::*;
     use crate::l2::l2_cell_in;
     use crate::l2_port::L1Cache;
-    use crate::walk::cell_window;
+    use crate::walk::{cell_window, solid_top_below};
 
     /// P0.8.8: about 15 % of drop edges are left unguarded, and every railing stands on a
     /// flat edge above a real drop.

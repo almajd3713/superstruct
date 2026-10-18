@@ -357,6 +357,68 @@ pub fn solid_top_below(prims: &[Primitive], x: Q, z: Q, y: Q) -> Option<Q> {
         .max()
 }
 
+/// Collidable primitives bucketed by plan position, for many point queries against one set.
+/// Answers exactly what [`solid_top_below`] and [`solid_in_column`] answer, without scanning
+/// every primitive per query.
+pub struct ColumnIndex<'a> {
+    prims: &'a [Primitive],
+    shift: u32,
+    side: usize,
+    buckets: Vec<Vec<u32>>,
+}
+
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // clamped to the grid
+impl<'a> ColumnIndex<'a> {
+    /// Buckets of `2^shift` quanta over a square of `extent` quanta from the origin. Primitives
+    /// outside the square are kept in the nearest edge bucket, so queries stay correct.
+    pub fn new(prims: &'a [Primitive], extent: Q, shift: u32) -> Self {
+        let side = ((extent >> shift) + 1).max(1) as usize;
+        let mut buckets = vec![Vec::new(); side * side];
+        let clamp = |v: Q| ((v >> shift).max(0) as usize).min(side - 1);
+        for (i, p) in prims.iter().enumerate().filter(|(_, p)| collidable(p)) {
+            let bb = p.aabb();
+            // A cylinder's disk lies inside its box, so the box bounds both.
+            let (x0, x1) = (clamp(bb.min.x), clamp(bb.max.x));
+            let (z0, z1) = (clamp(bb.min.z), clamp(bb.max.z));
+            for z in z0..=z1 {
+                for x in x0..=x1 {
+                    buckets[z * side + x].push(i as u32);
+                }
+            }
+        }
+        Self {
+            prims,
+            shift,
+            side,
+            buckets,
+        }
+    }
+
+    fn bucket(&self, x: Q, z: Q) -> &[u32] {
+        let clamp = |v: Q| ((v >> self.shift).max(0) as usize).min(self.side - 1);
+        &self.buckets[clamp(z) * self.side + clamp(x)]
+    }
+
+    pub fn solid_top_below(&self, x: Q, z: Q, y: Q) -> Option<Q> {
+        self.bucket(x, z)
+            .iter()
+            .map(|&i| &self.prims[i as usize])
+            .filter(|p| covers(p, x, z))
+            .map(Primitive::aabb)
+            .filter(|bb| bb.min.y < y)
+            .map(|bb| bb.max.y.min(y))
+            .max()
+    }
+
+    pub fn solid_in_column(&self, x: Q, z: Q, y0: Q, y1: Q) -> bool {
+        self.bucket(x, z).iter().any(|&i| {
+            let p = &self.prims[i as usize];
+            let bb = p.aabb();
+            covers(p, x, z) && bb.min.y < y1 && bb.max.y > y0
+        })
+    }
+}
+
 /// Whether a collidable solid occupies the plan point somewhere strictly inside `(y0, y1)`.
 pub fn solid_in_column(prims: &[Primitive], x: Q, z: Q, y0: Q, y1: Q) -> bool {
     prims.iter().any(|p| {
