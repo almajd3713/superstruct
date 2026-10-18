@@ -554,7 +554,7 @@ Structures are placed until the built fraction reaches the fill density `f` (the
 5. **Place.** The support gives an anchor surface point and an orientation. The structure's volume is rasterised on the lattice. It is accepted if:
    - it overlaps no `Reserved` slot and no `Built` slot, except where the support is `Colliding`, `Embedded` or `Nested` and the overlap is intended;
    - it overlaps a `Route` slot only if the segment there is engulfable (then those slots become `Engulfed` and the segment gets `Entrance`s, below);
-   - it stays inside the cell (clipped by the cell box where a form crosses the face is not allowed here: a structure that would cross a face is cut by the clip, and only if it is a keyed feature from L1 may it do so; tissue structures must fit);
+   - it lies wholly inside the cell with the usual 8 m margin (tissue structures are not clipped across faces; only L1 keyed features cross faces);
    - its access can be made (below).
 6. **Access.** The structure has at least one **entrance** on its support contact, and **more entrances** when it is large (one per 30 m of footprint, up to 8), including where an engulfed route enters and leaves. Each entrance is joined to `R` by a walk like step 2 (a complete lattice, so it succeeds), unless the structure is itself on a route. Entrances become `PortKind::Entrance` ports with a `ForcedPort` for L3 (`levels.md` §6.6). A form that is **sealed** by its own definition (a blank monument face, a sealed capsule) is marked `NO_ENTRANCE` and is exempt; sealed structures must still be tied to the support by contact.
 7. **Accretion.** A new structure exposes new support surfaces: its roof, underside and sides. They join the surface list for the next attempts. This is how structures grow on structures.
@@ -729,6 +729,8 @@ New L2 salts (block `0x0300–0x03FF`, append-only):
 Draw order in an L2 cell: reserve (no draws), route (anchors, walks, segments, loops, engulf marks), grow (attempts in order), dress (edges, skin, dead ends, closing loops). Every attempt and every pass draws a fixed number of values.
 
 ## 6. L3: Blocks (64 m)
+
+> **Web redesign.** From version 7 the plan, entrances and skeleton are those of §6W. The rest of this section (tiles, solver, sockets, fallback, validator) is reused.
 
 **Specified in P4.1.1 (2026-10-18).** L3 turns every L2 mass envelope into architecture: rooms, corridors, stairwells, voids and pipe runs. Each block is solved on its own by model synthesis, inside boundary conditions that its parent fixes completely. Everything outside envelopes is already final at L2.
 
@@ -1057,6 +1059,153 @@ Headroom and steps are enforced through the Nav (plates need 29 Q of headroom, l
 | P4.1.6 | Loop frequency: fired / candidates | ≥ 10⁴ candidates | within 0.30 ± 0.015 (about 3σ) |
 | P4.1.6 | Loops exist: realized extra links | same cells | ≥ 1 in at least 20 % of cells with ≥ 3 nodes |
 | P4.1.6 | `check_l3` after the change | ≥ 10⁴ active blocks | every port and entrance reachable; 0 failures |
+
+## 6W. L3 in the Web: buildings as passages (64 m)
+
+*PW.0.5. Version 7. §6 stays the specification of versions 1–6 and of the tile solver, boundary sockets, fallback and validator, which are reused. This section changes what feeds them: any number of entrances on any face or storey, a skeleton over all of them, and interior archetypes. Owners: L3-01..21 (PW.4.1–PW.4.3), INT-01..19 (PW.4.4, PW.4.5). Architecture: `the-web.md` §10.1.*
+
+### 6W.1 Mass lattice and frames
+
+- A **mass** is an L2 structure (`§5W.4`, `ENVELOPE`). It carries a frame `F` (`regimes.md` §7.4) with **local up** `ey`. Its floors are always normal to `ey`: inverted, hanging, sideways, tilted and radial forms differ only in silhouette, support and entrances (L3-21).
+- Its **mass lattice** is the lattice of `§6.3` (8 × 16 × 8 slots of 8 × 4 × 8 m per block, storeys along `ey`) laid in the frame `F`, with its origin at the mass's frame origin.
+  - For `Id` and quarter-turn frames (the frame maps world axes to world axes) the mass lattice is the **world L3 lattice**: blocks are the world L3 cells, exactly as in §6.
+  - For any other frame, **mass blocks** are the 64 m cubes of the mass lattice. A world L3 cell does not solve them; it emits, for every mass block it overlaps, that block's pieces **clipped to the L3 cell box** (§1.4). A mass block is a pure function of `(mass key, block index)`, so every world cell that touches it derives the same block. Mass blocks are cached by that key.
+- The **mass key** is `hash(seed, L2, owner, L3_MASS)` with the mass index absorbed; a mass block adds its lattice index. Everything below that says "block" means a world L3 cell or a mass block according to the frame.
+- A block is **active** if it overlaps an envelope of its mass with positive volume (test on the integer AABB, `primitives.md` §9.5, then on the oriented volume).
+- **Twisted forms** (L3-13): the form has a central core column (a spine) that is rotationally symmetric. Every storey has its own lattice frame, turned by `k · δ` headings (`δ` from the form), and storeys connect **only** through the core: vertical sockets are P on the core column and F elsewhere. Each storey's skeleton is then solved in its own frame, and the core column's door is on the storey's own ring.
+
+### 6W.2 Entrances
+
+*Owners: L3-01, L3-02.*
+
+An **entrance** is an `Entrance` port (`ports.md` §2.1) with a `ForcedPort` into L3. A mass has **any number** of them: `0 ..` as many as L2 emitted (§5W.2). Where they come from:
+
+- the structure's support contact (§5W.2 step 3.6), one or more;
+- every end of an engulfed route (§5W.2), at the storey given by the route's height;
+- additional entrances for large masses: one per 30 m of footprint, up to 8;
+- L2 set pieces and thresholds on the mass.
+
+```rust
+pub enum EntranceKind {
+    Door,      // a doorway in a side wall, any storey
+    RoofHatch, // opening in the roof, to the top storey
+    FloorHatch,// opening in the floor of storey 0 (hanging forms, structures on stilts)
+    Ladder,    // a ladder port: a hatch with a ladder well of one column
+}
+```
+
+- Each entrance has a **storey** `t_e` and a **column** `c_e`:
+  - `Door`: `t_e` is the storey whose floor height is nearest the entrance's floor (the route's height). `c_e` is the IN column behind the doorway, found as in §6.2 (apron, middle 4 m). If the doorway is not within an IN column, the nearest IN column in the facing direction is used and the rind between is cut as the passage of §6.4 step 4.
+  - `RoofHatch`: `t_e` = the top storey, `c_e` = the IN column under the hatch.
+  - `FloorHatch`, `Ladder` at the bottom: `t_e = 0`.
+  - `Ladder`: the same as the matching hatch, but the vertical opening is a 1 × 1 m ladder well (`Ladder` tile, `CLB` rules, `the-web.md` §9) rather than a stair.
+- The entrance doorway is at least 4 m wide for `Door` and 1.5 × 1.5 m for hatches; both obey the minimum clearance of `ports.md` §2.
+- Entrances are numbered in the order the L2 cell emitted them (`ports.md` §2.1), and a mass's entrance list is the same in every block that meets it.
+- An entrance whose column is not found (the mass has fewer than one IN column, a "vestibule-only" or sealed mass) makes the plan **Vestibule-only** or **Sealed** as in §6.4, with the count of entrances ≥ 1 forcing at least Vestibule-only.
+
+### 6W.3 Plan and skeleton over all entrances
+
+*Owners: L3-03.*
+
+Every block that meets a mass computes the same plan from the parent output alone, using `Rng::new(s_i)` of §6.4 where the draw order is extended. It generalises §6.4 as follows.
+
+**Plan class.** *Sealed* (no entrances, or `NO_ENTRANCE`), *Vestibule-only* (exactly one IN column), *Full* (two or more).
+
+**Full plan.**
+1. **Vestibules.** For each entrance `e`, the slot `(c_e, t_e)` is a fixed `Vestibule` (a hatch variant for `RoofHatch`, `FloorHatch` and `Ladder`). Two entrances may share a slot (the same column and storey): the slot then has both doorways.
+2. **Spines.** The number of spines is `n_s = min(4, 1 + floor(|IN| / 16))`. Each spine `s_j` is drawn in turn, with `below(n)` among the IN columns that are not already a spine or a vestibule column and **whose removal, together with the earlier spines, keeps the IN set 4-connected** (for the first spine, the candidate rule of §6.4). If there is no candidate, the spine count is reduced. The door direction of `s_j` is drawn among the directions whose neighbour is IN and not a spine. Every spine occupies every storey of its column, as in §6.4. For twisted forms the spines are the core column only.
+3. **Storey trees.** Each storey `t` draws `below(24)` (a permutation of the four directions). The **targets** at `t` are:
+   - the door neighbour `d_j` of every spine `s_j`;
+   - the column `c_e` of every entrance with `t_e = t`;
+   - for every 4-connected component of `IN ∖ spines` in a block part, the component's column nearest the first spine's `d` (ties: lower z, then lower x).
+
+   A BFS from `d_1` over `IN ∖ spines`, expanding in the drawn order, gives a tree; the **skeleton slots** at `t` are the union of its paths from `d_1` to all targets. The tree is connected because `IN ∖ spines` is 4-connected by the spine rule.
+4. **Entrance passages.** The rind between each doorway and its vestibule is solid minus a passage of the doorway's width, 3 m high, with a 4 Q floor slab (as §6.4 step 4). Hatch passages are vertical: the roof or floor slab between the outside and the vestibule is cut by the hatch.
+5. The **skeleton** `K` is the spines, the vestibules and the tree slots.
+
+The plan is a pure function of the parent output, so blocks agree without communicating. **Entrances at any storey** need no special cases: a storey with no entrance has a tree to its spine doors only.
+
+**Why this makes buildings through-routes.** Every entrance column is a target of the tree at its storey, and every storey's tree reaches a spine door, and spines join all storeys. So `K` is connected and contains every entrance (Lemma L3W-1 below). A building with two or more entrances is therefore a through-route between all of them. Which routes exist through it is the interior's variety.
+
+### 6W.4 Archetypes
+
+*Owners: L3-04..13 (PW.4.2).*
+
+An **archetype** adapts the interior to the form. It never changes the skeleton or the boundary conditions; it only changes tile weights, restricts non-skeleton slots, and fixes extra non-skeleton content.
+
+```rust
+pub struct Archetype {
+    pub id: ArchetypeId,                   // L3-04..13 or INT-xx
+    pub forms: &'static [FormFamily],      // where it applies
+    pub weights: TileWeightDelta,          // multiplies tile weights of the solver
+    pub fixed: fn(&MassPlan) -> Vec<FixedSlot>, // extra fixed slots that are not in K
+    pub payoff: bool,                      // whether it provides an interior payoff (§6W.6)
+}
+```
+
+- The archetype is picked per mass by `pick_weighted` over those that apply to the form and are not banned by the character, weighted by the character's quarter weights (`regimes.md` §10).
+- A fixed slot added by an archetype must not occupy a skeleton slot, must keep every socket consistent (the same rule as §6.6), and must keep the acceptance rule satisfiable (a fixed slot that is walkable must be adjacent, by a D side, to a skeleton slot or another walkable fixed slot that is).
+- The list (L3-04..13):
+
+| Id | Archetype | Applies to | Restriction |
+|---|---|---|---|
+| L3-04 | office grid | slabs, towers | regular W/D pattern at 2-slot pitch; corridors on the skeleton |
+| L3-05 | cell block | slabs, drums | rows of 1-slot cells off a skeleton corridor |
+| L3-06 | hall with mezzanine | towers, cages | a double-height `Atrium` core with an edge gallery |
+| L3-07 | ramp core | towers, drums | the spine is replaced by a helical ramp (walkable slope) |
+| L3-08 | stacked lofts | slabs, sideways | alternating wide storeys |
+| L3-09 | open cage | cages, gantries | most slots `Out`-like, floors only on the skeleton |
+| L3-10 | machine floors | plants, machines | big `Atrium` volumes with catwalks on the skeleton |
+| L3-11 | rack aisles | rack canyons, data | long narrow aisles between solid racks |
+| L3-12 | radial plan | rotundas, domes | spokes from a central spine |
+| L3-13 | twisted floors | twisted towers | per-storey frame (§6W.1) |
+
+The rule "**banning** ≥ one archetype never leaves none": the plain solver (no archetype) is always legal and is the fallback.
+
+### 6W.5 Corridor kinds and interiors
+
+*Owners: L3-14..20 (PW.4.3), INT-01..19 (PW.4.4, PW.4.5).*
+
+- **Corridor kinds** are tile classes and restrictions applied along skeleton edges: galleries over double-height rooms (L3-14), stepped corridors that climb half a storey (L3-15, a 2 m rise within one slot: allowed because the step-up total stays within the ramp rule, `traversal.md`), enfilades of rooms in a line (L3-16), dog-legs with a window at the bend (L3-17), corridors open to an atrium (L3-18), skew corridors at the grain angle (L3-19, an oriented corridor slab clipped to the block, built from the same `Oriented` boxes), and ladder wells between floors (L3-20, `Ladder` tiles). Each is drawn per skeleton edge by `pick_weighted` over the character's weights; a kind that cannot fit is skipped, down to the plain corridor.
+- **Interiors batch 2** (INT-01..19) are specified as **set-piece rooms** with a footprint in slots and a restriction list, placed by the archetype step on non-skeleton slots, with each fixed slot respecting the rule of §6W.4. They provide payoffs (§6W.6).
+- All of them are built from the existing tile alphabet plus the new tiles `Ladder`, `Hatch`, `Ramp` (a half-storey ramp), `Gallery` (a floor with a drop), and `Rack` (solid with aisles). New tiles are **appended** to the alphabet (`§6.5`), with sockets that follow the rules there, and each new tile adds its masks.
+
+### 6W.6 Payoffs inside buildings
+
+A mass with one entrance is a dead end (PRN-05) unless it is `Sealed`. Its payoff is inside:
+
+1. an archetype's **payoff room** (INT-xx, a window room onto a long sightline, a lift lobby, a shrine) placed at the walk-farthest walkable slot from the entrance;
+2. else a **view room**: the farthest room that has an exterior face gets a window slot (an opening in the rind) facing a free or void direction;
+3. else a **lamp** in the farthest room (always possible).
+
+A mass with ≥ 2 entrances needs none: it is a through-route.
+
+### 6W.7 Boundary conditions and agreement
+
+Section 6.6 stands with these changes:
+- Block faces mean **mass block faces** (the mass lattice). Face patterns are drawn from `hash(seed, L3, mass block owner, PORT_FACE_X | PORT_FACE_Z)` with the mass key absorbed first, so two blocks of the same mass agree. The pattern is not used across a boundary between two different masses (masses are ≥ 8 m apart, so no `Core` slot touches another mass's).
+- A `Vestibule`, spine, hatch and ladder slot is a **fixed slot**; its sockets are fixed.
+- For clipped (non-aligned) mass blocks the L3 ports on the **world** L3 cell faces are not generated: the world cell has no solve. The ports of a mass block are those on its own faces, and the world L3 cell lists the entrances that lie in it, as before.
+
+### 6W.8 Acceptance and the fallback
+
+Section 6.8 stands. The fallback rooms set R now includes every vestibule and every spine door, and the fallback path from each face-D slot ends at the nearest skeleton slot (which now includes all vestibules). The proofs are rewritten for the plan above.
+
+**Lemma L3W-1 (K connects every entrance).** In a Full mass, `K` is connected in the walk graph across blocks and contains every entrance's vestibule. *Proof.* Each storey's tree is a connected BFS tree over `IN ∖ spines` (the spine rule keeps that set 4-connected), containing every target, which includes the door neighbours of all spines and the column of every entrance at that storey. Tree edges are O/D inside a block and fixed D across block faces, the same in both blocks. Every spine door is a skeleton slot at every storey, and a spine's P stack joins all storeys. So any two skeleton slots are walk-connected, and every vestibule is a skeleton slot. ∎
+
+**Lemma L3W-2 (block closure) and L3W-3 (geometry).** As Lemmas L3-3 and L3-4, with `K` as defined here. Archetype fixed slots obey §6W.4, so the acceptance rule and the fallback still apply. The fallback is legal for every boundary condition because it uses only `Room` and `Solid`, plus fixed slots, whose sockets are fixed.
+
+**Theorem L3W (through-routes).** For every mass with entrances `E` (|E| ≥ 1):
+1. every entrance connects, inside the parent L2 cell, to N (Theorem L3, via its apron, hatch landing or ladder base, which L2 joined to its routes, §5W.2 step 3.6);
+2. for |E| ≥ 2, every entrance is walk-connected to every other entrance **inside the mass**;
+3. every L3 walkable surface of the mass is connected to `K`, or sealed.
+*Proof.* (1) is Theorem L3 with the new `K`. (2) is Lemma L3W-1. (3) is the acceptance rule. ∎ "Inside the mass" is within the union of its blocks, each of which attaches to `K` by Lemma L3W-2.
+
+### 6W.9 Salts, draw order and census
+
+- New salts (L3 block, `0x0400–0x04FF`): `L3_ARCH` `0x0410` (archetype pick), `L3_CORR` `0x0411` (corridor kinds), `L3_PAYOFF` `0x0412` (payoff rooms). The existing `L3_MASS`, `L3_SOLVE`, `L3_RETRY`, `L3_PIPE` and the port face salts are reused.
+- Draw order in a mass plan: vestibules (no draws), spines (`n_s` draws), the door directions, `below(24)` per storey, archetype, corridor kinds per skeleton edge in index order, payoff.
+- The census counts, per mass, the archetype id, the corridor kinds, the entrance kinds and the payoff id (`Instance` tags, §5W.9).
 
 ## 7. L4: Modules (8 m), outline
 
