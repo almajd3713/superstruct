@@ -186,6 +186,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     let n = normalize(in.normal);
     var colour = lit_glow(n, in.material, in.glow);
+    colour = colour + material_albedo(in.material) * point_light_sum(in.rel, n, in.clip.xy, 1.0 / in.clip.w);
 
     if (globals.params.y > 0.5) {
         let wp = globals.cam_local.xyz + in.rel;

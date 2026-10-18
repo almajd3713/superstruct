@@ -13,6 +13,8 @@ const HORIZON: &str = include_str!("../shaders/horizon.wgsl");
 const HORIZON_CACHE: &str = include_str!("../shaders/horizon_cache.wgsl");
 const HORIZON_MARCH: &str = include_str!("../shaders/horizon_march.wgsl");
 const POST: &str = include_str!("../shaders/post.wgsl");
+const LIGHTS: &str = include_str!("../shaders/lights.wgsl");
+const LIGHT_CULL: &str = include_str!("../shaders/light_cull.wgsl");
 
 /// Fully composed WGSL for each pipeline.
 #[derive(Debug, Clone)]
@@ -25,6 +27,7 @@ pub struct ShaderSources {
     pub horizon_cache: String,
     pub horizon_march: String,
     pub post: String,
+    pub light_cull: String,
 }
 
 fn compose(common: &str, body: &str) -> String {
@@ -38,13 +41,14 @@ fn horizon_cache(port: &str, entry: &str) -> String {
 impl ShaderSources {
     pub fn embedded() -> Self {
         Self {
-            scene: compose(&compose(COMMON, SHADE), SCENE),
+            scene: compose(&compose(&compose(COMMON, SHADE), LIGHTS), SCENE),
             lines: compose(COMMON, LINES),
             cull: CULL.to_owned(),
             hiz: HIZ.to_owned(),
             horizon_cache: horizon_cache(HORIZON, HORIZON_CACHE),
             horizon_march: compose(&compose(COMMON, SHADE), HORIZON_MARCH),
             post: POST.to_owned(),
+            light_cull: LIGHT_CULL.to_owned(),
         }
     }
 
@@ -60,7 +64,10 @@ impl ShaderSources {
         let common = read("common.wgsl", COMMON);
         let shade = compose(&common, &read("shade.wgsl", SHADE));
         Self {
-            scene: compose(&shade, &read("scene.wgsl", SCENE)),
+            scene: compose(
+                &compose(&shade, &read("lights.wgsl", LIGHTS)),
+                &read("scene.wgsl", SCENE),
+            ),
             lines: compose(&common, &read("lines.wgsl", LINES)),
             cull: read("cull.wgsl", CULL),
             hiz: read("hiz.wgsl", HIZ),
@@ -70,6 +77,7 @@ impl ShaderSources {
             ),
             horizon_march: compose(&shade, &read("horizon_march.wgsl", HORIZON_MARCH)),
             post: read("post.wgsl", POST),
+            light_cull: read("light_cull.wgsl", LIGHT_CULL),
         }
     }
 }

@@ -468,6 +468,8 @@ pub struct ModuleBatch {
     /// Colour and strength of full-brightness emissive parts in this chunk, linear: the regime's
     /// emissive colour (`atmosphere_at`) and its light level.
     pub glow: [f32; 4],
+    /// Lit lamps: position in the chunk's frame and brightness 1 to 15. They become point lights.
+    pub lamps: Vec<([f32; 3], u8)>,
 }
 
 /// Bits of `ModuleInstance::packed` that carry the brightness.
@@ -479,6 +481,7 @@ impl ModuleBatch {
         Self {
             by_piece: vec![Vec::new(); Piece::ALL.len()],
             glow: [1.0, 0.95, 0.85, 1.0],
+            lamps: Vec::new(),
         }
     }
 
@@ -540,7 +543,13 @@ pub fn expand(modules: &[worldgen::l4::Module]) -> ModuleBatch {
                 batch.push(piece, pos, m.facing, m.glow);
             }
             ModuleKind::DoorFrame => batch.push(Piece::DoorFrame, pos, m.facing, m.glow),
-            ModuleKind::Lamp => batch.push(Piece::Lamp, pos, m.facing, m.glow),
+            ModuleKind::Lamp => {
+                batch.push(Piece::Lamp, pos, m.facing, m.glow);
+                if m.glow > 0 {
+                    // Just under the fixture.
+                    batch.lamps.push(([pos[0], pos[1] - 0.4, pos[2]], m.glow));
+                }
+            }
             ModuleKind::Grating => batch.push(Piece::Grating, pos, m.facing, m.glow),
             ModuleKind::Railing | ModuleKind::Pipe | ModuleKind::Cable => {
                 let (piece, tile) = match m.kind {

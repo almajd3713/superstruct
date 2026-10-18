@@ -11,6 +11,7 @@ use crate::gpu_timer::{GpuTimer, Zone};
 use crate::hiz::HizPass;
 use crate::horizon_pass::HorizonPass;
 use crate::kit::ModuleBatch;
+use crate::lights::{Light, LightSystem};
 use crate::mesh::Mesh;
 use crate::modsys::ModuleState;
 use crate::noise;
@@ -372,6 +373,8 @@ pub struct Renderer {
     far: FarState,
     modules: ModuleState,
     post: PostPass,
+    lights: LightSystem,
+    light_scratch: Vec<Light>,
     horizon: HorizonPass,
     world_seed: u64,
     /// Two-phase occlusion culling (needs the prepass and indirect draws).
@@ -540,9 +543,15 @@ impl Renderer {
             ],
         });
 
+        let sources = ShaderSources::embedded();
+        let lights = LightSystem::new(device, size, &sources.light_cull);
         let scene_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene layout"),
-            bind_group_layouts: &[Some(&globals_bgl), Some(&draws_bgl)],
+            bind_group_layouts: &[
+                Some(&globals_bgl),
+                Some(&draws_bgl),
+                Some(&lights.render_bgl),
+            ],
             immediate_size: 0,
         });
         let lines_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -550,7 +559,6 @@ impl Renderer {
             bind_group_layouts: &[Some(&globals_bgl)],
             immediate_size: 0,
         });
-        let sources = ShaderSources::embedded();
         let post = PostPass::new(device, format, size, &sources.post);
         let depth_view = create_depth(device, size.0, size.1);
         let hiz = HizPass::new(
@@ -589,6 +597,8 @@ impl Renderer {
             far,
             modules,
             post,
+            lights,
+            light_scratch: Vec::new(),
             horizon,
             world_seed: 0,
             occlusion: true,
@@ -926,6 +936,26 @@ impl Renderer {
         }
     }
 
+    /// Replaces the point lights; the clusters are rebuilt every frame from the nearest ones.
+    pub fn set_lights(&mut self, lights: &[Light]) {
+        self.lights.set_lights(lights);
+    }
+
+    /// The most lights any view uses; the nearest are kept (P5.1.2).
+    pub fn set_light_budget(&mut self, budget: usize) {
+        self.lights.budget = budget;
+    }
+
+    /// Lights in the cluster grid in the last frame.
+    pub fn lights_active(&self) -> u32 {
+        self.lights.active
+    }
+
+    /// Debug: test every light per fragment instead of using the clusters.
+    pub fn set_lights_brute_force(&mut self, on: bool) {
+        self.lights.brute_force = on;
+    }
+
     /// Turns the stylization prototypes on or off (`post.rs`).
     pub fn set_post(&mut self, settings: PostSettings) {
         self.post.settings = settings;
@@ -993,6 +1023,11 @@ impl Renderer {
             self.shader_error = Some(msg.clone());
             return Err(msg);
         }
+        if let Err(msg) = self.lights.reload(device, &sources.light_cull) {
+            tracing::error!("light shader reload failed, keeping previous pipelines:\n{msg}");
+            self.shader_error = Some(msg.clone());
+            return Err(msg);
+        }
         if let Err(msg) = self.post.reload(device, &sources.post) {
             tracing::error!("post shader reload failed, keeping previous pipeline:\n{msg}");
             self.shader_error = Some(msg.clone());
@@ -1012,6 +1047,7 @@ impl Renderer {
             self.cull.rebind_hiz(device, self.hiz.all_levels());
             self.horizon.resize(device, size);
             self.post.resize(device, size);
+            self.lights.resize(device, size);
         }
     }
 
@@ -1087,6 +1123,7 @@ impl Renderer {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &self.globals_bg, &[]);
         pass.set_bind_group(1, &self.instances_bg, &[]);
+        pass.set_bind_group(2, self.lights.render_bg(), &[]);
         let stride = std::mem::size_of::<IndirectArgs>() as u64;
         for run in &self.runs {
             let page = &self.pages[run.page];
@@ -1112,6 +1149,7 @@ impl Renderer {
         pass.set_pipeline(&self.pipelines.modules);
         pass.set_bind_group(0, &self.globals_bg, &[]);
         pass.set_bind_group(1, &self.instances_bg, &[]);
+        pass.set_bind_group(2, self.lights.render_bg(), &[]);
         self.modules
             .draw(pass, self.indirect_first_instance && !self.force_direct);
     }
@@ -1125,6 +1163,7 @@ impl Renderer {
         pass.set_pipeline(&self.pipelines.far);
         pass.set_bind_group(0, &self.globals_bg, &[]);
         pass.set_bind_group(1, &self.instances_bg, &[]);
+        pass.set_bind_group(2, self.lights.render_bg(), &[]);
         pass.set_vertex_buffer(0, far.unit_vertices.slice(..));
         pass.set_index_buffer(far.unit_indices.slice(..), wgpu::IndexFormat::Uint32);
         if self.indirect_first_instance && !self.force_direct {
@@ -1254,6 +1293,17 @@ impl Renderer {
             Some((f, at)) => f.translated(camera_relative(&camera.pos, at)),
             None => Frustum::from_view_proj(view_proj),
         };
+        self.light_scratch.clear();
+        self.modules.collect_lights(&mut self.light_scratch);
+        self.lights.record(
+            queue,
+            encoder,
+            &camera.pos,
+            camera.view_rotation(),
+            camera.fov_y,
+            &self.light_scratch,
+            timer.and_then(|t| t.compute_pass_writes(Zone::LightCull)),
+        );
         self.far.prepare(queue, &camera.pos, &frustum);
         self.modules.prepare(queue, &camera.pos, &frustum);
         self.horizon.prepare(

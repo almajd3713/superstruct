@@ -19,10 +19,12 @@ pub enum Zone {
     HorizonHalf = 7,
     /// The stylization pass; only recorded while a toggle is on.
     Post = 8,
+    /// Clustered light assignment.
+    LightCull = 9,
 }
 
 impl Zone {
-    pub const ALL: [Zone; 9] = [
+    pub const ALL: [Zone; 10] = [
         Zone::Scene,
         Zone::Ui,
         Zone::Cull,
@@ -32,6 +34,7 @@ impl Zone {
         Zone::HorizonCache,
         Zone::HorizonHalf,
         Zone::Post,
+        Zone::LightCull,
     ];
 
     pub fn name(self) -> &'static str {
@@ -45,6 +48,7 @@ impl Zone {
             Zone::HorizonCache => "horizon cache",
             Zone::HorizonHalf => "horizon half",
             Zone::Post => "post",
+            Zone::LightCull => "light cull",
         }
     }
 }

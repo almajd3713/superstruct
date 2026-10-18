@@ -26,6 +26,7 @@ pub mod lift;
 pub mod liftdraw;
 pub mod liftplan;
 pub mod liftsys;
+pub mod lights;
 pub mod materials;
 pub mod mesh;
 pub mod meshpool;

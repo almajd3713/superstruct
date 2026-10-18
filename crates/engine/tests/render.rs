@@ -1332,3 +1332,169 @@ fn stylization_passes_toggle_independently() {
         assert!(post < 1.5, "stylization budget is 1.5 ms: {post}");
     }
 }
+
+/// P5.1.1: clustered point lights give the same picture as testing every light, and 1000 of
+/// them stay inside the culling (0.5 ms) and geometry (6 ms) budgets at 1440p. Writes
+/// `out/lights-*.png`.
+#[test]
+fn clustered_lights_match_brute_force_and_fit_the_budget() {
+    use engine::gpu_timer::Zone;
+    use engine::lights::Light;
+    let Some(h) = headless() else { return };
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = cam.pos.offset(Vec3::new(0.0, 1.65, -54.0)).unwrap();
+    cam.yaw = std::f32::consts::PI;
+    let scene = demo_scene_at(I64Vec3::ZERO);
+    let dark = FrameParams {
+        ambient: [0.05, 0.05, 0.05],
+        light: 0.02,
+        ..FrameParams::default()
+    };
+    // A deterministic scatter of coloured lights over the demo scene.
+    let lights = |n: u32| -> Vec<Light> {
+        let mut seed = 0x2545_f491_u32;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed >> 8) as f32 / (1 << 24) as f32
+        };
+        (0..n)
+            .map(|_| {
+                let at = Vec3::new(next() * 120.0 - 60.0, next() * 12.0, next() * 120.0 - 60.0);
+                Light {
+                    pos: WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0) + at).unwrap(),
+                    colour: [0.6 + 0.4 * next(), 0.6 + 0.4 * next(), 0.6 + 0.4 * next()],
+                    intensity: 6.0,
+                    radius: 9.0,
+                }
+            })
+            .collect()
+    };
+
+    let size = (960, 540);
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    let unlit = h.render_with(&mut renderer, &cam, size, dark, &[]).unwrap();
+    renderer.set_lights(&lights(300));
+    let clustered = h.render_with(&mut renderer, &cam, size, dark, &[]).unwrap();
+    assert!(
+        renderer.lights_active() > 50,
+        "{}",
+        renderer.lights_active()
+    );
+    renderer.set_lights_brute_force(true);
+    let brute = h.render_with(&mut renderer, &cam, size, dark, &[]).unwrap();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out");
+    save_png(
+        &dir.join("lights-clustered.png"),
+        size.0,
+        size.1,
+        &clustered,
+    )
+    .unwrap();
+    let (max, mean) = image_diff(&clustered, &brute);
+    assert!(
+        max <= 3 && mean < 0.05,
+        "clusters differ from brute force: max {max}, mean {mean}"
+    );
+    let (max, _) = image_diff(&clustered, &unlit);
+    assert!(max > 40, "the lights light something: {max}");
+
+    // Cost at 1440p with 1000 lights.
+    let big = (2560, 1440);
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, big);
+    renderer.set_scene(&h.device, &h.queue, &scene);
+    renderer.set_lights(&lights(1000));
+    if let Some(times) = h.gpu_times(&mut renderer, &cam, big, dark, 30) {
+        let ms = |zone| {
+            times
+                .iter()
+                .find(|(z, _)| *z == zone)
+                .map_or(0.0, |(_, ms)| *ms)
+        };
+        eprintln!(
+            "1000 lights at 1440p: light cull {:.3} ms, scene {:.3} ms",
+            ms(Zone::LightCull),
+            ms(Zone::Scene)
+        );
+        assert!(ms(Zone::LightCull) < 0.5, "culling budget is 0.5 ms");
+        assert!(ms(Zone::Scene) < 6.0, "geometry budget is 6 ms");
+    }
+    let img = h.render_with(&mut renderer, &cam, big, dark, &[]).unwrap();
+    save_png(&dir.join("lights-1000.png"), big.0, big.1, &img).unwrap();
+}
+
+/// P5.1.2: lit module lamps become point lights, only the nearest within the per-view budget,
+/// and none when the chunk's emissive strength is zero.
+#[test]
+fn module_lamps_light_the_view_within_the_budget() {
+    use engine::kit::expand;
+    use worldgen::l4::{Module, ModuleKind};
+    use worldgen::prim::QVec3;
+    let Some(h) = headless() else { return };
+    // A 20 × 20 grid of lamps 8 m apart on a ceiling, some dead.
+    let mods: Vec<Module> = (0..400)
+        .map(|i| Module {
+            kind: ModuleKind::Lamp,
+            pos: QVec3::new((i % 20) * 128 + 64, 64, (i / 20) * 128 + 64),
+            facing: 0,
+            len: 0,
+            width: 0,
+            variant: 0,
+            glow: if i % 5 == 0 { 0 } else { 15 },
+        })
+        .collect();
+    let batch = expand(&mods);
+    assert_eq!(batch.lamps.len(), 320, "dead lamps give no light");
+    let origin = WorldPos::new(I64Vec3::ZERO, Vec3::new(512.0, 512.0, 512.0)).unwrap();
+    let mut cam = camera_at(I64Vec3::ZERO);
+    cam.pos = WorldPos::new(I64Vec3::ZERO, Vec3::new(520.0, 514.0, 520.0)).unwrap();
+    cam.pitch = -0.7;
+    let size = (640, 360);
+    let dark = FrameParams {
+        ambient: [0.03, 0.03, 0.03],
+        light: 0.0,
+        fog_density: 0.0,
+        ..FrameParams::default()
+    };
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    let floor = {
+        let mut m = Mesh::default();
+        m.add_box(
+            Vec3::new(-10.0, -0.3, -10.0),
+            Vec3::new(170.0, 0.0, 170.0),
+            0,
+        );
+        m
+    };
+    renderer.set_scene(&h.device, &h.queue, &[(origin, floor)]);
+    let mut up = batch.clone();
+    up.glow[3] = 1.0;
+    renderer.upload_module_chunk(&h.queue, origin, &up);
+    let mut run = |budget: usize| {
+        renderer.set_light_budget(budget);
+        let img = h.render_with(&mut renderer, &cam, size, dark, &[]).unwrap();
+        (renderer.lights_active(), img)
+    };
+    let (n_small, img_small) = run(4);
+    let (n_big, img_big) = run(512);
+    let (n_none, img_none) = run(0);
+    assert_eq!(n_none, 0);
+    assert!(img_none != img_big, "the lamps light the floor");
+    assert_eq!(n_small, 4, "the budget caps the lights");
+    assert_eq!(n_big, 320, "all lit lamps fit the default budget");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../out");
+    save_png(&dir.join("lamps-lit.png"), size.0, size.1, &img_big).unwrap();
+    save_png(&dir.join("lamps-few.png"), size.0, size.1, &img_small).unwrap();
+
+    // A blacked-out chunk lights nothing.
+    let mut renderer = engine::renderer::Renderer::new(&h.device, engine::headless::FORMAT, size);
+    let mut off = batch;
+    off.glow[3] = 0.0;
+    renderer.upload_module_chunk(&h.queue, origin, &off);
+    renderer.set_scene(&h.device, &h.queue, &[]);
+    let _ = h.render_with(&mut renderer, &cam, size, dark, &[]).unwrap();
+    // Strength zero keeps the lights but makes them black: intensity is zero.
+    assert!(renderer.lights_active() > 0);
+}

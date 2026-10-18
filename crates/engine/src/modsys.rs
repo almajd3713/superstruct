@@ -10,12 +10,16 @@ use worldgen::coord::WorldPos;
 use crate::camera::camera_relative;
 use crate::cull::Frustum;
 use crate::kit::{GLOW_MASK, KitSet, ModuleBatch, ModuleInstance, Piece};
+use crate::lights::Light;
 use crate::renderer::ChunkHandle;
 use crate::suballoc::{Range, SubAllocator};
 
 /// Most module chunks and instances resident at once; beyond that new ones are not drawn.
 pub const MOD_MAX_CELLS: usize = 4096;
 pub const MOD_MAX_INSTANCES: u32 = 1 << 20;
+/// A full-brightness lamp: strength and reach of its point light.
+const LAMP_INTENSITY: f32 = 5.0;
+const LAMP_RADIUS: f32 = 9.0;
 /// The cell slot lives in bits 2..18 of an instance.
 const SLOT_SHIFT: u32 = 2;
 
@@ -43,6 +47,7 @@ pub struct ModChunk {
     /// Chunk-local bounding sphere.
     bounds: [f32; 4],
     glow: [f32; 4],
+    lamps: Vec<([f32; 3], u8)>,
     bytes: u64,
     visible: bool,
 }
@@ -163,6 +168,7 @@ impl ModuleState {
             groups,
             bounds: batch.bounding_sphere(),
             glow: batch.glow,
+            lamps: batch.lamps.clone(),
             bytes,
             visible: true,
         });
@@ -257,5 +263,23 @@ impl ModuleState {
 
     pub fn is_empty(&self) -> bool {
         self.args_scratch.is_empty()
+    }
+
+    /// Point lights for the lit lamps of the visible chunks, tinted by each chunk's emissive
+    /// colour and strength. The caller applies the per-view budget.
+    pub fn collect_lights(&self, out: &mut Vec<Light>) {
+        for c in self.chunks.iter().filter(|c| c.visible) {
+            for &(at, level) in &c.lamps {
+                let Ok(pos) = c.origin.offset(Vec3::from(at)) else {
+                    continue;
+                };
+                out.push(Light {
+                    pos,
+                    colour: [c.glow[0], c.glow[1], c.glow[2]],
+                    intensity: LAMP_INTENSITY * c.glow[3] * f32::from(level) / 15.0,
+                    radius: LAMP_RADIUS,
+                });
+            }
+        }
     }
 }
