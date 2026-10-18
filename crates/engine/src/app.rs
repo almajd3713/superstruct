@@ -21,11 +21,12 @@ use crate::camera::Camera;
 use crate::cellscene::busiest_l2_cell;
 use crate::controller::{Controller, EYE_HEIGHT, MoveInput};
 use crate::debugcmd::Command;
-use crate::liftplan::plan_cell;
-use crate::liftsys::{LiftInput, LiftSystem, PlanResult, PlayerView};
 use crate::gpu::{Gpu, GpuError};
 use crate::gpu_timer::GpuTimer;
 use crate::input::{Action, Bindings, InputState};
+use crate::liftdraw::LiftDraw;
+use crate::liftplan::plan_cell;
+use crate::liftsys::{LiftInput, LiftSystem, PlanResult, PlayerView};
 use crate::meshpool::MeshPool;
 use crate::overlay::{Overlay, OverlayInfo};
 use crate::readback;
@@ -69,6 +70,7 @@ struct App {
     walker: Controller,
     survival: Survival,
     lifts: LiftSystem,
+    lift_draw: LiftDraw,
     lift_results_tx: crossbeam_channel::Sender<PlanResult>,
     lift_results_rx: crossbeam_channel::Receiver<PlanResult>,
     /// Presses seen since the last fixed step, consumed by the first step of a frame.
@@ -434,6 +436,12 @@ impl App {
                 queue: &running.gpu.queue,
             },
         );
+        self.lift_draw.update(
+            &mut running.renderer,
+            &running.gpu.device,
+            &running.gpu.queue,
+            &self.lifts,
+        );
         self.box_scratch.clear();
         if self.debug_boxes {
             cell_boxes(&render_camera.pos, &mut self.box_scratch);
@@ -687,6 +695,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         walker: Controller::new(start),
         survival: Survival::new(start),
         lifts: LiftSystem::new(WorldSeed(settings_seed)),
+        lift_draw: LiftDraw::default(),
         lift_results_tx,
         lift_results_rx,
         lift_input: LiftInput::default(),
