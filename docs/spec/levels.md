@@ -435,6 +435,8 @@ Salts added in the L1 block (`0x0200–0x02FF`), append-only:
 Draw order in an L1 cell (version 7): beams (§4W.2), knot, voids, fill, then arteries (§4W.5.2). Everything the L2 children need is passed as `KeepOut`, `ForcedPort`, `Zone` and the fill field.
 
 
+> **Web redesign.** The L2 content for version 7 is §5W below. This section describes versions 1–6.
+
 ## 5. L2: Districts (512 m)
 
 **L1 context query** (`worldgen::l1_query::L1Context`, P0.8.1): `classify(p)` for a point in L1-cell-local metres returns `TrunkInterior` inside a trunk, else `Structure` inside any other collidable solid (deck, bridge, core wall), else `DeckSurface` for open air within 0.5 m above a deck or bridge top, else `Void`. Lift-shaft volumes and `NO_COLLIDE` pieces are ignored.
@@ -504,6 +506,227 @@ This implements cell-level connectivity (CLAUDE.md §3.5, `ports.md`):
 - An L2 cell with an L1 `KeepOut` void (shaft, chasm or cavity) within 64 m of one of its walkable surfaces gets a vista with `chance(0.25)`.
 - **As implemented** (`worldgen::l2_vista`, P0.8.7): draws are the 0.25 chance, a starting side, then eight placement offsets. For each shaft or chasm of the parent and each deck top in the cell, the four sides are tried from the starting side: a 16 m wide strip of deck 8 m behind the void's edge must be fully supported and clear, then the balcony (8 m over the void, a 0.5 m `GRATING` slab flush with the deck) and a corridor (16 m wide, 8 m high, 16–64 m long over the void) must be free of every L1 solid and `KeepOut` except the void's own, of skywalk corridors and lift shafts, and inside the 72 m margin of the cell. The first fit wins; if none does the cell has no vista. The corridor is a `KeepOut`; balcony and corridor form a `Zone { Vista }`; the cell sets `MetaFlags::VISTA`; masses avoid the zone.
 - The vista is a walkable platform at the void's edge with a 16 m wide `KeepOut` corridor facing the void, and a `Zone { Vista }` for L3. L3 must keep the corridor open.
+
+## 5W. L2 in the Web: the Tissue (512 m)
+
+*PW.0.4. Version 7. This replaces §5 once PW.3.x lands; §5 describes versions 1–6. Catalogue entries (each form, support variant, path type, mutation, threshold, hub, set piece) are specified by the items that own them (PW.3.x), against the framework below. Architecture: `the-web.md` §6.*
+
+| | |
+|---|---|
+| **Inputs** | the parent L1 output: `KeepOut` (voids, beams, artery corridors), `ForcedPort`s (artery crossings and Roads), the fill field value `f`, the knot (if in this cell), the stack query and the stratum `Character`; the cell's frame (`regimes.md` §7.4); face ports from the neighbour-independent keys |
+| **Outputs** | structures (`ENVELOPE` masses with floors planned for L3), routes (final geometry), set pieces, thresholds, dressing, ports (including `Entrance`), `ForcedPort`s, `Zone`s |
+| **Children receive** | an `Envelope` per mass, `ForcedPort`s for every entrance, `Zone`s for set pieces and views, `KeepOut` for routes |
+
+### 5W.1 The slot lattice
+
+Routing, placing and measuring happen on a lattice in the cell's **frame** (`regimes.md` §7.4): origin at the cell centre, axes `ex, ey, ez` of the frame.
+
+- Pitch **32 m**, so the lattice is 16 × 16 × 16 = 4096 **slots** in frame coordinates. A slot is `(sx, sy, sz)` with `0 ≤ s < 16`, covering a cube of 32 m in the frame. Slots whose centre is outside the L2 cell (when the frame is rotated) are **absent** and not usable. At a quarter-turn frame or `Id` all 4096 are present and the lattice is aligned with the cell.
+- `Scale` of the stratum (SC-05) multiplies the pitch by the scale ratio, rounded to a whole number of 16 m (so a ×½ stratum has a 16 m lattice of 32 × 32 × 32 slots; ×4 has 128 m and 4 × 4 × 4).
+- Each slot has an **occupancy state**: `Free`, `Reserved` (parent `KeepOut`, frame, artery corridor: no tissue may enter), `Route`, `Built` (inside a structure), or `Engulfed` (a route slot inside a structure).
+- Slot ↔ world mapping is by `primitives.md` §9.1.4; occupancy is decided on the **integer AABB** of the shapes (§9.5), not on the float solid.
+- **Port stubs.** Ports of the L2 faces (cascaded or forced) are placed in world axes, not in the frame. A port is joined to the nearest slot centre by a short **stub** along world axes, at most one slot long, in the order x, then y, then z. The stub counts as `Route`.
+
+### 5W.2 The four steps (order is what makes connectivity hold)
+
+The cell runs the steps in this order, with its RNG `hash(seed, 2, cell, TISSUE)` (a draw counts as always made, even when a step is empty).
+
+#### Step 1: Reserve
+
+Mark `Reserved`: every parent `KeepOut` (voids, cavity bites, beam bodies that are not inhabited, artery corridors), every frame piece, and the knot's hub footprint (`Zone`). A reserved slot can still be **crossed** by a route, but only as a bored passage (below). The sanctuary zone, if any, is reserved as before (`§5.5`).
+
+#### Step 2: Route
+
+1. **Anchors.** The cell's route anchors are, in order: its ports (cascade, forced, own, sorted by face then id), the knot (if present), artery crossing points, and set-piece anchors drawn here (`anchors = below(3)` extra places such as a lift lobby or a view point; they are placed on free slots at the edge of voids first).
+2. **Tree.** Connect the anchors with walks on the lattice. A tree `R` starts as the first anchor's slot. For each following anchor, walk to the nearest slot of `R` (Chebyshev, ties by index). The walk uses 6 axis moves and, when the stratum weave allows, face-diagonal moves; moves into a `Reserved` slot cost 8 instead of 1, and into an absent slot are not allowed. The walk is a weighted random walk with a step budget, finished by a deterministic Dijkstra on the lattice (ties: lowest slot index). The lattice is complete (apart from absent corner slots, which never disconnect it), so the walk **always succeeds**; a route through a `Reserved` slot is realised as a bored passage: a tunnel (PH-11) or crawl duct (PH-12) through the reserved solid, with a bulkhead threshold on each side.
+3. **Segments.** The walk is cut into segments at corners, at height changes and at changes of surrounding state (free air, over a void, beside a structure). Each segment picks a **path type** from the stratum's weights (`regimes.md` §10), filtered by context (table in §5W.5).
+4. **Loops.** `below(3)` extra walks between random slots of `R` that are ≥ 4 slots apart, so the route net is not a bare tree.
+5. **Engulfable marking.** Each segment is marked *engulfable* with chance `engulf_p` (1/8 by default; the character may change it). An engulfable segment is a candidate to disappear into a structure in step 3.
+
+#### Step 3: Grow
+
+Structures are placed until the built fraction reaches the fill density `f` (the fraction of present slots that are `Built` or `Engulfed`) within ±10 % of the cell volume. Each attempt is a fixed set of draws:
+
+1. **Support** (`SUP-01..11`) by `pick_weighted` over the character's support weights, restricted to those with a free support surface (§5W.3).
+2. **Form** by `pick_weighted` over the character's form-family weights, then a member of the family (§5W.4).
+3. **Mutations**: `below(3)` of them (0–2), each picked by the mutation weights (§5W.4.2).
+4. **Scale and frame.** The form's scale (the character's) and the frame: the cell frame, or for a `Colliding` support a second frame from the neighbouring grain (§5W.3).
+5. **Place.** The support gives an anchor surface point and an orientation. The structure's volume is rasterised on the lattice. It is accepted if:
+   - it overlaps no `Reserved` slot and no `Built` slot, except where the support is `Colliding`, `Embedded` or `Nested` and the overlap is intended;
+   - it overlaps a `Route` slot only if the segment there is engulfable (then those slots become `Engulfed` and the segment gets `Entrance`s, below);
+   - it stays inside the cell (clipped by the cell box where a form crosses the face is not allowed here: a structure that would cross a face is cut by the clip, and only if it is a keyed feature from L1 may it do so; tissue structures must fit);
+   - its access can be made (below).
+6. **Access.** The structure has at least one **entrance** on its support contact, and **more entrances** when it is large (one per 30 m of footprint, up to 8), including where an engulfed route enters and leaves. Each entrance is joined to `R` by a walk like step 2 (a complete lattice, so it succeeds), unless the structure is itself on a route. Entrances become `PortKind::Entrance` ports with a `ForcedPort` for L3 (`levels.md` §6.6). A form that is **sealed** by its own definition (a blank monument face, a sealed capsule) is marked `NO_ENTRANCE` and is exempt; sealed structures must still be tied to the support by contact.
+7. **Accretion.** A new structure exposes new support surfaces: its roof, underside and sides. They join the surface list for the next attempts. This is how structures grow on structures.
+
+The loop stops when `f` is reached, when 64 attempts have been made, or when 16 consecutive attempts have been rejected. Every attempt draws a fixed number of values (rejected attempts still make all their draws), and the cell's output depends on the attempt order only.
+
+**Engulfed routes (TIS-04).** If a structure overlaps a route segment marked engulfable, the slots become `Engulfed` and the segment is rewritten: the segment ends at the structure's boundary on both sides, with an `Entrance` at each. Inside, L3 must connect the two entrances (`levels.md` §6.8). This is where several entrances on several storeys come from: the route's entry and exit are at the heights of the route there. A route segment that is **not** engulfable is a hard obstacle for structures.
+
+#### Step 4: Dress and pay off
+
+1. **Edges.** Railings, ladders for drops that need them, stubs and thresholds (§5W.6). The edge rules of §5.4 apply (railings are 1.1 m, with the same drop test).
+2. **Skin.** The skin pass of §5W.7.
+3. **Dead ends.** Every leaf of `R` that is not a port, an anchor or a knot is a **dead end**. Each must end at a **payoff**: a set piece of the catalogue (§5W.8), a view, a light, or a lift. The pass tries, in order, to place:
+   1. a **set piece** drawn by `pick_weighted` over those that fit in the free slots around the leaf (size from the catalogue);
+   2. a **view**: if a ray from the leaf into free or void slots runs at least 200 m (or reaches the cell face, where the neighbouring cell's occupancy is unknown, so a free ray to the face counts only when the face cell is a void, a Between or a ported face), the leaf is turned into a balcony or window facing it. The ray is cast over the integer lattice;
+   3. a **lift**: a one-shaft lift joining the leaf to a different level of the tree, if the slot column fits;
+   4. a **light**: a lamp (a `Mass` of one slot with the `EMISSIVE` material) at the end. This always fits, because the leaf slot itself is free. It is the guaranteed last resort, so the rule can always be met.
+   The validator checks the rule: no leaf without one of the four.
+4. **Loops closing.** If a leaf lies within 2 slots of another route slot (not in the same segment), the pass may instead join them with probability 1/2; the draw is always made.
+
+The rule has the id `PRN-05` and each payoff carries its own id in the census.
+
+### 5W.3 Supports: the framework
+
+*Owners: TIS-06, SUP-01..11 (PW.3.2); variants SV-01..26 (PW.3.3, PW.3.4).*
+
+A **support** is a way a structure attaches to its surroundings. It is a record:
+
+```rust
+pub struct SupportSpec {
+    pub id: SupportId,                // SUP-01..11
+    pub surface: SurfaceClass,        // what it attaches to (below)
+    pub up: UpRule,                   // how the structure's up is set (below)
+    pub body_axis: BodyAxis,          // vertical, horizontal along the surface, along a beam, radial
+    pub variants: &'static [VariantId], // SV-xx, drawn by pick_weighted
+}
+```
+
+| Support | Surface class | Structure's up | Body axis |
+|---|---|---|---|
+| Standing (SUP-01) | upward face of a beam, a roof, a knot, or the ground of a slope | local up | vertical |
+| Hanging (SUP-02) | downward face of a crust, a beam, a bridge | local up, "floors normal inside", the structure is hung below | vertical, growing down |
+| Spanning (SUP-03) | two surfaces facing across a gap | local up | horizontal, between the anchors |
+| Sideways (SUP-04) | a vertical face of a structure or trunk | local up, **long axis horizontal** | horizontal, away from the face |
+| Collar (SUP-05) | the side of a trunk or tether | local up | ring or helix around it |
+| Embedded (SUP-06) | the inside of a beam or a thick wall | local up | along the host |
+| Suspended (SUP-07) | a cable from above | local up | hangs from cables |
+| Piled (SUP-08) | any surface, many small pieces | random per piece | any |
+| Nested (SUP-09) | the inside of a hall, atrium or hollow tether | local up | vertical |
+| Colliding (SUP-10) | none: placed in a second frame | local up in the second frame | vertical |
+| Radial (SUP-11) | the surface of a gravity well | away from the well | radial |
+
+- **Local up** is the frame's `+ey` (or `+Y` when the cell's frame is `Id`), and with gravity wells (`gravity.md`) the local down.
+- A structure on a **Hanging** support is not inverted: its floors stay normal and it is hung from the surface above. An **inverted** form (MUT-01) turns the form's own geometry upside down on top of any support.
+- **Colliding** places the second structure in the *neighbouring grain's frame* (`regimes.md` §7.3): the frame of the grain cell that the neighbouring cell's centre lies in, or, within a single grain, a frame turned by `yaw + 8` headings (45°). The wedge between the two is allowed to remain as a space; overlaps are intended, and slots in the overlap are `Built` by both.
+- The support variants SV-01..26 are modifiers of the support: each lists how it differs (stilts, a viewing pod, a broken edge, …). A variant is picked by `pick_weighted` with equal weights unless the character sets otherwise, and it may add extra pieces (stilts) or change the anchor (kissing).
+- Surfaces come from a **surface list** the cell maintains: each entry is `(slot or face, normal, class, owner)`. The list starts with the L1 frame pieces, the cell's walkable L1 surfaces (artery floors, crust skin), the voids' rims, and each route. New surfaces are appended as structures are placed (accretion).
+
+### 5W.4 Forms and mutations: the framework
+
+#### 5W.4.1 Forms
+
+*Owners: FORM-01..23 (PW.3.5–PW.3.7).*
+
+A **form** is a pure function of a RNG, a scale and a frame that returns a `FormOut`:
+
+```rust
+pub struct FormOut {
+    pub id: FormId,                   // FORM-xx
+    pub pieces: Vec<Primitive>,       // in the form's frame, ENVELOPE flags as in §5.1 where L3 refines them
+    pub floors: Vec<FloorPlan>,       // storeys: height, plan rect, level
+    pub entrances: Vec<EntranceCand>, // candidate openings (position, facing, floor)
+    pub footprint: SlotBox,           // for rasterising
+    pub sealed: bool,
+}
+```
+
+- Sizes are in the form's table (PW.3.5–7) and scale with the character's scale ratio, except that doors, handrails and steps do not scale.
+- A form uses only the shapes of `primitives.md` (§3 and §9): boxes, cylinders, ramps and stair runs, oriented as needed. Curves are faceted (`§9.3`).
+- **Floors.** The floor height is 4 m by default (`L3` rule), 3 m to 6 m by form. A form lists its floors so that `L3` has the storey plan.
+- Forms obey the envelope rule of §5.1: the structure drawn at L2 is an envelope that L3 refines, and L3 must cover its faces (75 %) and, at the crust surface, the skin rule of §5W.7.
+- **Inverted, sideways and tilted forms** keep their floors normal to local up: an inverted ziggurat has its terraces facing up (walkable); a sideways tower is a normal tower laid along its axis, with the floor orientation turned by 90° so that, inside, the floors are still horizontal. A tilted form is turned by a frame tilt, and its floors are still horizontal.
+
+#### 5W.4.2 Mutations
+
+*Owners: MUT-01..15 (PW.3.8).*
+
+A mutation is a function `FormOut → FormOut` (or on the frame). Up to two are applied, in the drawn order:
+
+| Group | Mutations |
+|---|---|
+| POSE | inverted, tilted, twisted |
+| DAMAGE | broken, overgrown, swallowed |
+| COPY | doubled or mirrored, stretched |
+| HOLLOW | hollowed, caged, pierced |
+| LIGHT | dark, lit |
+| SCALE | scaled (×4 or ×¼), fused with a neighbour |
+
+(The full id list, MUT-01..15, is in the registry.) `Swallowed` (MUT-15) is the mechanism of the "older structure inside newer mass": it embeds a copy of a second form inside the first, drawn from an older stratum's palette. `Pierced` reserves a route through the form and makes it a `bored through` route segment.
+
+### 5W.5 Path types: the framework
+
+*Owners: PH-01..20 (PW.3.9, PW.3.10), PV-01..19 (PW.3.11, PW.3.12), MOD-01..09 (PW.3.14).*
+
+A path type is a record:
+
+```rust
+pub struct PathSpec {
+    pub id: PathId,                  // PH-xx or PV-xx
+    pub needs: PathNeed,             // Flat, Rise(min,max), Span(min,max), Interior, Gravity
+    pub width: (Q, Q),               // range of the clear width
+    pub build: fn(&mut Rng, &PathCtx) -> PathOut,   // pieces, nodes, ports
+}
+```
+
+**Context filter** for a segment: the walk gives the segment `(start, end, surrounding)`. The path type must satisfy:
+
+| Segment | Allowed types |
+|---|---|
+| level, free air below | catwalk, skybridge, footbridge, catenary, zigzag, pier, gangway |
+| level, over a solid roof or beam | beam-top, pipe-top, roof walk, ledge, conveyor |
+| level, beside a façade or between buildings | façade gallery, arcade, alley, avenue, skew corridor |
+| level, engulfable or reserved | bored tunnel, crawl duct, curved gallery (inside a rotunda) |
+| height change up to 3 m | ramp (as part of any horizontal type) or a short stair |
+| height change > 3 m | any PV type fitting the rise: flights up to the rise limit of `traversal.md`; helices and spirals for large rises; lifts above 32 m; ladders where the stratum allows |
+| change of gravity | gravity gate (THR-09) |
+
+- The legal set is intersected with the stratum's path weights (`regimes.md` §10); zero weights remove a type. **PH-01 and PV-01 are never removed**, so a legal choice always exists.
+- Types that need a span (catenary, cable-stayed, zigzag) use two anchor surfaces taken from the surface list; if none fits, the type is skipped (the draw is still made) and the next is tried, down to the universal PH-01.
+- **Modifiers MOD-01..09** are drawn independently after the type: width, enclosure (open, railed, caged, walled, glazed, tunnel), condition (intact, missing rails, a missing section with a detour: the detour is a second walk), light, ceiling height, rhythm, material, dressing, and angle (on-grid, off-grid by the local grain, free). A modifier that makes a path impassable (a missing section) must keep a detour as a second route, so connectivity is unchanged.
+
+### 5W.6 Thresholds and hubs
+
+*Owners: THR-01..09 (PW.3.13), HUB-01..11 (PW.3.15).*
+
+- A **threshold** is placed on a route node where a route enters a structure, a sealed region, or a different gravity or atmosphere. Types THR-01..09 are drawn by context (a bored passage gets a bulkhead hatch; an engulfed route gets a portal frame or a broken wall; a gravity change gets a gate). The threshold never blocks: its opening is always at least the port minimum (`ports.md` §2).
+- A **hub** (HUB-01..11) is the knot's structure in the L2 cell that contains the knot, and one more in each L2 cell on a `Spine` station or a `Road` crossing with chance 1/4. A hub is a special form whose family is the hub family of the character; it replaces step 3's first attempt and is placed even if `f` is met.
+
+### 5W.7 Skin coverage
+
+*Owners: TIS-05 (with the dead-end rule), HOR-02 (with PW.2.4).*
+
+L1 gives the crust's **skin** surfaces (`§4W.6`): shells with openings wider than 32 m. Within an L2 cell the skin surface `S` is covered to at least **90 %** of its area:
+
+1. Divide `S` into 32 × 32 m tiles. A tile is covered if the union of `Built` and `Engulfed` slots, plus cladding, lies within 1 m of the skin plane over at least 3/4 of its area.
+2. Where a tile is not covered by a structure that grew there, add **cladding**: a thin slab (2–16 m deep) as a `Mass` or `Misc` piece of material `CONCRETE`, with windows from the cell hash (so that far window lights match the near ones, `the-web.md` §11.2). L1 openings stay open.
+3. L2 may add **relief** (≤ 16 m deep) and openings narrower than 32 m only. Nothing larger.
+4. The test measures the covered fraction over the whole skin of a crust in a 5 km region and requires ≥ 90 %.
+
+### 5W.8 Places: the set pieces
+
+L2 set pieces (the list of `the-web.md` §6.5): atrium with galleries, light well, cistern, organ room, window wall, observation pod, hanging garden, niche / shrine, generator room, abandoned dwellings, interchange, lift lobby, tram stop, valley balcony, grain seam plaza, tether foot. Each has a footprint, a facing, and a payoff weight; they are owned by PW.4+ and PW.7, and the dead-end pass only needs the footprint and the id. Hubs, set pieces and thresholds are all placed with the same grow acceptance test.
+
+### 5W.9 ID tagging (census)
+
+- Every piece, port, zone and route segment that comes from a registry idea carries a `Tag(u16)`, the registry index of its ID (a generated table `crates/gen/src/ids.rs` from `docs/proposals/registry.md`). A primitive may carry one primary tag; the others are in the instance list.
+- `CellMeta` holds `instances: Vec<Instance>`, with `Instance { tag: Tag, key: u64 }`, where `key` is the hash of the feature's own key (so a feature that is clipped into many cells counts once in the census: the census counts distinct `(tag, key)`).
+- Tags are part of the golden hash.
+- The census (`web-report --census`, PW.2.11) counts instances per ID over the sample region, and reports IDs with zero.
+
+### 5W.10 Salts and draw order
+
+New L2 salts (block `0x0300–0x03FF`, append-only):
+
+| Salt | Value | Key | Use |
+|---|---|---|---|
+| `TISSUE` | `0x0310` | cell (L2) | the four steps (§5W.2) |
+| `TISSUE_FRAME` | `0x0311` | cell (L2) | frame of a structure in a grain |
+| `SET_PIECE` | `0x0312` | cell (L2) | set-piece draws |
+| `SKIN_WINDOWS` | `0x0313` | skin tile key | window lights (shared with the far band) |
+
+Draw order in an L2 cell: reserve (no draws), route (anchors, walks, segments, loops, engulf marks), grow (attempts in order), dress (edges, skin, dead ends, closing loops). Every attempt and every pass draws a fixed number of values.
 
 ## 6. L3: Blocks (64 m)
 
