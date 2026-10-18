@@ -2,19 +2,22 @@
 //!
 //! So far: face ports, the skywalk halves at walkway ports, lift shafts and building masses.
 
-use crate::cell::{CellKey, Level, floor_div_pow2, floor_mod_pow2};
+use crate::cell::{Axis, CellKey, FaceKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::key::LayerKey;
 use crate::l1::{DECK_REGION_LOG2, decks};
 use crate::l2_attach::attached_masses;
 use crate::l2_column::{lift_column, span_of, stair_tower};
-use crate::l2_mass::masses_in;
+use crate::l2_entrance::entrances;
+use crate::l2_links::{INSET, LinkStats, Node, links};
+use crate::l2_mass::{Parent, masses_in};
 use crate::l2_port::{L1Cache, cell_ports_in};
 use crate::l2_rail::railings;
 use crate::l2_vista::vista;
 use crate::l2_walk::Skywalk;
-use crate::port::PortKind;
+use crate::port::{Port, PortKind};
 use crate::prim::{
-    CellMeta, CellOutput, ChildConstraint, MetaFlags, Primitive, Q, QAabb, ZoneKind,
+    CellMeta, CellOutput, ChildConstraint, MetaFlags, PrimFlags, Primitive, Q, QAabb, QRect, Shape,
+    ZoneKind,
 };
 use crate::seed::WorldSeed;
 use crate::walk::cell_window;
@@ -42,8 +45,18 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
 }
 
 /// The L2 output together with its masses, which L3 and the entrance rules need.
-#[allow(clippy::too_many_lines)] // one pipeline, read top to bottom
 pub fn l2_build(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> (CellOutput, Vec<MassInfo>) {
+    let (out, infos, _) = l2_build_stats(seed, cache, cell);
+    (out, infos)
+}
+
+/// [`l2_build`] with the statistics of the walking links.
+#[allow(clippy::too_many_lines)] // one pipeline, read top to bottom
+pub fn l2_build_stats(
+    seed: WorldSeed,
+    cache: &L1Cache,
+    cell: CellKey,
+) -> (CellOutput, Vec<MassInfo>, LinkStats) {
     debug_assert_eq!(cell.level, Level::L2);
     let c = cell.coords;
     let parent_key = CellKey::new(Level::L1, c.map(|v| floor_div_pow2(v, 3)));
@@ -63,6 +76,8 @@ pub fn l2_build(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> (CellOutput,
         .collect();
     let y_offset = Q::try_from(floor_mod_pow2(c.y, 3)).unwrap_or(0) * CELL;
     let mut corridors: Vec<QAabb> = Vec::new();
+    let mut nodes: Vec<Node> = Vec::new();
+    let mut feet: Vec<Node> = Vec::new();
     for port in out.ports.iter().filter(|p| p.kind == PortKind::Walkway) {
         let floor = port.rect.v0 + y_offset;
         let Some(height) = (0..8)
@@ -82,6 +97,40 @@ pub fn l2_build(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> (CellOutput,
         };
         out.primitives.extend(walk.primitives());
         corridors.push(walk.corridor());
+        let u = i32::midpoint(port.rect.u0, port.rect.u1);
+        let at = |along: Q, top: Q| match walk.axis {
+            Axis::X => Node {
+                top,
+                x: along,
+                z: u,
+            },
+            _ => Node {
+                top,
+                x: u,
+                z: along,
+            },
+        };
+        if height == 0 {
+            nodes.push(at(walk.plane + INSET * walk.inward, walk.floor));
+        } else {
+            // The deck just past the foot of the stair, which is where people step off.
+            let f = walk.foot();
+            let (x, z) = match walk.axis {
+                Axis::X => (
+                    if walk.inward > 0 { f.x1 } else { f.x0 } + walk.inward * INSET,
+                    i32::midpoint(f.z0, f.z1),
+                ),
+                _ => (
+                    i32::midpoint(f.x0, f.x1),
+                    if walk.inward > 0 { f.z1 } else { f.z0 } + walk.inward * INSET,
+                ),
+            };
+            feet.push(Node {
+                top: walk.floor - walk.height,
+                x,
+                z,
+            });
+        }
     }
     out.child_constraints.extend(
         corridors
@@ -150,12 +199,64 @@ pub fn l2_build(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> (CellOutput,
     let mut seen = cell_window(&parent.primitives, origin, CELL);
     seen.extend(out.primitives.iter().copied());
     out.primitives.extend(railings(seed, cell, &seen).0);
+    let doors = entrances(seed, cell, &parent, &infos, &out.primitives);
+    for (m, e) in infos.iter().zip(&doors) {
+        let Some(e) = e else {
+            continue;
+        };
+        let d = e.doorway;
+        let (axis, plane) = match d.side {
+            0 => (Axis::Z, m.aabb.min.z),
+            1 => (Axis::X, m.aabb.max.x),
+            2 => (Axis::Z, m.aabb.max.z),
+            _ => (Axis::X, m.aabb.min.x),
+        };
+        out.ports.push(Port {
+            face: FaceKey { owner: cell, axis },
+            id: u16::try_from(out.ports.len()).unwrap_or(u16::MAX),
+            kind: PortKind::Entrance { plane },
+            rect: QRect {
+                u0: d.u0,
+                v0: d.floor,
+                u1: d.u1,
+                v1: d.floor + 3 * M,
+            },
+        });
+        if let Some(apron) = e.apron {
+            out.child_constraints
+                .push(ChildConstraint::KeepOut { aabb: apron });
+            let u = i32::midpoint(d.u0, d.u1);
+            let (x, z) = match d.side {
+                0 => (u, apron.min.z),
+                1 => (apron.max.x, u),
+                2 => (u, apron.max.z),
+                _ => (apron.min.x, u),
+            };
+            nodes.push(Node { top: d.floor, x, z });
+        }
+    }
+    nodes.extend(feet);
+    let solid: Vec<QAabb> = out
+        .primitives
+        .iter()
+        .filter(|p| {
+            !matches!(p.shape, Shape::LiftShaft { .. }) && !p.flags.contains(PrimFlags::NO_COLLIDE)
+        })
+        .map(Primitive::aabb)
+        .collect();
+    let ctx = Parent::new(&parent, origin);
+    let (paths, stats) = links(seed, cell, &ctx, &solid, CELL, &nodes);
+    out.child_constraints.extend(
+        paths
+            .into_iter()
+            .map(|aabb| ChildConstraint::KeepOut { aabb }),
+    );
     for i in 0..out.ports.len() {
         out.child_constraints.push(ChildConstraint::ForcedPort {
             port: u32::try_from(i).unwrap_or(u32::MAX),
         });
     }
-    (out, infos)
+    (out, infos, stats)
 }
 
 /// Copies the parent's sanctuary zone and flag into the child that holds it.
@@ -206,7 +307,7 @@ mod tests {
         let in_n = |i: usize| nav.plates[i].source < from_l1;
         let (mut ports, mut walkways) = (0, 0);
         for p in &out.ports {
-            if p.kind == PortKind::LiftStop {
+            if matches!(p.kind, PortKind::LiftStop | PortKind::Entrance { .. }) {
                 continue;
             }
             ports += 1;
@@ -280,6 +381,74 @@ mod tests {
             cells >= 10_000 && ports > 1000 && walkways > 100,
             "{cells} {ports} {walkways}"
         );
+    }
+
+    /// P4.1.6: entrances are ports with a `ForcedPort`, in mass order after the face ports; deck
+    /// aprons are keep-outs; the loop candidates fire at the spec's 30 %.
+    #[test]
+    fn entrances_are_forced_ports_and_loops_fire_at_the_spec_rate() {
+        let seed = WorldSeed(0x0416);
+        let cache = L1Cache::default();
+        let (mut doors, mut aprons) = (0usize, 0usize);
+        let mut total = LinkStats::default();
+        for x in -12..12 {
+            let parent = CellKey::new(Level::L1, I64Vec3::new(x, x % 3, 2 * x % 5));
+            for k in 0..512i64 {
+                let cell = CellKey::new(
+                    Level::L2,
+                    parent.coords * 8 + I64Vec3::new(k % 8, k / 64, k / 8 % 8),
+                );
+                let (out, masses, stats) = l2_build_stats(seed, &cache, cell);
+                let entrances: Vec<usize> = (0..out.ports.len())
+                    .filter(|&i| matches!(out.ports[i].kind, PortKind::Entrance { .. }))
+                    .collect();
+                assert!(entrances.len() <= masses.len());
+                assert!(
+                    entrances.windows(2).all(|w| w[0] < w[1])
+                        && entrances.iter().all(|&i| out.ports[..i]
+                            .iter()
+                            .filter(|p| matches!(p.kind, PortKind::Entrance { .. }))
+                            .count()
+                            + out.ports[..i]
+                                .iter()
+                                .filter(|p| !matches!(p.kind, PortKind::Entrance { .. }))
+                                .count()
+                            == i),
+                );
+                if let Some(&first) = entrances.first() {
+                    assert!(
+                        out.ports[..first]
+                            .iter()
+                            .all(|p| !matches!(p.kind, PortKind::Entrance { .. }))
+                    );
+                    assert!(
+                        out.ports[first..]
+                            .iter()
+                            .all(|p| matches!(p.kind, PortKind::Entrance { .. }))
+                    );
+                }
+                for i in entrances {
+                    assert!(out.child_constraints.iter().any(
+                        |c| matches!(c, ChildConstraint::ForcedPort { port } if *port as usize == i)
+                    ));
+                    doors += 1;
+                }
+                aprons += out
+                    .child_constraints
+                    .iter()
+                    .filter(|c| matches!(c, ChildConstraint::KeepOut { .. }))
+                    .count();
+                total.nodes += stats.nodes;
+                total.tree += stats.tree;
+                total.candidates += stats.candidates;
+                total.fired += stats.fired;
+                total.dropped += stats.dropped;
+            }
+        }
+        println!("{doors} entrances, {aprons} keep-outs, {total:?}");
+        assert!(doors > 50 && total.candidates > 300, "{doors} {total:?}");
+        let rate = f64::from(total.fired) / f64::from(total.candidates);
+        assert!((0.24..0.36).contains(&rate), "loop rate {rate}");
     }
 
     /// P0.8.6: exactly one L2 child carries each sanctuary, with the zone free of masses.

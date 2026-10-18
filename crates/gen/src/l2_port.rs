@@ -193,7 +193,7 @@ fn cascade(seed: WorldSeed, cache: &L1Cache, f: &Frame) -> Found {
     } else {
         out = interior_floors(seed, cache, f);
     }
-    out.sort_unstable_by_key(|&(k, r)| (r.v0, r.u0, k as u8));
+    out.sort_unstable_by_key(|&(k, r)| (r.v0, r.u0, k.rank()));
     out
 }
 
@@ -452,8 +452,8 @@ mod tests {
                                 .filter(|p| p.kind != PortKind::Walkway)
                                 .map(|p| (p.kind, p.rect))
                                 .collect();
-                            got.sort_by_key(|&(k, r)| (r.v0, r.u0, k as u8));
-                            expect.sort_by_key(|&(k, r)| (r.v0, r.u0, k as u8));
+                            got.sort_by_key(|&(k, r)| (r.v0, r.u0, k.rank()));
+                            expect.sort_by_key(|&(k, r)| (r.v0, r.u0, k.rank()));
                             assert_eq!(got, expect, "{f:?} tile {i},{j}");
                             l2_ports += got.len();
                         }

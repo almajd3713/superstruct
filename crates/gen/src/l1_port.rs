@@ -201,7 +201,9 @@ mod tests {
                 assert!(r.v1 - r.v0 >= 39, "clearance ≥ 2.4 m {p:?}");
                 assert!(r.v0 - BRIDGE_THICKNESS >= 0 && r.v1 <= CELL, "{p:?}");
             }
-            PortKind::Walkway | PortKind::StairLanding => panic!("not an L1 port: {p:?}"),
+            PortKind::Walkway | PortKind::StairLanding | PortKind::Entrance { .. } => {
+                panic!("not an L1 port: {p:?}")
+            }
         }
         let dir = match face.axis {
             Axis::X => Dir6::PosX,

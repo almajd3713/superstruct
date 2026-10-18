@@ -74,7 +74,7 @@ pub fn check_cell(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellReport
     let cn = CellNav::build(seed, cache, cell);
     let mut report = CellReport::default();
     for p in &cn.output.ports {
-        if p.kind == PortKind::LiftStop {
+        if matches!(p.kind, PortKind::LiftStop | PortKind::Entrance { .. }) {
             continue;
         }
         report.ports += 1;
@@ -407,7 +407,10 @@ mod tests {
             joins += b.joins;
             for ci in 0..b.cells.len() {
                 let ports: Vec<_> = b.cells[ci].output.ports.clone();
-                for p in ports.iter().filter(|p| p.kind != PortKind::LiftStop) {
+                for p in ports
+                    .iter()
+                    .filter(|p| !matches!(p.kind, PortKind::LiftStop | PortKind::Entrance { .. }))
+                {
                     let found = b.cells[ci].port_plates(p.face, &p.rect);
                     assert!(
                         !found.is_empty(),

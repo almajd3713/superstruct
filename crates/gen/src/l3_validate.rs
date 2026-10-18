@@ -184,7 +184,7 @@ pub fn check_l3(seed: WorldSeed, cache: &L1Cache, l2: CellKey) -> L3Report {
 
     // 1. L2 ports keep their floor and their connection.
     for p in &out.ports {
-        if p.kind == PortKind::LiftStop {
+        if matches!(p.kind, PortKind::LiftStop | PortKind::Entrance { .. }) {
             continue;
         }
         let plane = if p.face.owner == l2 { L2_CELL } else { 0 };
