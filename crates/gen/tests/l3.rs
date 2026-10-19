@@ -82,6 +82,7 @@ fn inside(bb: &QAabb, o: [Q; 3], masses: &[MassInfo]) -> bool {
 }
 
 #[test]
+#[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
 fn blocks_are_pure_bounded_and_inside_their_envelopes() {
     let cache = L1Cache::default();
     let mut blocks = 0;
@@ -143,6 +144,7 @@ fn blocks_are_pure_bounded_and_inside_their_envelopes() {
 }
 
 #[test]
+#[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
 fn the_fallback_is_always_legal_and_the_solver_rarely_needs_it() {
     use worldgen::l3::{SlotClass, VESTIBULE, l3_block_fallback};
     use worldgen::l3_tiles::{self, D, N_TILES};
@@ -237,6 +239,7 @@ fn fnv(text: &str) -> u64 {
 /// 100 golden L3 blocks: digests of the output, the layout and the solve statistics. They are
 /// regenerated with `UPDATE_GOLDEN=1 cargo test -p gen --release --test l3`.
 #[test]
+#[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
 fn golden_l3_blocks_are_unchanged() {
     use std::fmt::Write as _;
     let cache = L1Cache::default();

@@ -14,6 +14,7 @@ use worldgen::validate::{check_cell, check_l1};
 const FAR_L1: i64 = 1 << 48;
 
 #[test]
+#[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
 fn cells_near_two_to_the_fifty_sectors() {
     let seed = WorldSeed(0xFA2);
     let (mut cells, mut ports, mut with_content) = (0, 0, 0);

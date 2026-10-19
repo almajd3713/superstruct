@@ -424,6 +424,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn l3_attaches_to_the_network() {
         let seed = WorldSeed(0x0413);
         let cache = L1Cache::default();

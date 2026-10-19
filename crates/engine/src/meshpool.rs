@@ -582,6 +582,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn mid_chunk_is_the_envelope_subset_of_the_full_chunk() {
         let key = worldgen::cell::CellKey::new(Level::L2, I64Vec3::new(4, -4, 4));
         let full = worldgen::l2::l2_cell_in(WorldSeed(0), &L1Cache::default(), key).primitives;
@@ -617,6 +618,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn an_envelope_with_an_entrance_is_a_hollow_shell_with_a_door() {
         let (_, out) = cell_with_entrance(WorldSeed(0));
         let mut doors = 0;
@@ -891,6 +893,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn an_l3_chunk_carries_its_interior_modules_and_ao_boxes() {
         let seed = WorldSeed(0);
         let (key, _) = cell_with_entrance(seed);

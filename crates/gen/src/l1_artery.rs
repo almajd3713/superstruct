@@ -32,6 +32,27 @@ const CELLS: usize = 512;
 /// Local L2 cell coordinates.
 pub type L2c = [i64; 3];
 
+/// Every number that sets how dense the skeleton is. Changing one changes generator output:
+/// bump `GEN_VERSION` and regenerate the goldens. `skeleton_census` prints their effect.
+pub mod tuning {
+    /// Ports on a face: `PORTS_MIN + below(PORTS_SPREAD)`.
+    pub const PORTS_MIN: u64 = 2;
+    pub const PORTS_SPREAD: u64 = 3;
+    /// Loops per cell: `below(LOOPS_SPREAD)`.
+    pub const LOOPS_SPREAD: u64 = 3;
+    /// A loop joins two cells at least this far apart (Chebyshev); closer pairs are dropped.
+    pub const LOOP_MIN_SPAN: i64 = 3;
+    /// A walk gets `BUDGET_PER_DIST * dist + BUDGET_BASE` random steps before the BFS.
+    pub const BUDGET_PER_DIST: i64 = 4;
+    pub const BUDGET_BASE: i64 = 8;
+    /// Weight multiplier of a move that gets closer to the target.
+    pub const TOWARD_BIAS: i64 = 4;
+    /// Ties: which kinds of feature get one.
+    pub const TIE_BEAMS: bool = true;
+    pub const TIE_CRUSTS: bool = true;
+    pub const TIE_BETWEEN: bool = true;
+}
+
 /// L1 face order of the skeleton: `−x, +x, −y, +y, −z, +z` (`levels.md` §4W.5.2).
 const FACE_ORDER: [Dir6; 6] = [
     Dir6::NegX,
@@ -43,6 +64,7 @@ const FACE_ORDER: [Dir6; 6] = [
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ArteryType {
     GrandStair,
     RampRoad,
@@ -121,7 +143,7 @@ pub fn face_artery_ports(seed: WorldSeed, cavity: &CavityView, face: FaceKey) ->
         Axis::Z => salt::ARTERY_FACE_Z,
     };
     let mut rng = Rng::new(hash(seed.0, Level::L1, face.owner.coords, salt));
-    let count = 2 + rng.below(3) as usize;
+    let count = (tuning::PORTS_MIN + rng.below(tuning::PORTS_SPREAD)) as usize;
     let offered = ArteryType::offered(face.axis);
     let weights = vec![1u32; offered.len()];
     let mut out: Vec<ArteryPort> = Vec::with_capacity(count);
@@ -235,7 +257,7 @@ fn walk(
     };
     let weave = i64::from(weave);
     let w_by_axes = [0, (255 - weave).max(1), weave / 2, weave / 4];
-    let budget = 4 * cheb(start, target) + 8;
+    let budget = tuning::BUDGET_PER_DIST * cheb(start, target) + tuning::BUDGET_BASE;
     let mut visited = [false; CELLS];
     visited[index(start)] = true;
     let mut cur = start;
@@ -257,7 +279,7 @@ fn walk(
                     }
                     let mut w = w_by_axes[axes];
                     if cheb(n, target) < cheb(cur, target) {
-                        w *= 4;
+                        w *= tuning::TOWARD_BIAS;
                     }
                     moves.push(n);
                     weights.push(w as u32);
@@ -424,7 +446,7 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
     }
 
     // Loops.
-    for _ in 0..b.rng.below(3) {
+    for _ in 0..b.rng.below(tuning::LOOPS_SPREAD) {
         let n = b.list.len() as u64;
         let (mut i, mut j) = (b.rng.below(n) as usize, b.rng.below(n) as usize);
         if i > j {
@@ -439,14 +461,14 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
         };
         let offered = ArteryType::offered(axis);
         let kind = offered[b.rng.below(offered.len() as u64) as usize];
-        if cheb(a, c) >= 3 {
+        if cheb(a, c) >= tuning::LOOP_MIN_SPAN {
             b.run(a, Goal::Cell(c), kind, Role::Loop);
         }
     }
 
     // Ties: beams (by line index), crusts (by k), Between content (in generation order).
     for beam in &beams {
-        if beam.kind != BeamKind::Conduit {
+        if tuning::TIE_BEAMS && beam.kind != BeamKind::Conduit {
             let cells: Vec<L2c> = beam.l2_cells(l1).iter().map(|c| c.map(i64::from)).collect();
             b.tie(k, &cells, TieKind::Beam);
         }
@@ -465,10 +487,15 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
         }
     }
     by_crust.sort_by_key(|(kk, _)| *kk);
-    for (_, cells) in &by_crust {
+    for (_, cells) in by_crust.iter().filter(|_| tuning::TIE_CRUSTS) {
         b.tie(k, cells, TieKind::Crust);
     }
-    for piece in between_content(seed, l1) {
+    let between = if tuning::TIE_BETWEEN {
+        between_content(seed, l1)
+    } else {
+        Vec::new()
+    };
+    for piece in between {
         if ![STR_TETHER, STR_DRIP, STR_SPIRE, STR_ISLAND].contains(&piece.tag) {
             continue;
         }
@@ -671,5 +698,36 @@ mod tests {
         }
         assert!(cells > 9_900);
         assert!(ties > 0 && loops > 0, "ties {ties}, loops {loops}");
+    }
+
+    /// Prints the skeleton size by role over 600 cells (`--nocapture`) and bounds it loosely.
+    #[test]
+    fn skeleton_census() {
+        let (mut n, mut t, mut by) = (0usize, 0usize, [0usize; 4]);
+        for i in 0..600i64 {
+            let l1 = I64Vec3::new(i % 10 * 7 - 35, i / 10 % 10 * 7 - 35, i / 100 * 7 - 21);
+            let Some(s) = skeleton(seed(), l1) else {
+                continue;
+            };
+            n += 1;
+            t += s.tree.len();
+            for a in &s.arteries {
+                by[match a.role {
+                    Role::Port { .. } => 0,
+                    Role::Loop => 1,
+                    Role::Tie(TieKind::Beam) => 2,
+                    Role::Tie(_) => 3,
+                }] += a.cells.len();
+            }
+        }
+        eprintln!(
+            "skeleton census over {n} cells: tree {} of 512; path cells per cell: ports {}, loops {}, beam ties {}, crust/Between ties {}",
+            t / n,
+            by[0] / n,
+            by[1] / n,
+            by[2] / n,
+            by[3] / n
+        );
+        assert!((16..=400).contains(&(t / n)));
     }
 }

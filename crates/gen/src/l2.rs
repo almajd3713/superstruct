@@ -358,6 +358,7 @@ mod tests {
 
     /// P0.8.4: every non-lift port of 10⁴ cells reaches the L1 network inside its cell.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn every_port_reaches_the_network() {
         let (mut cells, mut ports, mut walkways) = (0, 0, 0);
         'outer: for (seed, y) in [(0x0804u64, 0), (0x0805, 1), (0x0806, -2)] {
@@ -389,6 +390,7 @@ mod tests {
     /// P4.1.6: entrances are ports with a `ForcedPort`, in mass order after the face ports; deck
     /// aprons are keep-outs; the loop candidates fire at the spec's 30 %.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn entrances_are_forced_ports_and_loops_fire_at_the_spec_rate() {
         let seed = WorldSeed(0x0416);
         let cache = L1Cache::default();
@@ -456,6 +458,7 @@ mod tests {
 
     /// P0.8.6: exactly one L2 child carries each sanctuary, with the zone free of masses.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn sanctuary_is_marked_in_one_child() {
         let seed = WorldSeed(0x0807);
         let (mut found, mut masses) = (0, 0);

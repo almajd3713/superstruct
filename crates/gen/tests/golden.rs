@@ -13,7 +13,7 @@ use glam::I64Vec3;
 use worldgen::GEN_VERSION;
 use worldgen::cell::{CellKey, Level};
 use worldgen::hash::hash;
-use worldgen::l1::l1_cell;
+use worldgen::l1_web::l1_cell;
 use worldgen::l2::l2_cell_in;
 use worldgen::l2_port::L1Cache;
 use worldgen::regime::regime;
@@ -36,12 +36,18 @@ fn path() -> PathBuf {
 fn digest(cell: CellKey) -> u64 {
     match cell.level {
         Level::L0 => {
-            // The Web fields have no consumer yet and their own pinned test in `regime_web`;
-            // the digest keeps the version-6 fields so the goldens stay valid until a consumer lands.
+            // The Web fields are part of the digest from version 7, where L1 consumes them.
             let r = regime(SEED, cell.coords);
             fnv(&format!(
-                "Regime {{ style: {:?}, density: {:?}, verticality: {:?}, palette: {:?}, visibility_m: {:?}, light: {:?}, event: {:?} }}",
-                r.style, r.density, r.verticality, r.palette, r.visibility_m, r.light, r.event
+                "Regime {{ style: {:?}, density: {:?}, verticality: {:?}, palette: {:?}, visibility_m: {:?}, light: {:?}, event: {:?}, web: {:?} }}",
+                r.style,
+                r.density,
+                r.verticality,
+                r.palette,
+                r.visibility_m,
+                r.light,
+                r.event,
+                r.web
             ))
         }
         Level::L1 => fnv(&format!("{:?}", l1_cell(SEED, cell))),

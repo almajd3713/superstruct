@@ -1,6 +1,7 @@
 //! Openings where walkable space crosses a cell face. Spec: `docs/spec/ports.md`.
 
 use crate::cell::FaceKey;
+use crate::l1_artery::ArteryType;
 use crate::prim::{Q, QRect};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,6 +28,12 @@ pub enum PortKind {
     Entrance {
         plane: Q,
     },
+    /// An artery of the Web skeleton crossing the face (`levels.md` §4W.5). The rect is the
+    /// whole face of the L2 cell or the L2 cell's side of the L1 face; the floor and width
+    /// are decided by the L2 tissue.
+    Artery {
+        kind: ArteryType,
+    },
 }
 
 impl PortKind {
@@ -39,6 +46,7 @@ impl PortKind {
             Self::StairLanding => 3,
             Self::LiftStop => 4,
             Self::Entrance { .. } => 5,
+            Self::Artery { .. } => 6,
         }
     }
 }

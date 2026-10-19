@@ -97,6 +97,7 @@ mod tests {
 
     /// P0.8.6: sanctuary frequency and spacing over 10⁴ L1 cells, and each zone's placement.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn frequency_and_spacing() {
         let seed = WorldSeed(0x0806);
         let (mut cells, mut with_deck, mut zones) = (0u32, 0u32, 0u32);

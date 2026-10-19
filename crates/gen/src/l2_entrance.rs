@@ -172,6 +172,7 @@ mod tests {
     use crate::l2_port::L1Cache;
 
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn entrances_are_pure_and_sit_on_deck_or_skywalk() {
         let seed = WorldSeed(0x0E17);
         let (mut deck, mut deck_ok, mut attached, mut attached_ok) = (0, 0, 0, 0);

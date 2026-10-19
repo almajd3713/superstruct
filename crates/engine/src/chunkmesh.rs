@@ -379,6 +379,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn real_cell_loses_triangles() {
         use worldgen::cell::{CellKey, Level};
         use worldgen::l2::l2_cell;

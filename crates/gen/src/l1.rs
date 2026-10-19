@@ -5,21 +5,15 @@
 
 use glam::I64Vec3;
 
-use crate::cavity::CavityView;
 use crate::cell::{Axis, CellKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::hash::hash;
 use crate::key::{ColumnKey, ColumnSpanKey, LayerKey};
-use crate::l1_bridge::bridges;
 use crate::l1_port::PORT_CLEARANCE;
-use crate::l1_rim::rim_bites;
-use crate::prim::{
-    CellMeta, CellOutput, ChildConstraint, FeatureKind, MaterialId, MetaFlags, PrimFlags,
-    Primitive, Q, QAabb, QVec3, Shape, ZoneKind,
-};
+pub use crate::l1_web::l1_cell;
+use crate::prim::{FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb, QVec3, Shape};
 use crate::regime::{rare_stair, regime};
 use crate::rng::Rng;
 use crate::salt;
-use crate::sanctuary::sanctuary;
 use crate::seed::WorldSeed;
 
 /// One metre in quanta.
@@ -264,6 +258,9 @@ pub fn deck_holes(seed: WorldSeed, cell: CellKey) -> Vec<Rect> {
     holes
 }
 
+/// Wall thickness of a lift shaft.
+const CORE_WALL: Q = M;
+
 /// Squared separation, for comparing against `dist2_*`.
 const SEP2: i64 = (SEPARATION as i64) * (SEPARATION as i64);
 
@@ -330,100 +327,6 @@ pub fn chasm(seed: WorldSeed, cell: CellKey) -> Option<Rect> {
     let clear = clear_of_column(seed, ColumnKey::of(cell), span, &r)
         && shaft(seed, span).is_none_or(|sh| r.dist2_rect(&sh) >= SEP2);
     clear.then_some(r)
-}
-
-/// Everything L1 emits for one cell so far: face ports, trunk piece, deck pieces, half-bridges,
-/// the lift core, and `KeepOut` for bridges, the shaft and the chasm. Cavity cells emit nothing.
-pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
-    let mut out = CellOutput {
-        key: cell,
-        primitives: Vec::new(),
-        ports: Vec::new(),
-        child_constraints: Vec::new(),
-        meta: CellMeta::default(),
-    };
-    let cavity = CavityView::new(seed, cell);
-    if cavity.is_cavity(cell) {
-        return out;
-    }
-    out.ports = crate::l1_port::cell_ports_in(seed, &cavity, cell);
-    let span = ColumnSpanKey::of(cell);
-    let ds = decks(seed, LayerKey::of(cell, DECK_REGION_LOG2));
-    let core = core_footprint(seed, ColumnKey::of(cell));
-    let t = trunk(seed, span).filter(|t| trunk_piece(t, cell).is_some());
-    let stair = stair_footprint(seed, ColumnKey::of(cell));
-    let br = bridges(cell, &out.ports, core, stair, t.as_ref(), !ds.is_empty());
-    if br.trunk_kept {
-        out.primitives.extend(t.and_then(|t| trunk_piece(&t, cell)));
-    }
-    let holes = deck_holes(seed, cell);
-    let bites = rim_bites(seed, &cavity, cell, &ds, &holes, t.as_ref());
-    out.primitives.extend(deck_pieces(&ds, &holes, &bites));
-    if let Some(foot) = stair {
-        out.primitives.extend(crate::l1_stair::stair_pieces(foot));
-    }
-    // Children keep clear of the bitten slabs.
-    for (deck, rects) in ds.iter().zip(&bites) {
-        out.child_constraints
-            .extend(rects.iter().map(|r| ChildConstraint::KeepOut {
-                aabb: QAabb::new(
-                    QVec3::new(r.x0, deck.top - deck.thickness, r.z0),
-                    QVec3::new(r.x1, deck.top + PORT_CLEARANCE, r.z1),
-                ),
-            }));
-    }
-    // Children keep bridge decks and the opening above them clear.
-    out.child_constraints.extend(br.primitives.iter().map(|p| {
-        let bb = p.aabb();
-        ChildConstraint::KeepOut {
-            aabb: QAabb::new(
-                bb.min,
-                QVec3::new(bb.max.x, bb.max.y + PORT_CLEARANCE, bb.max.z),
-            ),
-        }
-    }));
-    let stops = core_stops(&ds, &br.primitives);
-    out.primitives.extend(core_pieces(core, &stops));
-    out.primitives.extend(br.primitives);
-    let full_height = |r: Rect| ChildConstraint::KeepOut {
-        aabb: QAabb::new(QVec3::new(r.x0, 0, r.z0), QVec3::new(r.x1, CELL, r.z1)),
-    };
-    out.child_constraints.extend(
-        stair
-            .into_iter()
-            .chain(shaft(seed, span))
-            .chain(chasm(seed, cell))
-            .map(full_height),
-    );
-    if let Some(aabb) = sanctuary(seed, cell, &out) {
-        out.child_constraints.push(ChildConstraint::Zone {
-            aabb,
-            kind: ZoneKind::Sanctuary,
-        });
-        out.meta.flags = MetaFlags::SANCTUARY;
-    }
-    out
-}
-
-/// Wall thickness of the lift core.
-const CORE_WALL: Q = M;
-
-/// Lift stop heights in a cell (§4.0.1): every deck top and every bridge floor, sorted, unique.
-pub fn core_stops(decks: &[Deck], bridges: &[Primitive]) -> Vec<Q> {
-    let mut stops: Vec<Q> = decks
-        .iter()
-        .map(|d| d.top)
-        .chain(bridges.iter().map(|b| b.aabb().max.y))
-        .collect();
-    stops.sort_unstable();
-    stops.dedup();
-    stops
-}
-
-/// The lift core of one cell: the `LiftShaft` volume and its four `METAL` walls, open for
-/// `PORT_CLEARANCE` above each stop.
-pub fn core_pieces(core: Rect, stops: &[Q]) -> Vec<Primitive> {
-    lift_pieces(core, 0, CELL, stops)
 }
 
 /// A lift shaft over `rect` from `y_lo` to `y_hi`: the `LiftShaft` volume and `METAL` walls on
@@ -579,7 +482,9 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cavity::CavityView;
     use crate::cavity::is_cavity;
+    use crate::prim::{CellOutput, ChildConstraint};
 
     fn l1(x: i64, y: i64, z: i64) -> CellKey {
         CellKey::new(Level::L1, I64Vec3::new(x, y, z))
@@ -974,6 +879,7 @@ mod tests {
 
     /// Deck pieces never enter a hole, and every hole is a full-height `KeepOut` for children.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn decks_avoid_all_holes() {
         let seed = WorldSeed(0x5AF);
         for x in -20..20 {
@@ -1095,6 +1001,7 @@ mod tests {
     /// P0.7.5: every L1 port has a deck or a bridge reaching it inside the cell, and every
     /// bridge reaches the core at its own height, clear of a kept trunk.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn every_port_is_reached() {
         use crate::port::PortKind;
         let seed = WorldSeed(0xB41D);
@@ -1207,6 +1114,7 @@ mod tests {
     /// P0.7.6: the far set is an ordered subset of the full output, drops only narrow bridges and core pieces,
     /// and is strictly smaller wherever there is a narrow bridge.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn far_primitives_are_a_subset() {
         use crate::l1_bridge::FAR_BRIDGE_WIDTH;
         let seed = WorldSeed(0xFA2);
@@ -1243,6 +1151,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn core_identical_in_column_and_absent_in_cavities() {
         let seed = WorldSeed(11);
         let mut checked = 0;
@@ -1269,6 +1178,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn every_deck_and_bridge_has_a_stop() {
         let seed = WorldSeed(11);
         let mut with_bridges = 0;
@@ -1311,6 +1221,7 @@ mod tests {
 
     /// P0.7.8: bites never disconnect a deck from its port faces or the core.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn rim_decks_stay_connected() {
         use crate::cavity::cavity_mask;
         use crate::regime::{RareEvent, rare_event};
@@ -1409,6 +1320,7 @@ mod tests {
     /// P0.7.9: the staircase footprint is the same `KeepOut` in every cell of its column,
     /// and no L1 solid, shaft or chasm touches it.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn stair_footprint_is_reserved() {
         let seed = WorldSeed(0x57A1);
         let (mut columns_seen, mut cells) = (0, 0);

@@ -6,8 +6,8 @@
 use crate::cavity::CavityView;
 use crate::cell::{Axis, CellKey, Dir6, FaceKey, Level};
 use crate::hash::hash;
-use crate::key::{ColumnKey, LayerKey};
-use crate::l1::{CELL, DECK_REGION_LOG2, Deck, SEPARATION, core_footprint, decks};
+use crate::key::LayerKey;
+use crate::l1::{CELL, DECK_REGION_LOG2, Deck, SEPARATION, decks};
 use crate::port::{Port, PortKind};
 use crate::prim::{Q, QRect};
 use crate::rng::Rng;
@@ -53,19 +53,9 @@ pub fn face_ports_in(seed: WorldSeed, cavity: &CavityView, face: FaceKey) -> Vec
     };
     let mut rng = Rng::new(hash(seed.0, Level::L1, face.owner.coords, salt));
     let mut rects: Vec<(PortKind, QRect)> = Vec::new();
-    if face.axis == Axis::Y {
-        // Same column on both sides, so the same core.
-        let core = core_footprint(seed, ColumnKey::of(face.owner));
-        rects.push((
-            PortKind::LiftStop,
-            QRect {
-                u0: core.x0,
-                v0: core.z0,
-                u1: core.x1,
-                v1: core.z1,
-            },
-        ));
-    } else {
+    // The v6 lift stop on Y faces went with the lift core (version 7): the Web skeleton
+    // (`l1_artery`) carries vertical routes now.
+    if face.axis != Axis::Y {
         side_ports(&mut rng, face.owner, other, seed, &mut rects);
     }
     rects
@@ -201,7 +191,10 @@ mod tests {
                 assert!(r.v1 - r.v0 >= 39, "clearance ≥ 2.4 m {p:?}");
                 assert!(r.v0 - BRIDGE_THICKNESS >= 0 && r.v1 <= CELL, "{p:?}");
             }
-            PortKind::Walkway | PortKind::StairLanding | PortKind::Entrance { .. } => {
+            PortKind::Walkway
+            | PortKind::StairLanding
+            | PortKind::Entrance { .. }
+            | PortKind::Artery { .. } => {
                 panic!("not an L1 port: {p:?}")
             }
         }
@@ -244,6 +237,7 @@ mod tests {
         /// P0.7.4: every face between two non-cavity L1 cells carries at least one walkable
         /// port, and every port obeys the geometry rules.
         #[test]
+        #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
         fn backbone_faces_carry_a_port(
             seed in any::<u64>(),
             c in prop::array::uniform3(-1_000_000i64..1_000_000),

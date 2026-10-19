@@ -372,6 +372,7 @@ mod tests {
     /// P0.9.3: in 3 × 3 × 3 blocks of L2 cells, every port of every cell reaches the network,
     /// and ports shared by two cells really join their graphs.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn blocks_are_reachable_from_the_backbone() {
         let seed = WorldSeed(0x0903);
         let (mut ports_checked, mut joins) = (0, 0);
@@ -434,6 +435,7 @@ mod tests {
 
     /// P0.9.4: a random sample passes, in CI time.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn random_cells_pass() {
         let count = if cfg!(debug_assertions) {
             2_048

@@ -368,6 +368,7 @@ mod tests {
     /// P0.8.5: the shaft is the same from every L2 cell it passes through, and its slices tile
     /// the shaft's height. Where one cell holds a deck and its platform, they are connected.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn shaft_is_identical_across_its_span() {
         let seed = WorldSeed(0x0805);
         let (mut shafts, mut joined) = (0, 0);
@@ -478,6 +479,7 @@ mod tests {
     /// P0.8.5b: the tower is identical from every L2 cell it passes through, every flight lies
     /// inside one cell, and in a cell holding a deck and the top platform they are connected.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     #[allow(clippy::too_many_lines)] // one scan with several checks per tower
     fn tower_is_identical_across_its_span() {
         let seed = WorldSeed(0x0806);

@@ -45,9 +45,11 @@ After playing the Phase 5 build, the user found the world empty and dull: deck s
 
 The user wants wild, varied ideas, not literal readings. Their examples, and the ones in these docs, are seeds. When implementing a family, multiply its variants. When stuck for ideas, research or ask the user.
 
-## Update 2026-10-19 (PW.2.8 part)
+## Update 2026-10-19 (PW.2.8 and PW.2.8b done, `GEN_VERSION` 7)
 
-`l1_artery.rs` is built and committed (face ports, port walks, BFS fallback, loops, ties; 10⁴-cell backbone check passes). PW.2.8 stays unticked: the assembly into `l1_cell`, `GEN_VERSION` 7 and the golden digest are split out as **PW.2.8b**, which waits for the user, because it removes the lift core that v6 L2/L3/validate/engine consume (the game would not work until PW.3). `T` averages about 250 of 512 L2 cells. Next, without that decision: PW.2.9 (artery types), PW.2.10 (stratum character), PW.2.4b, PW.2.6b.
+`l1_artery.rs` (skeleton, tuning constants) and `l1_web.rs` (the assembled Web L1) are built; the lift core is gone from the generator (spec `levels.md` §4W.5.7–§4W.5.8). **The game is broken by design until PW.3** (user decision): the v6 L2/L3/engine sit on the Web L1, their v6-dependent tests are `#[ignore]` with the reason "replaced in version 7" (`grep -rn "replaced in version 7" crates`), and the dead v6 L1 helpers stay until PW.3 deletes them. Next: PW.2.9 (artery types), PW.2.10 (stratum character), PW.2.4b, PW.2.6b, then PW.3.
+
+**Workflow (user decision, 2026-10-19):** keep testing local to what you touch; run the full check only at critical points. `scripts/quick.sh [crate] [filter]` runs fmt plus `cargo nextest` on one crate (default gen). `scripts/check.sh` is the full run (now nextest). nextest is installed (`cargo install cargo-nextest`), config in `.config/nextest.toml` (report at 60 s, kill at 300 s). The dev profile builds `gen` at opt-level 3 with line-table debug info. The whole workspace now tests in about 15 s (it took over 10 minutes before the v6 tests were ignored, mostly two 90 s tests and an endless nav-graph test on Web output).
 
 ## State at handoff (updated 2026-10-18, end of PW.2.7)
 

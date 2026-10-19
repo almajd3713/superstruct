@@ -172,6 +172,7 @@ fn pieces_meet_exactly_at_shared_faces() {
 }
 
 #[test]
+#[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
 fn nothing_collidable_enters_the_envelope() {
     let mut cells = 0;
     for layer in layers(120) {

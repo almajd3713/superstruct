@@ -326,6 +326,7 @@ mod tests {
 
     /// P4.2.2: guarded edge runs have a railing module and unguarded ones have none.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn guarded_edges_have_railings_and_unguarded_ones_do_not() {
         let cache = L1Cache::default();
         let (mut guarded, mut unguarded) = (0, 0);
@@ -413,6 +414,7 @@ mod tests {
     /// P4.2.2: panels on W sides, frames on D sides, gratings on corridors, lamps on lit slots,
     /// nothing in solid slots; placement is pure and stays inside the block.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn modules_follow_the_slot_rules() {
         let blocks = sample_blocks(60);
         assert!(blocks.len() >= 30, "{} blocks", blocks.len());

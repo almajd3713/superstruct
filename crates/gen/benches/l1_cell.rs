@@ -5,7 +5,7 @@ use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use glam::I64Vec3;
 use worldgen::cavity::{CavityView, is_cavity};
 use worldgen::cell::{CellKey, Level};
-use worldgen::l1::l1_cell;
+use worldgen::l1_web::l1_cell;
 use worldgen::regime::{RareEvent, rare_event};
 use worldgen::seed::WorldSeed;
 

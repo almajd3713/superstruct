@@ -897,6 +897,7 @@ mod tests {
     /// Lemma A, checked by the validator: in an L1 cell, all deck and bridge surfaces and the
     /// lift platforms form one component.
     #[test]
+    #[ignore = "v6 L1 output (decks, bridges, lift core); the Web skeleton is checked in l1_artery, PW.3 rebuilds the nav checks"]
     fn l1_cells_are_internally_connected() {
         use crate::cell::{CellKey, Level};
         use crate::l1::l1_cell;

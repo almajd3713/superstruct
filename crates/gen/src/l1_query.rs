@@ -97,6 +97,7 @@ mod tests {
     /// P0.8.1: the query agrees with a brute-force reading of the primitives through the SDF,
     /// at points on, inside and just above each primitive.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn agrees_with_primitives() {
         let seed = WorldSeed(0x0801);
         let mut rng = Rng::new(7);

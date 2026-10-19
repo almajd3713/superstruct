@@ -28,8 +28,13 @@ expect_used = "warn"
 lto = "thin"
 codegen-units = 1
 
+[profile.dev]
+# Backtraces keep line numbers; full debug info only slows linking and fills target/.
+debug = "line-tables-only"
+
+# The tests loop over thousands of generated cells, so the generator is built optimised.
 [profile.dev.package.gen]
-opt-level = 1
+opt-level = 3
 
 [profile.dev.package."*"]
 opt-level = 1

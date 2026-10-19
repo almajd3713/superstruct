@@ -991,6 +991,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn a_scripted_ride_between_two_decks() {
         let (k, f, stops) = find_cell();
         let (s0, s1) = (q_m(stops[0].y), q_m(stops[1].y));

@@ -777,6 +777,7 @@ pub(crate) mod tests {
         }
 
         #[test]
+        #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
         fn lands_on_a_real_deck_and_walks_it() {
             let seed = WorldSeed(0);
             let (spot, width) = deck_spot(seed);

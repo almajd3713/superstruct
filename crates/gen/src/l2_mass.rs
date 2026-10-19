@@ -250,6 +250,7 @@ mod tests {
 
     /// P0.8.2: no mass touches an L1 solid, keep-out or void, and every mass stands on deck.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn masses_sit_on_supported_clear_surfaces() {
         let seed = WorldSeed(0x0802);
         let (mut total, mut parents) = (0, 0);

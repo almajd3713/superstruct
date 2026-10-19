@@ -226,6 +226,7 @@ mod tests {
     /// P0.8.7: vista frequency among eligible cells is at most the spec's 0.25, and each
     /// vista's balcony stands on deck at the edge of a void with its corridor over that void.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     #[allow(
         clippy::too_many_lines,
         clippy::cast_possible_truncation,

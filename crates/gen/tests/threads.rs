@@ -6,7 +6,7 @@ use glam::I64Vec3;
 use rayon::prelude::*;
 use worldgen::cell::{CellKey, Level};
 use worldgen::hash::hash;
-use worldgen::l1::l1_cell;
+use worldgen::l1_web::l1_cell;
 use worldgen::l2::l2_cell_in;
 use worldgen::l2_port::L1Cache;
 use worldgen::regime::regime;

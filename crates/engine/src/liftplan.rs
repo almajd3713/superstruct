@@ -4,7 +4,7 @@
 use worldgen::cavity::is_cavity;
 use worldgen::cell::CellKey;
 use worldgen::key::LayerKey;
-use worldgen::l1::{DECK_REGION_LOG2, Rect, core_footprint, core_stops, decks, l1_cell};
+use worldgen::l1::{DECK_REGION_LOG2, Rect, core_footprint, decks, l1_cell};
 use worldgen::prim::{FeatureKind, Q, Shape};
 use worldgen::seed::WorldSeed;
 
@@ -37,6 +37,20 @@ pub enum CellPlan {
 
 /// The core of `cell` and its stops. The stops come from the same function and inputs
 /// `l1_cell` uses to cut the wall openings, so they match the openings exactly.
+/// Lift stop heights of a v6 cell: every deck top and bridge floor, sorted and unique. The v6
+/// lift core is gone from the generator (version 7), so nothing calls this on a live world
+/// until PW.3 replaces the lift system.
+fn core_stops(decks: &[worldgen::l1::Deck], bridges: &[worldgen::prim::Primitive]) -> Vec<Q> {
+    let mut stops: Vec<Q> = decks
+        .iter()
+        .map(|d| d.top)
+        .chain(bridges.iter().map(|b| b.aabb().max.y))
+        .collect();
+    stops.sort_unstable();
+    stops.dedup();
+    stops
+}
+
 pub fn plan_cell(seed: WorldSeed, cell: CellKey) -> CellPlan {
     if !cell.in_domain() {
         return CellPlan::OutOfDomain;
@@ -163,6 +177,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn stops_match_the_openings_in_the_core_walls() {
         let c = find(with_two_decks);
         let (f, stops) = core(c);
@@ -204,6 +219,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn deck_stops_are_served_on_every_side_over_the_full_length() {
         let c = find(with_two_decks);
         let (f, stops) = core(c);
@@ -217,6 +233,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn bridge_stops_serve_a_single_side_interval_of_bridge_width() {
         // A cell with a bridge stop that no deck shares.
         let c = find(|c| {

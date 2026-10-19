@@ -172,6 +172,7 @@ mod tests {
     /// P0.8.9: every trunk-attached mass touches its trunk and has an entrance landing that
     /// the validator links to the L1 network, over 10⁴ cells.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn attached_masses_are_reachable() {
         let seed = WorldSeed(0x0809);
         let (mut cells, mut attached) = (0u32, 0u32);

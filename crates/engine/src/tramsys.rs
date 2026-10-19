@@ -618,6 +618,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn a_walker_on_the_rails_is_pushed_into_the_median() {
         let line = full_line();
         let sess = Session::new(line.clone()).unwrap();
@@ -642,6 +643,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn a_scripted_ride_from_the_first_station_to_the_last() {
         let line = full_line();
         let sess = Session::new(line.clone()).unwrap();

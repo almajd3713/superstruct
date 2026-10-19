@@ -176,6 +176,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn sanctuary_lies_inside_a_flagged_l1_cell() {
         let seed = WorldSeed(0);
         let from = WorldPos::new(I64Vec3::ZERO, Vec3::splat(512.0)).unwrap();

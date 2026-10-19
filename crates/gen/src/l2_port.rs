@@ -470,6 +470,7 @@ mod tests {
     /// Inside an L1 cell, every deck or bridge port has flush floor on both sides, and the
     /// port ids are dense; own ports obey their rules and overlap nothing.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn interior_and_own_ports_are_sound() {
         let seed = WorldSeed(0x0804);
         let (mut cascade, mut own) = (0, 0);

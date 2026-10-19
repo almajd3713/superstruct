@@ -1,0 +1,5 @@
+[profile.default]
+# A test that runs for minutes is a bug (a search loop that cannot finish): report it at 60 s
+# and kill it at 300 s instead of hanging the whole run.
+slow-timeout = { period = "60s", terminate-after = 5 }
+fail-fast = false

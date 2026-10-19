@@ -207,6 +207,7 @@ mod tests {
     /// P0.8.8: about 15 % of drop edges are left unguarded, and every railing stands on a
     /// flat edge above a real drop.
     #[test]
+    #[ignore = "reads the v6 L1 (lift core, decks, bridges), replaced in version 7; rebuilt or deleted with PW.3"]
     fn unguarded_fraction_matches_spec() {
         let seed = WorldSeed(0x0808);
         let (mut drops, mut guarded, mut rails) = (0u32, 0u32, 0usize);

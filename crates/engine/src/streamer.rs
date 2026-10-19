@@ -528,6 +528,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn uploads_never_exceed_the_frame_budget_and_everything_arrives() {
         let budget = 200_000;
         let mut s = streamer(StreamerConfig {
@@ -553,6 +554,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn fast_flythrough_stays_inside_the_memory_budget_without_stale_work() {
         let memory = 900_000;
         let mut s = streamer(StreamerConfig {
@@ -590,6 +592,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn far_to_full_swap_keeps_the_old_chunk_drawn_until_the_new_one_is_resident() {
         let mut s = streamer(StreamerConfig {
             stream: small(),
@@ -636,6 +639,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn mid_to_full_swap_hides_the_mid_chunk_and_keeps_it_out_of_collision() {
         let mut s = streamer(StreamerConfig {
             stream: small(),
@@ -673,6 +677,7 @@ mod tests {
     /// The far band at its default 50 km radius fills within its time budget on 8 workers.
     /// Prints the time; run `cargo test --release -p engine --lib far_band -- --nocapture`.
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn far_band_reaches_fifty_km_within_its_time_budget() {
         let mut s = Streamer::new(
             StreamerConfig {
@@ -726,6 +731,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn band_radii_change_live() {
         let mut s = streamer(StreamerConfig {
             stream: small(),

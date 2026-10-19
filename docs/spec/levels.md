@@ -444,7 +444,16 @@ Forced ports are part of the face key (the face evaluates the same L0 lines for 
 - `T` is kept in insertion order. Each diagonal move is expanded into its supporting axis path (x, then y, then z) and those cells join `T`, so every artery is a 6-connected path.
 - Walk weights are `255 − weave` (at least 1), `weave / 2` and `weave / 4` for axis, face-diagonal and space-diagonal moves, ×4 when the move reduces the Chebyshev distance. The budget is `4·dist + 8`; a BFS (nearest goal, lowest index) finishes it, also when no candidate move is left.
 - Ties: every beam except conduits (`Beam::l2_cells`), every crust the cell intersects (L2 cells whose centre lies in crust `k`), and every tether, drip, spire and island piece (cells its bounds overlap). The start is the candidate nearest to the knot (ties: lowest index). A tie whose start is already in `T` adds nothing. Ties use the catwalk web type.
-- Not yet: forced arteries (Roads and Spines, PW.10), the stratum-weighted types (PW.2.9, PW.2.10), the `ForcedPort` child constraints and the replacement of the lift core in `l1_cell` (PW.2.8b).
+- **Tuning.** Every number that sets the skeleton's density is a named constant in `l1_artery::tuning` (ports per face, loops, loop span, walk budget, the bias toward the target, which tie kinds exist). Changing one changes generator output (bump `GEN_VERSION`, regenerate goldens). `cargo nextest run -p gen skeleton_census --no-capture` prints the effect: the tree size and path cells by role.
+- Not yet: forced arteries (Roads and Spines, PW.10) and the stratum-weighted types (PW.2.9, PW.2.10).
+
+#### 4W.5.8 The assembled Web L1 (PW.2.8b, `worldgen::l1_web::l1_cell`, version 7)
+
+- Primitives, in order: beams and knot (`frame_content`), Between content, crust surfaces and cliffs, then the standing matter inside voids. Voids' keep-out shapes become `KeepOut` constraints. Cavity cells emit nothing.
+- Ports: the skeleton's L1-face ports first (`PortKind::Artery { kind }`, rect = the whole face of the L2 cell; floor and width are the L2 tissue's job, PW.3), then one port per L2 face an artery crosses, once per artery type (`FaceKey` at level L2, owner = the lower L2 cell). Each port gets one `ChildConstraint::ForcedPort`.
+- **The v6 lift core is gone.** `l1_cell` no longer emits the core, decks, trunks, bridges or the sanctuary, `l1_port` no longer makes the Y-face lift stop, and `l1_cell_v6`, `core_footprint`'s emitters (`core_pieces`, `core_stops`) are deleted. The v6 keyed helpers that the removed code shared (`core_footprint`, `decks`, `trunk`, `shaft`, `chasm`, bridges, rim, `l1_port`) remain as dead code because the v6 L2, L3, validator and engine still compile against them; PW.3 deletes them. Until then the v6 L2 and everything above it run on the Web L1 and are broken by design; the tests that read the v6 output are `#[ignore]`d with a reason (grep `replaced in version 7`).
+- `GEN_VERSION` is 7. The L0 golden digest includes `web`. L2 goldens changed because L2 reads L1 ports.
+
 - Measured over 10⁴ cells: `T` holds about 250 of the 512 L2 cells (port arteries about 196 path cells, loops 29, beam ties 9, crust and Between ties 96, with overlaps). That is the cost of 2–4 ports on each of six faces. The L2 tissue (PW.3) may want fewer ports or shorter ones; the numbers are in the PW.2.8 checklist note.
 
 #### 4W.5.6 Why Betweens are live
