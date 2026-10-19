@@ -437,6 +437,16 @@ Roads and Spines (and rivers, bores) are line features at L0 scale. In an L1 cel
 
 Forced ports are part of the face key (the face evaluates the same L0 lines for both cells), so they are in `ports.md`'s count: the count of own ports is `2 + below(3)` **plus** the forced ones. The forced arteries are joined to `T` first (step 0 of §4W.5.2), which is why the later walks attach to them. A forced port must not coincide with an own port; an own port that would is redrawn (`ports.md` §3 keeps the draw count fixed).
 
+#### 4W.5.7 As implemented (PW.2.8, `worldgen::l1_artery`)
+
+- `face_artery_ports` draws a face's ports from `hash(seed, L1, owner, ARTERY_FACE_X/Y/Z)`: `2 + below(3)` distinct cells `(i, j)` (X faces `(y, z)`, Y faces `(x, z)`, Z faces `(x, y)`), each with a type drawn uniformly from `ArteryType::offered(axis)`. Beam corridors and gravity gates are not offered yet (PW.2.9 adds the context they need), and the stratum weights wait for PW.2.10.
+- `skeleton(seed, l1)` is `None` for a cavity cell. Otherwise `T` starts as the knot's L2 cell; port walks follow in the order −x, +x, −y, +y, −z, +z; then `below(3)` loops (two cells of `T` by insertion order, a loop whose cells are closer than 3 is dropped; its type is drawn from the offered set of the dominant axis of the displacement); then ties.
+- `T` is kept in insertion order. Each diagonal move is expanded into its supporting axis path (x, then y, then z) and those cells join `T`, so every artery is a 6-connected path.
+- Walk weights are `255 − weave` (at least 1), `weave / 2` and `weave / 4` for axis, face-diagonal and space-diagonal moves, ×4 when the move reduces the Chebyshev distance. The budget is `4·dist + 8`; a BFS (nearest goal, lowest index) finishes it, also when no candidate move is left.
+- Ties: every beam except conduits (`Beam::l2_cells`), every crust the cell intersects (L2 cells whose centre lies in crust `k`), and every tether, drip, spire and island piece (cells its bounds overlap). The start is the candidate nearest to the knot (ties: lowest index). A tie whose start is already in `T` adds nothing. Ties use the catwalk web type.
+- Not yet: forced arteries (Roads and Spines, PW.10), the stratum-weighted types (PW.2.9, PW.2.10), the `ForcedPort` child constraints and the replacement of the lift core in `l1_cell` (PW.2.8b).
+- Measured over 10⁴ cells: `T` holds about 250 of the 512 L2 cells (port arteries about 196 path cells, loops 29, beam ties 9, crust and Between ties 96, with overlaps). That is the cost of 2–4 ports on each of six faces. The L2 tissue (PW.3) may want fewer ports or shorter ones; the numbers are in the PW.2.8 checklist note.
+
 #### 4W.5.6 Why Betweens are live
 
 The user asked for "an infinite web of routes on every axis" (PRN-03, PRN-04). A Between is therefore not empty: it holds the skeleton threads. The visual cost is low (a catwalk 4 m wide across 4 km of air), and the guarantee does not depend on the stack geometry, the void shapes or the neighbouring regime. The built fraction stays within the targets of the-web.md §4 (2–10 % for the Between).
@@ -539,6 +549,7 @@ Salts added in the L1 block (`0x0200–0x02FF`), append-only:
 | `VOID_CELL` | `0x0213` | cell (L1) | halls, shafts, funnels |
 | `FILL_CORNER` | `0x0214` | lattice corner (L1) | fill noise |
 | `ARTERY` | `0x0215` | cell (L1) | walks, loops, ties |
+| `ARTERY_FACE_X/Y/Z` | `0x0224–0x0226` | owner cell (L1) | face ports and their types |
 | `BETWEEN_KEY` | `0x0216` | cell (L0) with the Between index absorbed | identity of a run (§4W.6.1) |
 | `BETWEEN_SITE` | `0x0217` | `(p, q, run key)` (level 1) | the site draw |
 | `BETWEEN_LINE` | `0x0218` | `(t, 0, run key)`; `(−1, −1, run key)` for the count | tubes |

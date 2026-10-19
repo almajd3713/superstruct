@@ -58,6 +58,12 @@ salts! {
     FILL_CORNER = 0x0214;
     /// Cell (L1): the knot draw.
     KNOT = 0x0212;
+    /// Cell (L1): walks, loops and ties of the skeleton (`levels.md` §4W.5.2).
+    ARTERY = 0x0215;
+    /// Owner cell (L1): ports of its +X, +Y and +Z face (`levels.md` §4W.5.1).
+    ARTERY_FACE_X = 0x0224;
+    ARTERY_FACE_Y = 0x0225;
+    ARTERY_FACE_Z = 0x0226;
     /// Cell (L0) with the Between index absorbed: identity of a run (`levels.md` §4W.6.1).
     BETWEEN_KEY = 0x0216;
     /// `(p, q, run key)`: the site draw of a Between lattice.

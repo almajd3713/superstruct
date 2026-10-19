@@ -222,6 +222,35 @@ impl Beam {
         dir_class(self.dir)
     }
 
+    /// The L2 cells (`0..8` on each axis) of L1 cell `l1` that the beam's axis passes through.
+    /// The sampling step is half an L2 cell along the dominant axis, so no cell is skipped.
+    pub fn l2_cells(&self, l1: I64Vec3) -> Vec<[u8; 3]> {
+        let origin = l1 * L1_M;
+        let c0 = comp(origin, self.info().a);
+        let (a0, a1) = (c0.max(self.a_from), (c0 + L1_M).min(self.a_to));
+        let mut out: Vec<[u8; 3]> = Vec::new();
+        let mut a = a0;
+        while a < a1 {
+            let p = self.point_q(a);
+            let cell = [0, 1, 2].map(|k| (p[k] / Q - origin[k]).div_euclid(512));
+            if cell.iter().all(|c| (0..8).contains(c)) {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // in 0..8
+                let cell = cell.map(|c| c as u8);
+                if !out.contains(&cell) {
+                    out.push(cell);
+                }
+            }
+            a = if a + 256 < a1 {
+                a + 256
+            } else if a + 1 < a1 {
+                a1 - 1
+            } else {
+                a1
+            };
+        }
+        out
+    }
+
     /// The registry IDs this beam stands for.
     pub fn tags(&self) -> Vec<&'static str> {
         let mut t = vec![FRM_LINE, FRM_SECTION, self.kind.tag()];
