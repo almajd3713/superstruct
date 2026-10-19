@@ -45,6 +45,10 @@ After playing the Phase 5 build, the user found the world empty and dull: deck s
 
 The user wants wild, varied ideas, not literal readings. Their examples, and the ones in these docs, are seeds. When implementing a family, multiply its variants. When stuck for ideas, research or ask the user.
 
+## Update 2026-10-19 (PW.2.8 part)
+
+`l1_artery.rs` is built and committed (face ports, port walks, BFS fallback, loops, ties; 10⁴-cell backbone check passes). PW.2.8 stays unticked: the assembly into `l1_cell`, `GEN_VERSION` 7 and the golden digest are split out as **PW.2.8b**, which waits for the user, because it removes the lift core that v6 L2/L3/validate/engine consume (the game would not work until PW.3). `T` averages about 250 of 512 L2 cells. Next, without that decision: PW.2.9 (artery types), PW.2.10 (stratum character), PW.2.4b, PW.2.6b.
+
 ## State at handoff (updated 2026-10-18, end of PW.2.7)
 
 **Done and committed:** PW.0.1–PW.0.7, PW.1.1–PW.1.3, PW.2.1–PW.2.7. `GEN_VERSION` is still 6: nothing is assembled into `l1_cell` yet (the Web L1 is assembled at PW.2.8, which bumps to 7, puts `web` back into the L0 golden digest in `crates/gen/tests/golden.rs` and regenerates the goldens). **Next item: PW.2.8** (arteries, assembles the Web L1, `GEN_VERSION` 7), then PW.2.9…; `python3 scripts/coverage.py --todo` lists it. Also open: PW.2.4b (openings and dressing on Tilted skins) and PW.2.6b (voids in Tilted and Vertical stacks; void mouths cut the skin).
