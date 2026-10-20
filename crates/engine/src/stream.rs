@@ -123,7 +123,7 @@ impl StreamConfig {
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {
-            l3_radius_m: 192.0,
+            l3_radius_m: 96.0,
             l2_radius_m: 1024.0,
             l2_mid_radius_m: 3072.0,
             l1_full_radius_m: 4096.0,

@@ -703,7 +703,7 @@ mod tests {
     #[test]
     #[ignore = "prints viewpoints"]
     fn print_door_viewpoints() {
-        let seed = WorldSeed(0x5eed);
+        let seed = WorldSeed(0);
         let cache = L1Cache::default();
         let mut shown = 0;
         for cell in cells(60) {

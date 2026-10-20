@@ -45,6 +45,12 @@ After playing the Phase 5 build, the user found the world empty and dull: deck s
 
 The user wants wild, varied ideas, not literal readings. Their examples, and the ones in these docs, are seeds. When implementing a family, multiply its variants. When stuck for ideas, research or ask the user.
 
+## Handoff 2026-10-20 (later): PW.4 built (Web L3), `GEN_VERSION` 17
+
+PW.4.1 to PW.4.5 are committed (`3de3f57` and after; specs `levels.md` §6W.10 to §6W.13, checklist notes list every deviation). New modules: `l3_web.rs` (masses, entrances, `WebL3` context, world-cell wrapper), `l3_arch.rs`, `l3_dress.rs` (corridor kinds), `l3_rooms.rs` (INT-01..19); `l3_plan.rs`, `l3.rs`, `l3_tiles.rs`, `l3_solver.rs` (`solve_weighted`) were changed; `l3_validate.rs` was deleted (replaced by tests in `l3_web.rs`). Interiors work in the game: see the viewpoint in the PW.4.1 note. Also this session: empty mesh pages are released (VRAM leak) and the overlay shows page bytes; coplanar quads of different materials no longer overlap in `chunkmesh`; stair rails are a box plus a ramp that follow the flight (`edges.rs`).
+
+**Open, to check on your walk:** stair feet against walkways ("a walk facing the opposite side of the stairs": you said you would send a screenshot), whether rails still clip stairs, the z-fighting you reported again (my own screenshots show dither noise while chunks fade in, which may be what you see; if it is a fixed pattern on a surface, send the place), the GPU memory (2 GiB resident, the streamer's 768 MiB budget is over every frame because the wanted set alone exceeds it: lower the band radii or the L1/L2 detail if it must be less). Not done in PW.4: L4 modules and lights in Web interiors (`l4::block_modules` assumes axis-aligned blocks), payoff rooms (§6W.6), vertical joins between parts of a structure, a ladder mechanic (PW.5.1; roof hatches and ladder wells are only drawn).
+
 ## Handoff 2026-10-20: PW.3.12b, 21d, 21e, 21f, 22, 15c done; `GEN_VERSION` 16
 
 All committed (`git log`): the whole PW.2.9 to PW.3.21c stretch in `5f621ec`, then one commit per item. Full `cargo nextest run --workspace` passes (393 tests, about 5 minutes; the tram golden test alone takes 4 minutes now). Goldens are at version 16.
