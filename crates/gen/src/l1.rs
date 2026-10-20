@@ -412,9 +412,14 @@ pub fn deck_pieces(decks: &[Deck], holes: &[Rect], bites: &[Vec<Rect>]) -> Vec<P
 /// row, then extends a run from the previous row when its x-extent is identical. Output is
 /// sorted by `(z0, x0)`.
 pub fn decompose(holes: &[Rect]) -> Vec<Rect> {
-    let clip = |v: Q| v.clamp(0, CELL);
-    let mut xs: Vec<Q> = vec![0, CELL];
-    let mut zs: Vec<Q> = vec![0, CELL];
+    decompose_in(holes, CELL)
+}
+
+/// `decompose` on the square `[0, size)²`.
+pub fn decompose_in(holes: &[Rect], size: Q) -> Vec<Rect> {
+    let clip = |v: Q| v.clamp(0, size);
+    let mut xs: Vec<Q> = vec![0, size];
+    let mut zs: Vec<Q> = vec![0, size];
     for h in holes {
         xs.extend([clip(h.x0), clip(h.x1)]);
         zs.extend([clip(h.z0), clip(h.z1)]);
@@ -465,8 +470,21 @@ pub fn decompose(holes: &[Rect]) -> Vec<Rect> {
 /// Trunks, deck pieces and bridges at least 16 m wide. The same data, never a simplification.
 pub fn l1_far_primitives(seed: WorldSeed, cell: CellKey) -> Vec<Primitive> {
     let mut prims = l1_cell(seed, cell).primitives;
-    prims.retain(|p| p.flags.contains(PrimFlags::FAR_VISIBLE));
+    prims.retain(|p| p.flags.contains(PrimFlags::FAR_VISIBLE) && is_far_sized(p));
     prims
+}
+
+/// The Web has thousands of far-visible pieces in an L1 cell, and the far band reaches 50 km:
+/// only pieces at least 32 m thick in every direction are drawn from afar (about a tenth of
+/// them), which is what fits the far band's instance budget (PW.3.21c).
+pub const FAR_MIN_THICKNESS_Q: Q = 32 * 16;
+
+fn is_far_sized(p: &Primitive) -> bool {
+    let b = p.aabb();
+    (b.max.x - b.min.x)
+        .min(b.max.y - b.min.y)
+        .min(b.max.z - b.min.z)
+        >= FAR_MIN_THICKNESS_Q
 }
 
 /// `lo + step · range(0, n)`, uniform over the multiples of `step` in `[lo, hi]`.

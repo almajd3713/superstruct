@@ -19,7 +19,7 @@ use worldgen::seed::WorldSeed;
 
 use crate::beacon::BeaconDraw;
 use crate::camera::Camera;
-use crate::cellscene::busiest_l2_cell;
+use crate::cellscene::{busiest_l2_cell, knot_spawn};
 use crate::controller::{Controller, EYE_HEIGHT, MoveInput};
 use crate::debugcmd::Command;
 use crate::fartram::FarTrams;
@@ -565,6 +565,17 @@ impl App {
                 }
                 Err(err) => error!("cannot teleport to sector {x} {y} {z}: {err}"),
             }
+            return;
+        }
+        if std::env::var("SUPERSTRUCT_CELL").is_err()
+            && let Some((key, local)) = knot_spawn(WorldSeed(self.settings.seed))
+            && let Ok(p) = key.aabb_world().and_then(|b| b.min.offset(local))
+        {
+            // The default start: on the deck at a knot of the Web, looking along the cell.
+            self.camera.pos = p;
+            self.prev_cam_pos = p;
+            self.camera.yaw = 5.0 * std::f32::consts::FRAC_PI_4;
+            self.camera.pitch = 0.0;
             return;
         }
         let key = std::env::var("SUPERSTRUCT_CELL")

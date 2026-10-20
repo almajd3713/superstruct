@@ -83,6 +83,26 @@ pub enum Shp {
         y: i64,
         z: i64,
     },
+    /// A box in the frame of a Tilted stack (`Frame::table(yaw, tilt)`) with the corner `anchor`
+    /// (world metres): `s` along the frame's x, `t` along its z, `h` along its y (PW.2.6b).
+    PlateBox {
+        yaw: u8,
+        tilt: u8,
+        anchor: I64Vec3,
+        s: (i64, i64),
+        t: (i64, i64),
+        h: i64,
+    },
+    /// A cylinder along the frame's y from the point `(s, 0, t)` above `anchor`.
+    PlateCyl {
+        yaw: u8,
+        tilt: u8,
+        anchor: I64Vec3,
+        s: i64,
+        t: i64,
+        len: i64,
+        r: i64,
+    },
     /// A cylinder along table direction `d` from `start` (world quanta), `len` quanta long.
     Line {
         d: [i8; 3],
@@ -158,12 +178,70 @@ fn shp_bounds(s: &Shp) -> (I64Vec3, I64Vec3) {
                 origin + I64Vec3::splat(reach + z),
             )
         }
+        Shp::PlateBox {
+            yaw,
+            tilt,
+            anchor,
+            s,
+            t,
+            h,
+        } => plate_bounds(yaw, tilt, anchor, [s.0, 0, t.0], [s.1, h, t.1]),
+        Shp::PlateCyl {
+            yaw,
+            tilt,
+            anchor,
+            s,
+            t,
+            len,
+            r,
+        } => plate_bounds(yaw, tilt, anchor, [s - r, 0, t - r], [s + r, len, t + r]),
         Shp::Line { start, len, r, .. } => {
             let s = I64Vec3::new(start[0] / Q, start[1] / Q, start[2] / Q);
             let l = len / Q + r + 1;
             (s - I64Vec3::splat(l), s + I64Vec3::splat(l))
         }
     }
+}
+
+/// World bounds of the local box `lo..hi` of the frame `Frame::table(yaw, tilt)` at `anchor`.
+#[allow(clippy::cast_possible_truncation)] // metres of one L0 cell
+fn plate_bounds(
+    yaw: u8,
+    tilt: u8,
+    anchor: I64Vec3,
+    lo: [i64; 3],
+    hi: [i64; 3],
+) -> (I64Vec3, I64Vec3) {
+    let axes = Frame::table(yaw, tilt).axes();
+    let (mut mn, mut mx) = ([f64::MAX; 3], [f64::MIN; 3]);
+    for c in 0..8 {
+        let pick = |k: usize| {
+            if c >> k & 1 == 0 {
+                lo[k] as f64
+            } else {
+                hi[k] as f64
+            }
+        };
+        let v = axes[0] * pick(0) + axes[1] * pick(1) + axes[2] * pick(2);
+        for (k, x) in [v.x, v.y, v.z].into_iter().enumerate() {
+            mn[k] = mn[k].min(x);
+            mx[k] = mx[k].max(x);
+        }
+    }
+    (
+        anchor
+            + I64Vec3::new(
+                mn[0].floor() as i64,
+                mn[1].floor() as i64,
+                mn[2].floor() as i64,
+            ),
+        anchor
+            + I64Vec3::new(
+                mx[0].ceil() as i64,
+                mx[1].ceil() as i64,
+                mx[2].ceil() as i64,
+            ),
+    )
 }
 
 fn comp(v: I64Vec3, axis: Axis) -> i64 {
@@ -186,8 +264,8 @@ struct Crust {
     hi: i64,
 }
 
-fn crusts(seed: WorldSeed, home: I64Vec3, st: &Stack) -> Vec<Crust> {
-    let base = home.y * L0_M;
+fn crusts(seed: WorldSeed, home: I64Vec3, virt: I64Vec3, st: &Stack) -> Vec<Crust> {
+    let base = virt.y * L0_M;
     let (zone_lo, zone_hi) = (base + L1_M, base + L0_M - L1_M);
     st.segments
         .iter()
@@ -225,19 +303,167 @@ fn void_chance(fill_crust: u8) -> u64 {
     (1000 * (255 - u64::from(fill_crust)) * 3 / 255).min(600)
 }
 
-/// Every area void and line void (valleys, rifts) of L0 cell `home`, in a fixed order. Empty
-/// for stacks other than Flat and Curved (PW.2.6b).
+/// Every area void and line void (valleys, rifts) of L0 cell `home`, in a fixed order.
+///
+/// Vertical and Tilted stacks are generated as Flat ones in the stack's own space and then
+/// turned into world shapes (`levels.md` §4W.3.4); the rifts, which are already turned, are
+/// left out of them.
 pub fn voids_of_l0(seed: WorldSeed, home: I64Vec3) -> Vec<Void> {
     let web = regime(seed, home).web;
-    if !matches!(web.stack, StackGeometry::Flat | StackGeometry::Curved) {
-        return Vec::new();
-    }
     let st = stack(seed, home);
-    let cs = crusts(seed, home, &st);
+    match web.stack {
+        StackGeometry::Flat | StackGeometry::Curved => voids_in_stack_space(seed, home, home, &st),
+        StackGeometry::Vertical { axis } => {
+            let a = if axis == 0 { Axis::X } else { Axis::Z };
+            let virt = swap_with_y(home, a);
+            voids_in_stack_space(seed, home, virt, &st)
+                .into_iter()
+                .filter_map(|v| map_void(v, |s| swap_shp(s, a)))
+                .collect()
+        }
+        StackGeometry::Tilted { tilt, yaw } => {
+            let (ax, az) = (home.x * L0_M + L0_M / 2, home.z * L0_M + L0_M / 2);
+            let c = 64.0
+                / f64::from(64 * 64 + crate::orient::TILT_SLOPE[usize::from(tilt)].pow(2)).sqrt();
+            voids_in_stack_space(seed, home, home, &st)
+                .into_iter()
+                .filter_map(|v| map_void(v, |s| plate_shp(s, yaw, tilt, (ax, az), c)))
+                .filter(|v| {
+                    let (lo, hi) = v.bounds();
+                    let o = home * L0_M;
+                    Axis::ALL.into_iter().all(|k| {
+                        comp(lo, k) - comp(o, k) >= L1_M - 1
+                            && comp(hi, k) - comp(o, k) <= L0_M - L1_M + 1
+                    })
+                })
+                .collect()
+        }
+    }
+}
+
+/// The extent of a keep-out piece in stack coordinates: `s`, `t` and `a` ranges in metres, with
+/// `s`, `t` and `a` the axes of the stack's map (plane coordinates for a Tilted stack). `None`
+/// for pieces that are not simple boxes or cylinders.
+pub(crate) fn stack_extent(sh: &Shp, s: Axis, t: Axis, a: Axis) -> Option<[(i64, i64); 3]> {
+    match *sh {
+        Shp::PlateBox {
+            tilt,
+            anchor,
+            s,
+            t,
+            h,
+            ..
+        } => {
+            let up = (h as f64 / cos_tilt(tilt)).round() as i64;
+            Some([s, t, (anchor.y, anchor.y + up)])
+        }
+        Shp::PlateCyl {
+            tilt,
+            anchor,
+            s,
+            t,
+            len,
+            r,
+            ..
+        } => {
+            let up = (len as f64 / cos_tilt(tilt)).round() as i64;
+            Some([(s - r, s + r), (t - r, t + r), (anchor.y, anchor.y + up)])
+        }
+        Shp::Box { .. } | Shp::Cyl { .. } => {
+            let (lo, hi) = shp_bounds(sh);
+            Some([s, t, a].map(|k| (comp(lo, k), comp(hi, k))))
+        }
+        _ => None,
+    }
+}
+
+fn cos_tilt(tilt: u8) -> f64 {
+    64.0 / f64::from(64 * 64 + crate::orient::TILT_SLOPE[usize::from(tilt)].pow(2)).sqrt()
+}
+
+/// Swaps the Y component with the `a` component.
+fn swap_with_y(v: I64Vec3, a: Axis) -> I64Vec3 {
+    match a {
+        Axis::X => I64Vec3::new(v.y, v.x, v.z),
+        Axis::Z => I64Vec3::new(v.x, v.z, v.y),
+        Axis::Y => v,
+    }
+}
+
+fn swap_shp(s: &Shp, a: Axis) -> Option<Shp> {
+    Some(match *s {
+        Shp::Box { lo, hi } => {
+            let (l, h) = (swap_with_y(lo, a), swap_with_y(hi, a));
+            Shp::Box {
+                lo: l.min(h),
+                hi: l.max(h),
+            }
+        }
+        Shp::Cyl { axis, base, len, r } => Shp::Cyl {
+            axis: match axis {
+                Axis::Y => a,
+                x if x == a => Axis::Y,
+                x => x,
+            },
+            base: swap_with_y(base, a),
+            len,
+            r,
+        },
+        _ => return None,
+    })
+}
+
+/// A flat shape of the stack space as a piece in the frame of a Tilted stack. `plane` is the
+/// anchor `(x, z)` in world metres; `c` the cosine of the tilt, which turns a vertical extent
+/// into one along the frame's y.
+#[allow(clippy::cast_possible_truncation)] // metres of one L0 cell
+fn plate_shp(s: &Shp, yaw: u8, tilt: u8, plane: (i64, i64), c: f64) -> Option<Shp> {
+    let (ax, az) = plane;
+    let along = |v: i64| (v as f64 * c).round() as i64;
+    Some(match *s {
+        Shp::Box { lo, hi } => Shp::PlateBox {
+            yaw,
+            tilt,
+            anchor: I64Vec3::new(ax, lo.y, az),
+            s: (lo.x - ax, hi.x - ax),
+            t: (lo.z - az, hi.z - az),
+            h: along(hi.y - lo.y),
+        },
+        Shp::Cyl {
+            axis: Axis::Y,
+            base,
+            len,
+            r,
+        } => Shp::PlateCyl {
+            yaw,
+            tilt,
+            anchor: I64Vec3::new(ax, base.y, az),
+            s: base.x - ax,
+            t: base.z - az,
+            len: along(len),
+            r,
+        },
+        _ => return None,
+    })
+}
+
+/// `v` with every shape mapped; `None` if any of them cannot be.
+fn map_void(mut v: Void, f: impl Fn(&Shp) -> Option<Shp>) -> Option<Void> {
+    v.keep_out = v.keep_out.iter().map(&f).collect::<Option<_>>()?;
+    v.solids = v.solids.iter().map(&f).collect::<Option<_>>()?;
+    Some(v)
+}
+
+/// The voids of `home` laid out in stack space. `virt` is the cell whose coordinates give the
+/// stack space its origin: `home` itself for Flat stacks, with Y and the stack axis swapped
+/// for Vertical ones. Keys always come from `home`.
+fn voids_in_stack_space(seed: WorldSeed, home: I64Vec3, virt: I64Vec3, st: &Stack) -> Vec<Void> {
+    let cs = crusts(seed, home, virt, st);
     if cs.is_empty() {
         return Vec::new();
     }
-    let origin = home * L0_M;
+    let web = regime(seed, home).web;
+    let origin = virt * L0_M;
     let mut out = Vec::new();
     for axis in [Axis::X, Axis::Z] {
         for lane in 1..=6i64 {
@@ -814,6 +1040,44 @@ fn to_cell(s: &Shp, cell_lo: I64Vec3) -> Option<Shape> {
                 clip(),
             )
         }
+        Shp::PlateBox {
+            yaw,
+            tilt,
+            anchor,
+            s,
+            t,
+            h,
+        } => {
+            let aabb = QAabb::new(
+                QVec3::new((s.0 * Q) as i32, 0, (t.0 * Q) as i32),
+                QVec3::new((s.1 * Q) as i32, (h * Q) as i32, (t.1 * Q) as i32),
+            );
+            Shape::oriented(
+                Frame::table(yaw, tilt),
+                qv(anchor),
+                LocalShape::Box { aabb },
+                clip(),
+            )
+        }
+        Shp::PlateCyl {
+            yaw,
+            tilt,
+            anchor,
+            s,
+            t,
+            len,
+            r,
+        } => Shape::oriented(
+            Frame::table(yaw, tilt),
+            qv(anchor),
+            LocalShape::Cylinder {
+                axis: Axis::Y,
+                base: QVec3::new((s * Q) as i32, 0, (t * Q) as i32),
+                length: (len * Q) as i32,
+                radius: (r * Q) as i32,
+            },
+            clip(),
+        ),
         Shp::Line { d, start, len, r } => {
             let o = |a: usize, axis: Axis| (start[a] - comp(cell_lo, axis) * Q) as i32;
             let st = QVec3::new(o(0, Axis::X), o(1, Axis::Y), o(2, Axis::Z));
@@ -910,12 +1174,47 @@ mod tests {
         }
     }
 
+    /// PW.2.6b: Tilted and Vertical stacks hold voids too, of the same kinds, inside the zone.
+    #[test]
+    fn tilted_and_vertical_stacks_have_voids() {
+        let (mut tilted, mut vertical) = (0, 0);
+        let mut kinds = std::collections::HashSet::new();
+        for h in homes() {
+            let geometry = regime(WorldSeed(1), h).web.stack;
+            let n = voids_of_l0(WorldSeed(1), h).len();
+            match geometry {
+                StackGeometry::Tilted { .. } => tilted += n,
+                StackGeometry::Vertical { .. } => vertical += n,
+                _ => continue,
+            }
+            for v in voids_of_l0(WorldSeed(1), h) {
+                kinds.insert(v.kind);
+            }
+        }
+        assert!(tilted > 0 && vertical > 0, "{tilted} {vertical}");
+        for k in [
+            VoidKind::Valley,
+            VoidKind::Hall,
+            VoidKind::Shaft,
+            VoidKind::Funnel,
+        ] {
+            assert!(kinds.contains(&k), "{k:?} missing");
+        }
+    }
+
     /// Rule 3: area voids of different keys in one crust are at least 512 m apart.
     #[test]
     fn area_voids_are_separated() {
         let seed = WorldSeed(1);
         let mut pairs = 0;
         for h in homes().take(40) {
+            // The rule holds in stack space; world coordinates show it only for Flat stacks.
+            if !matches!(
+                regime(seed, h).web.stack,
+                StackGeometry::Flat | StackGeometry::Curved
+            ) {
+                continue;
+            }
             let vs: Vec<_> = voids_of_l0(seed, h)
                 .into_iter()
                 .filter(|v| matches!(v.kind, VoidKind::Hall | VoidKind::Shaft | VoidKind::Funnel))

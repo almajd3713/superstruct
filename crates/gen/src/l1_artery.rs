@@ -78,8 +78,30 @@ pub enum ArteryType {
 }
 
 impl ArteryType {
-    /// The types a port on a face of `axis` may take (`levels.md` §4W.5.3). Beam corridors and
-    /// gravity gates need context (a beam at the port, a well) and are offered from PW.2.9.
+    /// Every type, in the order that the port draw weighs them.
+    pub const ALL: [ArteryType; 9] = [
+        Self::GrandStair,
+        Self::RampRoad,
+        Self::LiftTrunk,
+        Self::Avenue,
+        Self::TramTube,
+        Self::CatwalkWeb,
+        Self::BeamCorridor,
+        Self::LadderChain,
+        Self::GravityGate,
+    ];
+
+    /// Whether a port on a face of `axis` may take the type (`levels.md` §4W.5.3). Beam
+    /// corridors and gravity gates also need context, see `face_artery_ports`.
+    pub const fn allowed(self, axis: Axis) -> bool {
+        match self {
+            Self::GrandStair | Self::CatwalkWeb | Self::BeamCorridor | Self::GravityGate => true,
+            Self::LiftTrunk | Self::LadderChain => matches!(axis, Axis::Y),
+            Self::RampRoad | Self::Avenue | Self::TramTube => !matches!(axis, Axis::Y),
+        }
+    }
+
+    /// The types a loop between two cells may take: those that need no context.
     pub const fn offered(axis: Axis) -> &'static [ArteryType] {
         match axis {
             Axis::Y => &[
@@ -125,6 +147,47 @@ impl ArteryPort {
 /// The ports on `face`: 2–4 distinct L2 cells of the face grid, none if either side is a
 /// cavity cell. Depends on the face key only, so both cells derive the same list.
 pub fn face_artery_ports(seed: WorldSeed, cavity: &CavityView, face: FaceKey) -> Vec<ArteryPort> {
+    ports_with(seed, cavity, face, near_well(seed, face))
+}
+
+/// Whether a gravity well is near the face centre. Wells exist from PW.6.1; until then no
+/// face is near one, so gravity gates are never offered.
+const fn near_well(_seed: WorldSeed, _face: FaceKey) -> bool {
+    false
+}
+
+/// The cells `(i, j)` of `face` that a beam crosses: the beam has an L2 cell on the face in
+/// both L1 cells. Conduits are too thin to live in. Depends on the face key only.
+fn beam_cells(seed: WorldSeed, face: FaceKey, other: CellKey) -> Vec<[u8; 2]> {
+    let k = Axis::ALL.iter().position(|&a| a == face.axis).unwrap_or(0);
+    let on_face = |l1: I64Vec3, layer: u8| {
+        let mut out: Vec<[u8; 2]> = Vec::new();
+        for beam in beams_of_cell(seed, l1) {
+            if beam.kind == BeamKind::Conduit {
+                continue;
+            }
+            for c in beam.l2_cells(l1).into_iter().filter(|c| c[k] == layer) {
+                let ij = match face.axis {
+                    Axis::X => [c[1], c[2]],
+                    Axis::Y => [c[0], c[2]],
+                    Axis::Z => [c[0], c[1]],
+                };
+                if !out.contains(&ij) {
+                    out.push(ij);
+                }
+            }
+        }
+        out
+    };
+    let low = on_face(face.owner.coords, 7);
+    let mut high = on_face(other.coords, 0);
+    high.retain(|ij| low.contains(ij));
+    high
+}
+
+/// `face_artery_ports` with the well context given. The draws are the same whatever the
+/// context: types are weighted 0 when not offered, never skipped.
+fn ports_with(seed: WorldSeed, cavity: &CavityView, face: FaceKey, gate: bool) -> Vec<ArteryPort> {
     debug_assert_eq!(face.owner.level, Level::L1);
     let dir = match face.axis {
         Axis::X => Dir6::PosX,
@@ -144,15 +207,23 @@ pub fn face_artery_ports(seed: WorldSeed, cavity: &CavityView, face: FaceKey) ->
     };
     let mut rng = Rng::new(hash(seed.0, Level::L1, face.owner.coords, salt));
     let count = (tuning::PORTS_MIN + rng.below(tuning::PORTS_SPREAD)) as usize;
-    let offered = ArteryType::offered(face.axis);
-    let weights = vec![1u32; offered.len()];
+    let beams = beam_cells(seed, face, other);
     let mut out: Vec<ArteryPort> = Vec::with_capacity(count);
     while out.len() < count {
         let ij = [rng.below(N as u64) as u8, rng.below(N as u64) as u8];
         if out.iter().any(|p| p.ij == ij) {
             continue;
         }
-        let kind = offered[rng.pick_weighted(&weights).unwrap_or(0)];
+        let weights = ArteryType::ALL.map(|t| {
+            let ok = t.allowed(face.axis)
+                && match t {
+                    ArteryType::BeamCorridor => beams.contains(&ij),
+                    ArteryType::GravityGate => gate,
+                    _ => true,
+                };
+            u32::from(ok)
+        });
+        let kind = ArteryType::ALL[rng.pick_weighted(&weights).unwrap_or(5)];
         out.push(ArteryPort {
             face,
             id: out.len() as u8,
@@ -193,6 +264,9 @@ pub struct Artery {
 pub struct Skeleton {
     /// The knot's L2 cell.
     pub knot: u16,
+    /// The knot's hub family (`l1_frame::HUB_WEIGHTS`): junction hall, lift nexus, machine,
+    /// gravity furnace, sanctuary site.
+    pub knot_hub: u8,
     /// Cells of `T` in insertion order.
     pub tree: Vec<u16>,
     pub arteries: Vec<Artery>,
@@ -411,6 +485,7 @@ impl Builder {
 }
 
 /// The skeleton of L1 cell `l1`, or `None` for a cavity cell.
+#[allow(clippy::too_many_lines)] // one pipeline, read top to bottom
 pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
     let key = CellKey::new(Level::L1, l1);
     let cavity = CavityView::new(seed, key);
@@ -420,7 +495,8 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
     let l0 = l1.div_euclid(I64Vec3::splat(8));
     let weave = regime(seed, l0).web.weave;
     let beams = beams_of_cell(seed, l1);
-    let k = knot(seed, l1, &beams).l2;
+    let knot_of = knot(seed, l1, &beams);
+    let k = knot_of.l2;
     let mut b = Builder {
         rng: Rng::new(hash(seed.0, Level::L1, l1, salt::ARTERY)),
         weave,
@@ -515,6 +591,7 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
 
     Some(Skeleton {
         knot: index(k) as u16,
+        knot_hub: knot_of.hub,
         tree: b.list,
         arteries: b.arteries,
         ports,
@@ -585,6 +662,67 @@ mod tests {
             }
         }
         assert!(live > 60);
+    }
+
+    /// ART-04..11 occur on real faces; a beam corridor sits only where a beam crosses the face,
+    /// and the lift and ladder types only on Y faces.
+    #[test]
+    fn port_types_follow_their_context() {
+        let mut count = [0usize; 9];
+        for x in -8..8 {
+            for y in -4..4 {
+                for z in -8..8 {
+                    let key = CellKey::new(Level::L1, I64Vec3::new(x, y, z));
+                    let cavity = CavityView::new(seed(), key);
+                    for axis in Axis::ALL {
+                        let face = FaceKey { owner: key, axis };
+                        let other = key
+                            .neighbor(match axis {
+                                Axis::X => Dir6::PosX,
+                                Axis::Y => Dir6::PosY,
+                                Axis::Z => Dir6::PosZ,
+                            })
+                            .unwrap();
+                        let beams = beam_cells(seed(), face, other);
+                        for p in face_artery_ports(seed(), &cavity, face) {
+                            assert!(p.kind.allowed(axis), "{key:?} {axis:?} {:?}", p.kind);
+                            assert_ne!(p.kind, ArteryType::GravityGate, "no wells yet");
+                            if p.kind == ArteryType::BeamCorridor {
+                                assert!(beams.contains(&p.ij));
+                            }
+                            count[ArteryType::ALL.iter().position(|&t| t == p.kind).unwrap()] += 1;
+                        }
+                    }
+                }
+            }
+        }
+        for (t, n) in ArteryType::ALL.iter().zip(count) {
+            if *t != ArteryType::GravityGate {
+                assert!(n > 0, "{t:?} never drawn");
+            }
+        }
+        println!("port types {:?}: {count:?}", ArteryType::ALL);
+    }
+
+    /// With a well near, gravity gates join the draw, on any axis.
+    #[test]
+    fn gravity_gates_are_drawn_near_a_well() {
+        let mut gates = 0;
+        for x in -6..6 {
+            for z in -6..6 {
+                let key = CellKey::new(Level::L1, I64Vec3::new(x, 0, z));
+                let cavity = CavityView::new(seed(), key);
+                let face = FaceKey {
+                    owner: key,
+                    axis: Axis::X,
+                };
+                gates += ports_with(seed(), &cavity, face, true)
+                    .iter()
+                    .filter(|p| p.kind == ArteryType::GravityGate)
+                    .count();
+            }
+        }
+        assert!(gates > 0);
     }
 
     #[test]

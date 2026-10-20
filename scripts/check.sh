@@ -12,3 +12,5 @@ cargo nextest run --workspace
 # Optional features are off in the workspace build above; check them explicitly.
 cargo clippy -p gen --all-targets --features serde -- -D warnings
 cargo nextest run -p gen --features serde
+# The report tool in quick mode: it must run; targets are not a gate yet (PW.12).
+cargo run -q --release -p web-report -- --size 4096 --samples 500 --census --out out/web-report-quick.json > /dev/null

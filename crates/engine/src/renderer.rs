@@ -236,7 +236,7 @@ fn step_fade(fade: f32, fading_in: bool, dt: f32) -> f32 {
 
 /// Most far cells and instances resident at once; beyond that new ones are not drawn.
 const FAR_MAX_CELLS: usize = 32768;
-const FAR_MAX_INSTANCES: u32 = 1 << 20;
+const FAR_MAX_INSTANCES: u32 = 3 << 20;
 
 struct FarChunk {
     handle: ChunkHandle,

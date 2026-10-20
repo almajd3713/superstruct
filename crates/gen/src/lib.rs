@@ -3,10 +3,14 @@
 #![forbid(unsafe_code)]
 
 pub mod atmosphere;
+pub mod carve;
 pub mod cavity;
 pub mod cell;
+pub mod character;
 pub mod coord;
+pub mod forms;
 pub mod hash;
+pub mod hubs;
 pub mod key;
 pub mod l1;
 pub mod l1_artery;
@@ -31,13 +35,20 @@ pub mod l2_port;
 pub mod l2_rail;
 pub mod l2_vista;
 pub mod l2_walk;
+pub mod l2_web;
 pub mod l3;
 pub mod l3_plan;
 pub mod l3_solver;
 pub mod l3_tiles;
 pub mod l3_validate;
 pub mod l4;
+pub mod locals;
+pub mod modifiers;
+pub mod mutations;
 pub mod orient;
+pub mod paths;
+pub mod paths_v;
+pub mod payoffs;
 pub mod port;
 pub mod prim;
 pub mod regime;
@@ -48,7 +59,13 @@ pub mod sanctuary;
 pub mod sanctuary_room;
 pub mod sdf;
 pub mod seed;
+pub mod sets;
+pub mod skin;
 pub mod stack;
+pub mod thresholds;
+pub mod tissue;
+pub mod tissue_grow;
+pub mod tissue_variants;
 pub mod tram;
 pub mod validate;
 pub mod walk;
@@ -56,4 +73,4 @@ pub mod walk_oriented;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 7;
+pub const GEN_VERSION: u32 = 11;

@@ -340,7 +340,11 @@ Each kind draws in the order: existence (by chance), then the parameters in the 
 
 #### 4W.3.3 As implemented (PW.2.6, `worldgen::l1_void`)
 
-*Flat (and Curved-as-Flat) stacks only; voids in Tilted and Vertical stacks and the skin openings that voids need are PW.2.6b. Bores do not depend on the stack and work everywhere.*
+*Version 10 (PW.2.6b): voids exist in every stack geometry (§4W.3.4). Bores do not depend on the stack.*
+
+#### 4W.3.4 Voids in Tilted and Vertical stacks (PW.2.6b)
+
+Area and valley voids are laid out in **stack space** as for a Flat stack. A **Vertical** stack swaps Y with its stack axis (X or Z) and drops pieces that cannot swap (rifts). A **Tilted** stack turns each box and Y-cylinder into an oriented piece in `Frame::table(yaw, tilt)` anchored at `(L0 centre x, a, L0 centre z)`, `(s, t)` being the stack-space offset from the L0 centre and the vertical extent being scaled by `cos(tilt)` so it follows the crust surfaces; a void whose world bounds leave the inner zone `[4096, 28672]` of the L0 cell is dropped. The mouth of a valley, shaft or funnel piece that touches a crust surface opens the skin plate over its bounding rectangle (`Opening`, plane coordinates when tilted).
 
 **Tags.** The registry rows VOID-03..06 are a garbled list; the mapping used is: VOID-03 any variant hall, VOID-04 hypostyle forest, VOID-05 vault and cathedral, VOID-06 crush, VOID-07 stepped, VOID-08 drowned in fog (a flag for the atmosphere), VOID-02 the plain hall. VOID-14 (Cavity) is the existing L0 event (`cavity.rs`), unchanged.
 
@@ -437,9 +441,13 @@ Roads and Spines (and rivers, bores) are line features at L0 scale. In an L1 cel
 
 Forced ports are part of the face key (the face evaluates the same L0 lines for both cells), so they are in `ports.md`'s count: the count of own ports is `2 + below(3)` **plus** the forced ones. The forced arteries are joined to `T` first (step 0 of §4W.5.2), which is why the later walks attach to them. A forced port must not coincide with an own port; an own port that would is redrawn (`ports.md` §3 keeps the draw count fixed).
 
+#### 4W.6.2a Tilted skins (PW.2.4b)
+
+On a Tilted stack the openings, roofscape, ceiling-scape and seams use the same lattices and draws as on a Flat one, but in **plane coordinates**: `s`, `t` are metres along the x and z axes of `Frame::table(yaw, tilt)` from the anchor (the L0 cell's centre, on the plane), and heights are measured along the frame's y from the plane. Every piece is an oriented piece in that frame with the anchor (an integer world point) as its origin, so two cells derive identical pieces. A cell generates the window of plane coordinates `[centre − 3400, centre + 3400)` and clips to itself. `Opening.plate` marks plane coordinates.
+
 #### 4W.5.7 As implemented (PW.2.8, `worldgen::l1_artery`)
 
-- `face_artery_ports` draws a face's ports from `hash(seed, L1, owner, ARTERY_FACE_X/Y/Z)`: `2 + below(3)` distinct cells `(i, j)` (X faces `(y, z)`, Y faces `(x, z)`, Z faces `(x, y)`), each with a type drawn uniformly from `ArteryType::offered(axis)`. Beam corridors and gravity gates are not offered yet (PW.2.9 adds the context they need), and the stratum weights wait for PW.2.10.
+- `face_artery_ports` draws a face's ports from `hash(seed, L1, owner, ARTERY_FACE_X/Y/Z)`: `2 + below(3)` distinct cells `(i, j)` (X faces `(y, z)`, Y faces `(x, z)`, Z faces `(x, y)`), each with a type drawn uniformly from `ArteryType::offered(axis)`. Beam corridors and gravity gates are not offered yet (PW.2.9 adds the context they need), and the stratum weights wait for PW.2.10. *(Superseded by §4W.5.9.)*
 - `skeleton(seed, l1)` is `None` for a cavity cell. Otherwise `T` starts as the knot's L2 cell; port walks follow in the order −x, +x, −y, +y, −z, +z; then `below(3)` loops (two cells of `T` by insertion order, a loop whose cells are closer than 3 is dropped; its type is drawn from the offered set of the dominant axis of the displacement); then ties.
 - `T` is kept in insertion order. Each diagonal move is expanded into its supporting axis path (x, then y, then z) and those cells join `T`, so every artery is a 6-connected path.
 - Walk weights are `255 − weave` (at least 1), `weave / 2` and `weave / 4` for axis, face-diagonal and space-diagonal moves, ×4 when the move reduces the Chebyshev distance. The budget is `4·dist + 8`; a BFS (nearest goal, lowest index) finishes it, also when no candidate move is left.
@@ -455,6 +463,14 @@ Forced ports are part of the face key (the face evaluates the same L0 lines for 
 - `GEN_VERSION` is 7. The L0 golden digest includes `web`. L2 goldens changed because L2 reads L1 ports.
 
 - Measured over 10⁴ cells: `T` holds about 250 of the 512 L2 cells (port arteries about 196 path cells, loops 29, beam ties 9, crust and Between ties 96, with overlaps). That is the cost of 2–4 ports on each of six faces. The L2 tissue (PW.3) may want fewer ports or shorter ones; the numbers are in the PW.2.8 checklist note.
+
+#### 4W.5.9 Port types (PW.2.9, `GEN_VERSION` 8)
+
+- The type of a port is drawn by `pick_weighted` over all nine types in `ArteryType::ALL` order, with weight 1 for an offered type and 0 otherwise, so the number of draws never depends on context. PW.2.10 will replace the 1s by the stratum character's weights.
+- Offered by axis: grand stair and catwalk web on any face; ramp road, avenue and tram tube on X and Z; lift trunk and ladder chain on Y.
+- **Beam corridor** is offered on a port cell `(i, j)` when a non-conduit beam has an L2 cell at `(i, j)` on the face in **both** L1 cells (the owner's layer 7 and the neighbour's layer 0). Both cells derive the same beams from line keys, so the face key alone decides.
+- **Gravity gate** is offered on a face near a gravity well. Wells exist from PW.6.1, so `near_well` is `false` until then and no gate is drawn; the draw path is tested by passing the context in. Item PW.2.9b turns it on.
+- Loops use `ArteryType::offered(axis)`, which needs no context.
 
 #### 4W.5.6 Why Betweens are live
 
@@ -868,6 +884,243 @@ New L2 salts (block `0x0300–0x03FF`, append-only):
 | `SKIN_WINDOWS` | `0x0313` | skin tile key | window lights (shared with the far band) |
 
 Draw order in an L2 cell: reserve (no draws), route (anchors, walks, segments, loops, engulf marks), grow (attempts in order), dress (edges, skin, dead ends, closing loops). Every attempt and every pass draws a fixed number of values.
+
+### 5W.11 As implemented: routes (PW.3.1, `worldgen::tissue`)
+
+- `TissueCache` holds a `WebParent` per L1 cell: the skeleton and every L1 piece with its tag (inhabited beams left out). `tissue_routes(seed, cache, cell)` returns the `Tissue`: lattice, anchors, route slots, segments.
+- **Lattice.** Slot centres are `cell centre + frame · ((s + ½) · pitch − 256)`, in `f64`; a slot is present when its centre lies in `[0, 512)³`. The pitch is 32 m scaled by the stratum's `scale` (§10.1 of `regimes.md`), a whole number of 16 m. The stratum is read at the cell centre with `character_near`.
+- **Reserve.** A slot whose centre lies in a parent piece is `Solid`, or `Void` when the piece is the keep-out of a void and no solid piece covers it. Both can be crossed: a `Solid` slot costs 8 (the route is bored), a `Void` slot 2 (a span).
+- **Anchors**, in order: artery ports and links by face (−x, +x, −y, +y, −z, +z) then type, each at the face centre of the cell and snapped to the nearest present slot; the knot at the cell centre; then 0–2 extras on free slots next to voids (any free slot when none).
+- **Walks.** A weighted random walk (axis weight `255 − weave`, face-diagonal `weave / 2`, ×4 towards the goal, ÷8 into a `Solid` slot) with a budget of `4 · distance + 8`, then Dijkstra over every present slot (ties by lowest index). A diagonal move records its supporting slot, so every walk is a 6-connected path. The first anchor starts the route; each next one walks to the nearest route slot; 0–2 loops join route slots at least 4 apart.
+- **Segments** are cut at corners and where the class of slot changes (free, void, solid); a segment is `Bored`, `Span`, `Rise` or `Level`, and is *engulfable* with chance 1/8 (the draw is always made) unless bored or spanning.
+- The draws come from `hash(seed, L2, cell, TISSUE)` in the order: extras, route walks, loops, segment marks.
+
+### 5W.12 As implemented: growth, supports and the skin (PW.3.2)
+
+- **Pitch.** The lattice pitch is always 32 m. The stratum's scale (SC-05) multiplies the sizes of forms (and later of paths and the L3 module), not the lattice: a route slot of 96 m took 40 % of a coarse cell. This replaces the sentence of §5W.1 that scales the pitch.
+- **Fill.** The target is `present · field / 255` slots. Parent solid counts as built (a skin plate and a beam are built matter), as do structures and swallowed routes. Engulfable chance of a segment is `1/8 + 5/8 · field`: routes run through buildings in dense strata.
+- **Attempts.** `tissue_grow::grow` makes 64 attempts of 16 words each (all words are drawn even after growth stopped); it stops at the target or after 16 rejections in a row. An attempt reads the support from word 0 (weights of the character, zero for supports with no place to start, universal ones when the stratum bans them all), the form family from 1, the member from 2, up to two mutations from 3–5 (PW.3.8 applies them), the size from 6–8, the place from 9–11, the entrances from 13–14.
+- **Place.** A support yields a box: Standing and Hanging grow it from an anchor slot by whole free layers (x, z and up or down) within the form's size, six anchors tried; Suspended starts 1–3 slots below a ceiling and carries cables; Spanning fills a gap of 2–14 slots between two supports; Sideways lays the form on its side from a wall; Collar is a ring of four boxes round a vertical solid; Embedded takes a 2×2×2 inside solid; Piled is 3–6 small boxes touching each other; Nested fills the void of a hall from its floor; Colliding is a box in a frame turned 45° from the cell's. Radial waits for wells.
+- **Accept.** All slots present and free (route slots only of engulfable segments and not anchors; solid, void or built only where the support means to overlap), and the structure touches a support: solid, built, route, or the cell shell inside a crust (the shell is the lattice boundary when the slot beside it lies in a crust). If it does not fit, the largest dimension shrinks and it is placed again, down to one slot.
+- **Entrances.** One per 30 m of footprint, 1 to 8, on route slots next to the structure first; a new access walk only for the first entrance (Dijkstra over every slot a structure has not taken) or when it is at most 4 slots. A cell off the skeleton starts its route at the first entrance. A structure with no entrance is rejected.
+- **Skin.** `skin_pass` takes the L1 skin plate pieces that meet the cell, finds the outside as the side that is not crust, and cuts the plate into 32 m tiles (in plate coordinates, so tilted plates tile in their frame). A tile whose centre is in the cell is covered when 12 of its 16 probes (0.5 m outside) lie in a structure; the rest are merged into runs and clad with 2–16 m slabs of concrete.
+- Cost: about 40 ms per cell (routes 7 ms). The census for SUP-01..10 and for the per-support counts is `tissue_grow` test `every_support_occurs`.
+
+### 5W.13 Support variants (PW.3.3, PW.3.4, `worldgen::tissue_variants`)
+
+The registry rows SV-01..26 are a garbled list of the variants of `the-web.md` §6.2. The mapping used here, support by support, with the plain support as the first entry:
+
+| Support | Variants |
+|---|---|
+| Standing | plain · SV-01 on stilts over a route · SV-02 on a slope with stepped footings |
+| Hanging | SV-26 free (the plain hanging) · SV-03 kissing a standing tower below, joined by a stair · SV-04 ending in a viewing pod · SV-05 chandelier cluster · SV-06 broken off with floors exposed · SV-07 hung from cables · SV-08 swung off-plumb |
+| Spanning | plain bridge-building · SV-09 pillar building · SV-10 arch building with a route under it · SV-11 fallen tower lying diagonally across a void |
+| Sideways | plain horizontal skyscraper · SV-12 from both sides of a trunk · SV-13 sagging floor by floor · SV-14 jutting out at a slant · SV-25 300 m long, stepped |
+| Collar | plain ring · SV-15 half ring · SV-16 true helix climbing the trunk |
+| Embedded | plain cliff dwellings · SV-17 a façade with nothing behind it · SV-18 windows only |
+| Suspended | plain gondola · SV-19 cable-hung platform town · SV-20 cages |
+| Piled | plain jenga · SV-21 omnidirectional cluster · SV-22 leaning pile across an alley |
+| Nested | plain building in an atrium · SV-23 a town in a hall · SV-24 a district inside a hollow tether |
+| Colliding, Radial | plain only |
+
+- **Draw.** Word 10 picks the variant: three in four are plain, the rest share the variants of the support equally. A variant that has no place in the cell is replaced by the plain support (the attempt is not lost).
+- **Pieces.** Besides boxes, a structure may hold shaped pieces whose boxes count as taken slots (`Shaped::Cyl`, `Stair`, `Cage`, `Helix`, `Facade`), cables (thin vertical pieces from a hanging box to the cell top), and windows on a face with no mass behind them (SV-18; such a structure takes no slot and needs no entrance). Oriented parts (SV-08, SV-11, SV-14) are boxes in `Frame::table(yaw, tilt)` rasterised by slot centre.
+- **Geometry.** Stilts are four pillars from the route to the box; footings are columns of 1–3 slots below a box that sits 1–2 slots up; kissing needs a built top 2–4 slots below the hanging box and puts a stair run in the gap; the pod is a cylinder under the middle of the box; a chandelier is three to six pendants of different length under one ceiling; a broken structure is cut diagonally along its width; the pillar and arch buildings stand on the ends of a gap between two supports (the arch's legs are two slots high); the helix is a faceted stair round the trunk (at most 256 treads) in a 3×3 box whose centre is the trunk; a façade is a 4 m slab on the host side of its box.
+
+### 5W.14 Forms (PW.3.5 to PW.3.7, `worldgen::forms`)
+
+A form is `fn(size: [w, h, d] in slots, rng) -> Option<FormOut>`; `FormOut` holds boxes, shaped pieces and boxes turned in `Frame::table(yaw, tilt)` about the centre of their base, all in slot units from the corner of the bounding size. `None` means the form does not fit that size, and the slab tower stands in (the structure records the form actually used). The structure takes the whole bounding box as **envelope** (its slots count as built whatever the pieces leave open), because L2 draws envelopes and L3 refines the inside.
+
+Size is drawn per form in metres (`[width, depth, height]`), multiplied by the stratum's scale and raised in slots; in a dense stratum the unit draw is raised to `1 / (1 + 4 · field)` so that structures are large.
+
+| Form | Family | Pieces |
+|---|---|---|
+| FORM-01 slab tower | TOWER | one box |
+| FORM-02 ziggurat | STEP | 2–4 tiers, each inset by one slot per side, widest at the bottom or (inverted) at the top |
+| FORM-03 needle | TOWER | a box 1–2 slots across |
+| FORM-04 tube tower | TOWER | four walls round an open core |
+| FORM-05 H-pair | TOWER | two towers and 2–3 bridges |
+| FORM-06 comb | TOWER | a base slab with a tooth every second slot |
+| FORM-07 cage | FRAMEWORK | the edges of the box and a floor every 8 m |
+| FORM-08 cluster | TOWER | 5–30 boxes, each touching an earlier one |
+| FORM-09 drum or silo | ROUND | a cylinder, upright or lying along x or z |
+| FORM-10 terrace cliff | STEP | terraces rising along x |
+| FORM-11 gantry | FRAMEWORK | two legs and a beam |
+| FORM-12 machine | PLANT | a lying turbine, a stack of cylinders, a bank of pistons or radiator fins |
+| FORM-13 rack canyon | FRAMEWORK | two long walls with a canyon between |
+| FORM-14 tank farm | PLANT | cylinders of 2×2 slots on a base slab |
+| FORM-15 ruin | RUIN | columns of ragged height (60 % of the footprint) |
+| FORM-16 rotunda | ROUND | a ring wall (16 facets) round a central drum |
+| FORM-17 twisted tower | ANGLED | one turned box per floor, each turned 2–4 headings more |
+| FORM-18 leaning tower | ANGLED | a box turned about its base by a tilt of 1–3 |
+| FORM-19 dome | ROUND | four rings of 16 facets narrowing upwards |
+| FORM-20 polygonal ring | ROUND | a wall of 8 or 16 facets |
+| FORM-21 starburst hub | ANGLED | a core and eight arms every 45° |
+| FORM-22 wedge | ANGLED | a prism whose roof rises towards one of four directions |
+| FORM-23 cone or funnel | ANGLED | eight stacked cylinders narrowing upwards, or downwards |
+
+The support variants (§5W.13) work on the form's boxes (its envelope when it is made of shaped pieces).
+
+### 5W.15 Mutations (PW.3.8, `worldgen::mutations`)
+
+Groups as `regimes.md` §9: POSE 01 inverted, 02 tilted, 03 twisted · DAMAGE 04 broken, 05 overgrown, 15 swallowed · COPY 06 doubled or mirrored, 07 stretched · HOLLOW 08 hollowed, 09 caged, 10 pierced · LIGHT 11 dark, 12 lit · SCALE 13 scaled, 14 fused. An attempt has none (5 in 10), one (3 in 10) or two (2 in 10) mutations; the group is drawn by the stratum's mutation weights, the member uniformly. Each acts on the form's output before placement: inverted flips y; tilted and twisted turn the pieces about a common pivot (`Turned.pivot`); broken ragged-cuts above 60 % of the height; overgrown hangs vines; mirrored keeps the left half and reflects it; stretched builds at half length on one axis and doubles it; hollowed leaves four walls; caged turns boxes into frames; pierced cuts a one-slot passage whose ends become entrances when a route reaches them; dark uses the metal material, lit adds windows on the sides; scaled makes the size a quarter (1 in 4) or twice; fused widens the box one slice over a built neighbour and allows the overlap; swallowed puts an older form, half size, inside in metal.
+
+### 5W.16 Horizontal paths (PW.3.9, `worldgen::paths`)
+
+PH-01..10 (PW.3.9) and PH-11..20 (PW.3.10) for level, span, bored and swallowed segments; PW.3.11 takes rises. Draws come from `hash(seed, L2, cell, PATHS)`: seven words per segment, always, so skipping a segment never moves the rest. Word 0 picks the type, 1 the width, 2 the rails (none, one, both), 3 windowed or blind, 4 the side of a façade, 5 and 6 sizes (sag, amplitude, pipe radius, ceiling).
+
+- **Legs.** A segment is cut into straight legs of equal height. A leg starts and ends at slot centres, overlaps its neighbour by half a width at corners, and reaches the cell's side when its end slot is on the lattice edge. The walking surface is the floor of the route's slots, so one deck height holds for every type.
+- **Context** (from the slots next to the leg): *roof* when at least half the slots below are solid, built or engulfed; *wall* on a side when at least half the lateral neighbours are; *open above* when every slot above is free or void; *steps* is the slot count minus one. Legal types: PH-01 always; open below: PH-02, PH-05 (2+ steps), PH-04 (2+), PH-03 (2+ and open above); over a roof: PH-06, PH-07; with a wall: PH-08, PH-09, and PH-10 when both sides have one (2+). The two anchors of a span type are the leg's ends (they are route slots, so they are anchored by construction).
+- **Weights** are the stratum's `paths[WALK]` for PH-01, 03..08 and `paths[ENCLOSED]` for PH-02, 09, 10; PH-01 is never below 1.
+- **Types.** PH-01 grating deck, 1.2–3 m, ribs every 4 m, rails by draw. PH-02 enclosed bridge 3–8 m wide, 3.2 m high, blind or with a glass band. PH-03 deck 2–5 m with a pylon at mid span and stay cables (stepped boxes, no collision). PH-04 deck that sags (3–12 m, under 27°) built from ramps with an overlapped underside, handrail cables. PH-05 nine-turn bridge: runs of 8–14 m alternating ±2–4 m sideways, jogs one width long, the end runs on the centre line. PH-06 tread inlaid in the top of a beam, kerbs and lamp posts. PH-07 pipe set into the roof with a 0.9 m tread on top. PH-08 ledge 1.2–2 m with ties to the façade 15.5 m off. PH-09 gallery 3–6 m: roof, wall one side, posts and rail on the other. PH-10 arcade 4–10 m: pillars and lintels every 8 m, 4–6 m ceiling.
+- **Tests.** `every_type_is_walkable` probes a floor 5 cm under, and nothing solid at 0.25, 0.9, 1.5 and 1.85 m above, every metre of each type's centre line (`walk_line`) in six variants and two axes; `pieces_stay_in_the_cell`; `catwalk_is_always_legal`; `every_path_type_occurs` (2 000 grown cells: all ten occur; PH-10 is rare, 23 cells).
+- Not in `l2_cell` yet (PW.3.21). Screenshots waived.
+
+**PH-11..20 (PW.3.10).** Context adds: *bored* (the segment runs through parent solid) and *swallowed* (any slot is inside a structure) get PH-01, PH-11, PH-12, and PH-20 when a swallowing structure has a ring wall; open segments gain PH-20 when a rotunda (a structure with a `Ring` piece) is next to them (a swallowed route in a rotunda is too rare to occur otherwise: 0 in 600 cells); over a roof PH-15 and PH-18; in the open PH-16 and (with air above) PH-17, both from 2 steps; beside a wall PH-13, and PH-19 from 2 steps; between two walls PH-14. Families: ENCLOSED has 11, 12, 20; STREET (`paths[2]`) 13, 14, 15, 19; WALK 16, 17, 18.
+- PH-11 lined passage 3–6 m wide and 3.2 m clear, ribs and a lamp row. PH-12 crawl duct 1.2–1.6 m wide and 1.3 m clear. PH-13 avenue 10–28 m wide with kerbs and lamp posts every 24 m. PH-14 alley 2–6 m wide with walls 14 m high (doors every 18 m on one side), a pipe, beams overhead. PH-15 roof tiles of 8 m, each 0, 0.15 or 0.3 m high (steps at most 0.3 m), parapets and vents. PH-16 pier 3–6 m on piles 24 m deep, bollards, a lamp at the head. PH-17 gangway 1.2–2.4 m on chains from a girder 14 m up. PH-18 conveyor 1.2–2 m, belt set in the roof, cleats 4 cm high every 2 m. PH-19 corridor that jogs 4–12 m sideways at 45° and back, the diagonals built from overlapping squares (the generator has no composed frames, so a true skew frame waits for a use that needs one). PH-20 gallery bowing up to 10 m (a fifth of the leg) in a parabola, built from overlapping squares, with an inner colonnade and a roof-height cut.
+- **Bores.** Every leg of a bored or swallowed segment adds a clear box to `PathPieces::bores` (PH-11, 12, 20 their own, others a default `width + 2` by 4 m). They are air to cut out of the parent's solid where the route passes: not drawn and not collidable. **PW.3.21 must apply them** (clip the parent pieces, and the structures' envelopes, against them) or the passages stay blocked; until then no bore has any effect.
+
+### 5W.17 Vertical paths, first half (PW.3.11, `worldgen::paths_v`)
+
+A rise segment is a straight run of `k` slots, so it climbs `32 k` m inside one 32 m column (the lattice pitch is always 32 m). At the walking stair of `traversal.md` (0.1875 m rise, 0.3125 m tread, 31°) one slot needs 171 steps and 53 m of run, so nothing climbs a slot in a straight line: every type folds, spirals or winds. The plan is drawn in `(u, v)` about the column centre and mapped to the lattice frame by a swap and two flips (draws). The route enters at the centre of the column at the foot and leaves at the centre at the top; both ends are decks. Ids in `PathPieces::chosen` are `20 + PV number`; the draws are the same seven words per segment as §5W.16.
+
+- **Folded stairs** (PV-01, 02, 03, 07, 08, 09, 10): flights alternate between two lanes at `v = ∓w` (lane width `w`) along `u`, joined by landings that span both lanes; a corridor `w` wide down the middle `v = 0` is kept free and carries the foot deck (at the bottom) and the top deck. Flights are as equal as possible: a short last flight would put its landing over the flight before it. Flight length is at most `2 · lh`; the footprint stays inside ±16 m.
+  - PV-01 straight flight: `lh = 11.5`, width 2–4 m. PV-02 switchback: `lh = 5–8`, width 2–3.5 m (about 3× the flights). PV-03 scissor: PV-01 plus a second stair turned half a circle in lanes at `v = ±3w` (the second stair is not on the route). PV-07 fire escape: 1–1.2 m wide, `lh = 3.5`, ties to the façade (a wall beside the column) at each landing. PV-08 cascade: 7–9 m wide, `lh = 6`, only from 3 slots (96 m). PV-09 stair in a wall's thickness: 2–2.5 m wide, walls 1 m thick either side; also the choice for bored and swallowed runs. PV-10 grand stair: 9–10 m wide.
+- **PV-04 square spiral:** a ring of side 24 m round an open well (the centre is the route, so a pillar is not possible; the registry's "pillar or well" is the well), flights along the four sides counter-clockwise, corner landings; the foot deck runs from the centre to the first corner, the top deck from the last landing inward and along the middle to the centre.
+- **PV-06 helical ramp:** the same ring with ramps at 0.268 (15°), width 4–6 m.
+- **PV-05 true helical stair:** `orient::helix_stair`, 32 treads a turn, inner radius 4 m, width 2.5–4 m, rise 4 Q (so the climb is exact), up to 4 slots; built in table frames of yaw only, so it needs a lattice frame without tilt (otherwise PV-01 is built).
+- **Legal types.** Open: PV-01, 02, 03, 04, 06, 10; PV-05 with a flat lattice frame and up to 4 slots; PV-07 and PV-09 with a wall beside the column; PV-08 from 3 slots. Bored or swallowed: PV-01, 09, 04, and PV-05 as above. Weights are `paths[STAIR]`; PV-01 is never below 1.
+- **Deviations (decide):** PV-10 is 18–20 m wide in total (two 9–10 m lanes), not 60–150 m, because a column is 32 m; wider needs lateral slots. PV-03's second stair is not connected to the route.
+- **Bores.** Bored and swallowed runs add the box the stair fills (plus 0.5 m) to `PathPieces::bores`.
+- **Tests.** `every_type_climbs_the_column`: all ten, at 1, 2 and 4 slots, four plan orientations; the route starts at the centre of the foot and ends at the centre of the top, has a floor under every sample and 1.85 m of headroom above, and the pieces stay inside the 32 m column. In the 2 000-cell run all ten occur (PV-08: 255, PV-04: 5 275). Only the identity frame is probed; tilted frames use the same lattice-frame code (PV-05 excepted).
+- Not in `l2_cell` yet (PW.3.21). Screenshots waived.
+
+
+### 5W.18 Vertical paths, second half (PW.3.12, `worldgen::paths_v`)
+
+PV-11..19, ids 31..39, in the LIFTSLOPE family (`paths[4]`). They reuse the machinery of §5W.17; a flight now has a style (rise and run of a unit): the walking stair (3 Q by 5 Q), the stair beam's stair (4 Q by 8 Q, a slope of 1 in 2) and the ramp of the inclined plane (25°, half-metre units).
+- **PV-11 stair-bridge:** PV-01's folded flights with `lh = 10.5`, width 3–4.5 m, and four piers under every landing, each down to the landing two flights below (or the foot).
+- **PV-12 stair beam:** folded flights in the beam stair (slope 1 in 2), `lh = 12.5`, 2–3 m wide; the flight is a solid wedge, so it reads as a beam. It is not tied to an actual L1 stair beam (those are skew; the lattice route cannot follow them): **deviation, decide.**
+- **PV-13 wrap round a trunk:** PV-04's square spiral on a ring of side 16 m, with a trunk 3 m clear of the flights from 3 m above the foot to 3 m below the top, so the centre stays walkable at both ends. (This also gives the registry's "pillar" of PV-04.)
+- **PV-14 terraces:** folded flights 8–10 m wide, `lh = 5`, landings 6 m deep.
+- **PV-15 inclined plane:** folded ramps at 25°, 5–9 m wide, `lh = 11`, landings 4 m deep (not a kilometre long: a column is 32 m).
+- **PV-16 lift:** a narrow stair (so the route is walkable without the car) and a shaft 6 m square in the plan corner `(+u, +v)` with a door 3 m by 4 m at the foot and at the top; variant by draw: freight (concrete walls), cage (grating walls), open platform (four posts). In identity frames a `LiftShaft` volume marks the car's way for the engine. **The car, gates and rides are runtime** (`lifts.md` §10, P3.4.2b); the generator only draws the shaft and the way in. Only from 2 slots (64 m).
+- **PV-17 paternoster:** two open shafts side by side with a loop of cabins (no collision, every 6 m, the second shaft half a spacing off), a platform at each stop, and the same narrow stair. From 2 slots.
+- **PV-18 escalator:** a dead escalator: a narrow stair (1.4–1.6 m) with a stepped handrail on each edge.
+- **PV-19 funicular:** a stair beam with a rail on each lane edge, 15 cm above its surface.
+- **Legal types.** Open: PV-11, 12, 13, 14, 15, 18, 19; PV-16 and 17 from 64 m. Bored or swallowed: PV-12 as well as §5W.17's. Weights are `paths[LIFTSLOPE]` (a zero removes them; PV-01 remains).
+- **Tests.** `every_type_climbs_the_column` now covers all 19 (foot to top at the centre, floor under every sample, 1.85 m of headroom, inside the column); all 19 occur in 2 000 cells.
+- Not in `l2_cell` yet (PW.3.21). Screenshots waived.
+
+
+### 5W.19 Thresholds (PW.3.13, `worldgen::thresholds`)
+
+A threshold goes on every structure entrance (`Structure::entrances`) and at both ends of every bored passage (the face between a route slot outside the solid and the first solid slot of a `Bored` segment), in the frame of the face: `s` into the structure, `t` across, `y` up from the route slot's floor. Draws come from `hash(seed, L2, cell, THRESHOLDS)`, three words per face (type, size, spare), faces in order: structures, then bored segments. The opening is at least 2 m wide (the port minimum) and 2.4 m high over its depth, and a sill is at most 0.4 m. Each threshold adds a clear box to `Thresholds::bores`, to be cut from the structure or the solid (**PW.3.21 must apply them**, as it must the path bores).
+- **Legal types.** A horizontal structure entrance: THR-01 (weight 2), 02 (3), 03 (1), 04 (2), 06 (1), 07 (1), 08 (2). An engulfed route: THR-02 or THR-04 (3 each), as the spec says. A bored end: THR-01 (3) or THR-06 (1). A hole down into a structure: THR-05. A hatch up into one: THR-01 as a ceiling collar.
+- **Types.** THR-01 bulkhead hatch: a thick metal frame, 2 m clear, with a 0.3 m coaming. THR-02 portal frame: concrete, 3 m clear, 4 m high. THR-03 giant gate: 8–12 m wide and 11–14 m high, shut, with a 2.2 m by 2.6 m door. THR-04 broken wall: stumps of three heights and rubble beside a 3 m gap. THR-05 floor hole: a collar on three sides and a rubble stair of thirteen 0.3 m steps down. THR-06 airlock: two hatches 6 m apart with a chamber between. THR-07 window: a 0.4 m sill, 2.4 m clear, a glass transom. THR-08 threshold of light: a glowing frame, a lit floor strip and a ceiling panel beyond.
+- **THR-09** (gravity gate) waits for the gravity module: **PW.3.13b**.
+- **Count.** About 120 thresholds a cell on average (800 cells), which is a few hundred primitives a cell and as many clear boxes; if that is too much, the entrances are the lever (most are L3 doors).
+- **Tests.** `openings_meet_the_port_minimum` (all but THR-05, both axes, both directions, three sizes: nothing solid in the 1.9 m wide, 2.35 m high opening, sills under 0.45 m), `the_rubble_stair_is_walkable`, `every_threshold_occurs` (800 cells, THR-01..08).
+- Not in `l2_cell` yet (PW.3.21). Screenshots waived.
+
+
+### 5W.20 Path modifiers (PW.3.14, `worldgen::modifiers`)
+
+Eight words per segment from `hash(seed, L2, cell, MODS)`, always, drawn after the type is known and built on every horizontal leg (and, for the material, on every rise). A modifier never narrows the walkway below the type's width, and never puts anything solid within 2.2 m above the centre line, so walkability is unchanged. `PathPieces::mods` records them per chosen segment.
+- **MOD-01 width:** the type's own range (§5W.16, §5W.17), drawn per segment; recorded as `Params::width`.
+- **MOD-02 enclosure** (open 4/10, railed 2, caged 1, walled 1, glazed 1, tunnel 1): only on open flat decks (PH-01, 03, 06, 07, 16, 17, 18). Railed: rails 1.1 m on both edges. Caged: rails, plus bars every 4 m up to a top bar at 2.6 m. Walled: walls 0.3 m thick and 2.6 m high, open above. Glazed: a 0.9 m wall and grating panes up to the roof. Tunnel: solid walls to the roof.
+- **MOD-03 condition:** intact, or missing rails: on a railed or caged enclosure (1 in 4) the rails stand in alternate 6 m stretches. (The spec text also names a missing section with a detour; the registry row does not, so it is not built.)
+- **MOD-04 light:** dark, or a lamp row on the façade side every 8 m (no collision).
+- **MOD-05 ceiling** under a glazed or tunnel roof: crushing 2.2 m, normal 3 m, cathedral 6 m (drawn evenly); open without a roof.
+- **MOD-06 rhythm** (PH-01, 06, 07, 08, 13, 16, 17, 18): none (1/2), frames, arches (frames with stepped haunches) or ribs (thin frames every 3–5 m); frames every 8–16 m stand outside the deck at `±(w/2 + 0.7)` and the lintel is at 3 m plus up to 5 m on wide decks, or above the roof.
+- **MOD-07 material:** structural pieces (concrete and metal) become concrete, metal or warm, weighted by the stratum's first three material weights plus one. The material slots proper are defined in PW.4.x and will replace this.
+- **MOD-08 dressing** (not on the enclosed types PH-02, 09, 10, 11, 12): none, three cables, two pipes, or emissive signage glyphs every 14 m, all overhead or on the edge.
+- **MOD-09 angle:** on-grid, off-grid, free. It turns the lintels and ribs of a rhythm about the vertical (off-grid 2, 4 or 6 headings, free 3 to 11) when the lattice frame has no tilt; posts stay on the grid. The generator has no composed frames, so the deck itself cannot skew (PH-19 and PH-20 are the skewed types).
+- **Tests.** `modifiers_keep_every_type_walkable` (all twenty horizontal types, forty modifier draws each, both axes: floor under and 1.85 m clear above the walking line), `every_modifier_value_occurs` (all values; ineligible types never get an enclosure, rhythm or dressing), and the 2 000-cell census: every value of every modifier occurs.
+- Not in `l2_cell` yet (PW.3.21). Screenshots waived.
+
+
+### 5W.21 Hubs (PW.3.15, `worldgen::hubs`)
+
+Hubs are forms of their own (`HUBS`, `Structure::form = 100 + n`), built by the same placement as the forms and placed at the start of step 3 whatever the fill; `Tissue::hubs` lists `(HUB id, structure index)` for those that fit as themselves (a hub whose builder cannot make the size it was fitted to falls back to a slab: a plain structure, not a hub). The draws are always made: two sets of sixteen words, a pick and a chance.
+- **The knot's hub.** The cell that holds the knot (`Skeleton::knot_hub`, from `l1_frame::knot`) gets one. Family 0 junction hall: HUB-01 (2) or 02 (1); 1 lift nexus: HUB-04; 2 machine: HUB-03 (2), 05 (1) or 06 (1); 3 gravity furnace: HUB-10; 4 sanctuary site: HUB-11.
+- **A contextual hub**, with chance 1/4, the first that applies: HUB-08 tram terminus where a tram tube port is anchored in the cell; HUB-07 valley rim beside a void; HUB-09 Between overlook where a crust meets a Between. The hubs at Spine stations and Road crossings wait for PW.10 (neither exists yet): **PW.3.15b**.
+- **Forms** (all in slots, sizes 128–512 m): 01 low hall with a tower and a beacon cone, lit; 02 floor, roof and a grid of columns; 03 horizontal drum between two aisles with fins; 04 ring wall round a helical stair with four corner towers; 05 roofed floor with a row of tanks; 06 two racks with a floor and bridges, lit; 07 three terraces stepping to an edge; 08 platform under a roof on columns with an end block, lit; 09 column with a platform thrust out at the top and a pod; 10 drum, dome and chimney; 11 platform with a ring wall and a pillar, lit.
+- **Measured.** 434 of 600 knot cells get a hub (the rest could not place it); per hub over the sample: 01: 108, 02: 56, 03: 48, 04: 85, 05: 31, 06: 33, 07: 3, 08: 44, 09: 59, 10: 19, 11: 32.
+- **Tests.** `every_hub_builds_inside_its_size` (each at four sizes, pieces inside), `every_hub_occurs` (knot cells of 600 L1 cells plus 800 other cells: all eleven).
+- Not in `l2_cell` yet (PW.3.21). Screenshots waived.
+
+
+### 5W.22 Set pieces (PW.3.16, PW.3.17, `worldgen::sets`)
+
+Forms of their own (`SETS`, `Structure::form = 200 + n`), placed in step 3 after the hubs and before the generic growth, so the fill counts them. Per cell: none (1/2), one (1/4) or two (1/4), each kind drawn by weight from what the cell's context allows; the draws are always made. `Tissue::sets` lists `(SET id, structure index)` for those that fit as themselves (a set piece whose builder cannot make the size it was fitted to falls back to a slab, as hubs do: PW.3.15c).
+- **Context.** Any cell: SET-03 (2), 05 (2), 07 (1), 08 (3), 10 (2). Fill at least 0.5: SET-01 (3), 02 (2), 04 (2), 09 (2). A free slot beside a void: SET-06 (3), 14 (3). Four or more anchors: SET-11 (3). A lift trunk port: SET-12 (4). A tram port: SET-13 (4). A grain seam (a neighbouring L2 cell has another frame, `Tissue::seam`): SET-15 (4). A tether landing in the cell (`Tissue::tether_foot`, the foot of an STR-03 piece): SET-16 (4).
+- **Forms** (slots; sizes 64–384 m): 01 atrium: four walls, a floor and a gallery every 3 slots; 02 light well: a tall ring wall on a base, lit; 03 cistern: a broad low tank on a slab; 04 organ room: a roofed hall with a back wall and a row of pipes of rising height; 05 window wall: one thin wall with buttresses, lit; 06 observation pod: stalk, arm and a pod, lit; 07 hanging garden: platforms hung under a beam with vines; 08 shrine: an alcove with a statue, lit; 09 generator room: a roofed hall with turbines lying along it; 10 dwellings: little boxes piled in a grid, lit; 11 interchange: four decks at four heights on four posts; 12 lift lobby: a hall with a square shaft; 13 tram stop: a platform under a canopy on posts; 14 valley balcony: a block with a slab thrust out and posts; 15 seam plaza: a triangular slab; 16 tether foot: a slab with a collar.
+- **Deviations (decide).** The set pieces are placed where the structures can stand, not at the thing that gave them their context: SET-16 is not at the tether's foot, SET-15 not on the seam, SET-06 and 14 not at the void's edge (only in a cell that has one), and SET-11's four decks are not joined to actual routes. SET-12's shaft has no lift (the car is runtime).
+- **Measured** over 3 000 cells: per type 98, 80, 205, 71, 219, 1, 98, 343, 79, 269, 57, 13, 23, 6, 233, 26 (SET-06 and 14 are rare because valleys are).
+- **Tests.** `every_set_piece_builds_inside_its_size` (five sizes, pieces inside), `every_set_piece_occurs` (3 000 cells: all sixteen; about a minute).
+- Not in `l2_cell` yet (PW.3.21). Screenshots waived.
+
+
+### 5W.23 Dead ends and legibility (PW.3.18, `worldgen::payoffs`; TIS-05, RULE-01, RULE-02)
+
+Run after growth, before the skin and the paths. A **dead end** is a route slot with at most one route neighbour that is no anchor (port, artery link, knot or extra) and no structure's entrance. In route order, each draws four words and takes the first stage that applies:
+1. a **set piece** (chance 1/3): the kinds of `sets::legal`, first by weight and then the next two, grown in the free slots beside the leaf (the box of the kind's smallest size, centred across the leaf), with an entrance at the leaf: a structure of the cell;
+2. a **view**: a ray of seven free or void slots (224 m; the spec says 200 m, and a ray to the cell face does not count because the neighbour is unknown) along one of the four horizontal directions; a balcony 6 m wide to the face, with a rail along its free end;
+3. a **lift** (chance 1/4): the nearest route slot of the same column at another height with only free slots between joins the leaf by a new rising segment, which `paths` builds as PV-16 (`Tissue::lift_segments`);
+4. a **light**: a lamp on a post at the leaf, which always fits.
+`payoffs::unpaid` is the validator (RULE-01): leaves without a payoff; the test requires none in 2 000 cells. **Legibility (RULE-02):** the cell that holds the knot has a beacon (a 24 m spire of the beacon material, visible far, in a corner of the knot's slot clear of the route); the lit hubs and set pieces and the arteries' bias towards the knot are the rest. **TIS-05** also names the edges: rails and thresholds are in §5W.16, §5W.19 and §5W.20.
+Measured (2 000 cells): 101 dead ends: 25 set pieces, 46 views, 1 lift, 29 lights. Set pieces and local places now stay within the cell's fill (the fill test is at 76 % within ±0.10, mean error 0.064; the bar is 75 % and 0.07).
+
+### 5W.24 Local places and near details (PW.3.19, `worldgen::locals`, `worldgen::modifiers`)
+
+**Local places LOC-01..06** are forms like the set pieces (`Structure::form = 300 + n`, `Tissue::locals`), placed after them with chance 1/4 per cell: LOC-01 light well ringed by galleries (fill 0.5), LOC-02 atrium under a glazed roof (0.5), LOC-03 thin spot: a slab two slots thick with a great lit window, where a column of the lattice has one or two crust slots, LOC-04 cut-away (a building with its front wall missing, 0.25), LOC-05 courtyard sunk into a low block (0.25), LOC-06 two towers leaning towards each other (tilt 1, yaws 0 and 32; 0.375). Measured over 2 000 cells: 27, 40, 28, 41, 40, 40.
+**Near details NEAR-01..05** are a ninth modifier word per path segment (none 1/2, then one of five): NEAR-01 a grille (a framed row of bars) beside the walkway; NEAR-02 a slit view (a thick wall with a gap 0.3 m wide); NEAR-03 a doorway framing a lamp at the far end of a long leg; NEAR-04 gaps 0.2 m wide across a catwalk's grating every 6 m (PH-01 only; narrower than a foot, so they show the drop and cost nothing); NEAR-05 windows (rows of lit panels along the façade side). Types that wander sideways (PH-05, 19, 20) take none of NEAR-01..03 and 05. The structures' own windows (the lit forms, the skin) are the same idea at larger scale. The modifier walkability test covers them.
+
+### 5W.25 Where the ideas of free orientation are (PW.3.20, ORI-01..11)
+
+| ID | Where |
+|---|---|
+| ORI-01 grain | `regimes.md` §7.3; frames per L2 cell (`WebFields::frame_l2`) |
+| ORI-02 fallen towers as bridges | SV-11 (§5W.13) |
+| ORI-03 tilted strata | `StackGeometry::Tilted` (`regimes.md` §8) |
+| ORI-04 oblique struts | oblique beams, FRM-02 (§4W.2.1a) |
+| ORI-05 stair beams and funiculars | FRM-11, PV-12, PV-19 (§5W.18) |
+| ORI-06 rotundas, drums, domes | FORM-09, 16, 19 (§5W.14) |
+| ORI-07 true helices | PV-05 (§5W.17), SV-16 |
+| ORI-08 catenaries | PH-04 (§5W.16) |
+| ORI-09 polygonal rings | FORM-20 |
+| ORI-10 radial districts | **PW.3.20b** (needs the gravity wells, PW.6.1) |
+| ORI-11 diagonal routes across a hall | PH-19 (§5W.16) |
+`tests/orientation.rs` finds each one by census in the generated world (grain frames in 64 L0 cells, a tilted stack, oblique and stair beams in 400 L1 cells, and the forms, variant and path types in 1 500 cells).
+
+
+### 5W.26 The Web L2 cell and the game (PW.3.21, `worldgen::l2_web`, version 11)
+
+`l2_build` (and so `l2_cell`, `l2_cell_in`) now returns the Web tissue: structures (hubs, set pieces, local places and the dead-end set pieces among them) in placement order, the skin's cladding, path pieces, thresholds, payoffs. Ports are the L2 face ports of the L1 skeleton (`cell_ports_in`). The clear boxes of paths and thresholds are `KeepOut` constraints (air that L3 must leave open and that the parent's solid is to be cut for: PW.3.21b). There are no masses until PW.4. `GEN_VERSION` is 11.
+- **Tram volumes.** A tram line's reserved volume is clear air: a slot it touches is absent (`tissue::drop_tram_slots`), and any piece that still meets it (a turned structure reaches past its slots) is dropped (`l2_web::drop_in_tram_volumes`). The tram test `no_l2_primitive_enters_the_envelope` holds.
+- **Density.** After the first runs the spacing of repeated pieces was doubled (ribs, lamps, glyphs, piers, cleats, rhythm frames) and a structure gets thresholds on its first two entrances only.
+- **Engine.** L3 is off (`meshpool::L3_ENABLED`) and structures collide as they are drawn; a chunk over the frame's upload budget uploads alone, up to four times the budget; the default start is a walkable one (`cellscene::knot_spawn`: the start of the longest level segment in the knot's L2 cell, 1 m above its floor).
+- **Not walkable yet (stated so it is not mistaken for a bug).** Bored tunnels, airlocks and structure doorways: nothing cuts a hole in solid (PW.3.21b), and a structure is a solid block until its interior exists (PW.4). Open catwalks, bridges, stairs and the open paths are walkable.
+- **Measured (native Windows, RTX 4070, release):** 95 to 143 fps in a walk from the default start; 11 200 chunks resident, 0.75 to 1.2 GiB of GPU memory; about 1 200 chunks over the 16 MiB frame budget (uploaded alone); the far band overflows ("far band is full", thousands of instances not drawn). Per L1 cell the generator makes 5 000 to 18 000 primitives (mostly the surface plates), per L2 cell a median of 5 000 meshed boxes (p90 12 700, worst 21 000; the stairs are a third, 171 steps for every slot of climb). Generation lags the camera: after 900 frames the queue still held 8 000 chunks, empty after 1 500.
+
+
+### 5W.27 Hole cutting (PW.3.21b, `worldgen::carve`)
+
+The clear boxes of bored passages and thresholds are cut out of solid boxes (`carve::carve`): a box is replaced by the boxes that remain outside the holes (disjoint, about five to a hole). Where the piece and the hole are boxes in one frame the cut is exact; where the frames differ the hole is covered by slices (as few as keep each slice's bounds within about twice the hole's own volume, at most six) and each slice by its bounds in the piece's axes, rounded outwards, so the hole can grow a little but never shrink and nothing solid stays in a passage. Pieces that are not boxes (ramps, cylinders) are left whole and counted (`CarveStats::unsupported`).
+- **L2 cell:** `l2_cell_web` cuts the structures' boxes by the cell's path and threshold bores (a doorway is a 4 m alcove in the structure's solid until PW.4 builds the interior); the pieces that line the passage are not cut.
+- **L1 cell:** a bored passage crosses the L1 solid, and an L1 chunk cannot know the bores of its 512 L2 cells without growing them. The bored segments follow from the routes alone (a bored segment is never swallowed, its type, width and legs do not read the structures), so `l2_web::l1_primitives_carved` runs `tissue_routes` for the 512 cells (about 1.7 s a cell), takes `paths::bored_bores` (the same boxes as the grown cell's, tested) and cuts the L1 pieces with them. The engine builds L1 full chunks from it. A threshold's own clear box is not used for the L1 cut (a structure can grow over the solid slot that gives the face, so the threshold may not exist in the grown cell); the passage's own bore covers the same corridor.
+- **Thresholds draw by face** (`THRESHOLDS` + the slot and direction), so a face's type does not depend on what else the cell holds.
+- **Measured** (six L1 cells): 80 to 224 pieces cut per cell, 0 to 10 left whole (cylinders and ramps); the pieces of a cell grow by 10 to 140 % (9 600 to 28 000 become 14 700 to 31 500). `a_bored_passage_can_be_walked` follows every horizontal bored passage of an L1 cell along its centre line: a floor under 96 % of the samples (the rest are the 0.2 m gaps of NEAR-04), and 96 % free to 1.1 m above it; **no sample is blocked by an L1 piece**; what blocks the rest are L2 pieces where a leg meets a stair at a corner slot (PW.3.12b).
+- Not cut: ramps, cylinders and other non-box pieces; a doorway into a form built of cylinders stays shut.
+
+### 5W.28 Mesh and generation budgets (PW.3.21c, `engine::chunkmesh`, `engine::primmesh`)
+
+- **Measured before** (native Windows): an L1 chunk 19 to 30 MiB (12 000 to 28 000 pieces), an L2 chunk up to 26 MiB; 360 chunks dropped for being over the 16 MiB frame budget; the far band overflowed 9 700 times.
+- **Changes.** (1) The mesher merges coplanar quads of one material that share a whole edge. (2) A face that the boxes beside it leave in three or more fragments is drawn whole (the fragments cost more quads than the face; what hides behind a neighbour is invisible). (3) Cylinders have 6 to 24 sides (was 8 to 48): a cell has thousands. (4) The far band draws only pieces at least 32 m thick in every direction (`l1::FAR_MIN_THICKNESS_Q`): about a tenth of the far-visible pieces, which is what a 50 km band can hold; and holds 3 145 728 instances (192 MiB, was 1 048 576).
+- **Measured after.** L1 chunk 11 to 12 MiB, L2 chunk median 3.7, p90 7.7, max 11.4 MiB (120 cells): none over the budget; no chunk dropped. Far band: no overflow. A 20 m/s flight over 70 s keeps all 11 200 wanted chunks resident (queue 0, 1 700 evicted) at 126 to 136 fps; a standing start fills the whole 50 km band in about 35 s, nearest chunks first (8 300 of 11 300 at 15 s). GPU memory 0.8 GiB.
+- **Not done:** stairs are still one box per step (171 for every slot of climb); the L1 surface plates are still 5 000 to 18 000 pieces a cell (the mesher is where they were reduced, not the generator); the oversize-upload rule stays (a chunk up to four budgets uploads alone).
+
 
 ## 6. L3: Blocks (64 m)
 

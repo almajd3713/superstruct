@@ -14,12 +14,10 @@ use glam::I64Vec3;
 
 use crate::cell::{Axis, Level};
 use crate::hash::hash;
-use crate::l1::{Rect, decompose};
-use crate::l1_between::{
-    Gen, L0_M, L1_M, Q, Run, WebPiece, begin, cell_clip, comp, site_rng, unit,
-};
-use crate::orient::{Frame, LocalShape};
-use crate::prim::{FeatureKind, MaterialId, PrimFlags, QAabb, QVec3, Shape};
+use crate::l1::{Rect, decompose_in};
+use crate::l1_between::{Gen, L0_M, L1_M, Plate, Q, Run, WebPiece, begin, comp, site_rng, unit};
+use crate::l1_void::{VoidKind, stack_extent, voids_of_l0};
+use crate::prim::{FeatureKind, MaterialId, PrimFlags};
 use crate::regime::regime;
 use crate::rng::Rng;
 use crate::salt;
@@ -50,6 +48,8 @@ pub struct Opening {
     pub t0: i64,
     pub s1: i64,
     pub t1: i64,
+    /// The coordinates are plane coordinates of a Tilted stack's frame (PW.2.4b), not world metres.
+    pub plate: bool,
 }
 
 /// The kind of the floor (`ceiling = false`) or the ceiling of a run.
@@ -87,18 +87,17 @@ pub fn surface_content(seed: WorldSeed, l1: I64Vec3) -> Vec<WebPiece> {
 
 /// The openings of the skins of L1 cell `l1` (HOR-02). L1 data for the children.
 pub fn surface_openings(seed: WorldSeed, l1: I64Vec3) -> Vec<Opening> {
-    let (g, runs) = begin(seed, l1);
+    let (mut g, runs) = begin(seed, l1);
     let a0 = comp(g.origin, g.map.a);
     let mut out = Vec::new();
-    if g.tilt.is_some() {
-        return out;
-    }
+    let (smin, smax) = g.shift_range();
     for run in &runs {
         for ceiling in [false, true] {
             let surf = if ceiling { run.hi } else { run.lo };
-            if surf + PLATE + 8 < a0 || surf - PLATE - 8 > a0 + L1_M {
+            if surf + smax + PLATE + 8 < a0 || surf + smin - PLATE - 8 > a0 + L1_M {
                 continue;
             }
+            g.plate = Plate::new(&g, surf);
             let kind = surface_kind(seed, run.key, ceiling);
             out.extend(g.openings(seed, run, ceiling, kind));
         }
@@ -140,18 +139,55 @@ impl Gen {
                 t0,
                 s1: s0 + w,
                 t1: t0 + d,
+                plate: self.plate.is_some(),
             });
         }
+        self.mouths(seed, run, ceiling, &mut out);
         out
+    }
+
+    /// The mouths of valleys, shafts and funnels that reach this surface open the skin plate
+    /// (PW.2.6b). The footprint is the bounding rectangle of each piece that touches it.
+    fn mouths(&self, seed: WorldSeed, run: &Run, ceiling: bool, out: &mut Vec<Opening>) {
+        let surf = if ceiling { run.hi } else { run.lo };
+        let (s, t, a) = (self.map.s, self.map.t, self.map.a);
+        let (cs0, ct0) = (self.s0(), self.t0());
+        let span = self.span();
+        for v in voids_of_l0(seed, self.home) {
+            if !matches!(
+                v.kind,
+                VoidKind::Valley | VoidKind::Shaft | VoidKind::Funnel
+            ) {
+                continue;
+            }
+            for piece in &v.keep_out {
+                let Some([sr, tr, ar]) = stack_extent(piece, s, t, a) else {
+                    continue;
+                };
+                let touches = if ceiling {
+                    ar.0 <= surf + 1 && ar.1 > surf
+                } else {
+                    ar.1 >= surf - 1 && ar.0 < surf
+                };
+                if touches && sr.1 > cs0 && sr.0 < cs0 + span && tr.1 > ct0 && tr.0 < ct0 + span {
+                    out.push(Opening {
+                        run_key: run.key,
+                        ceiling,
+                        s0: sr.0,
+                        t0: tr.0,
+                        s1: sr.1,
+                        t1: tr.1,
+                        plate: self.plate.is_some(),
+                    });
+                }
+            }
+        }
     }
 
     fn surface(&mut self, seed: WorldSeed, run: &Run, ceiling: bool) {
         let kind = surface_kind(seed, run.key, ceiling);
         let surf = if ceiling { run.hi } else { run.lo };
-        if self.tilt.is_some() {
-            self.tilted_plate(surf, ceiling);
-            return;
-        }
+        self.plate = Plate::new(self, surf);
         let holes = self.openings(seed, run, ceiling, kind);
         self.plate(surf, ceiling, &holes);
         match kind {
@@ -159,6 +195,7 @@ impl Gen {
             SurfaceKind::Ceilingscape => self.ceilingscape(seed, run, surf),
             SurfaceKind::Skin => self.seams(surf, ceiling),
         }
+        self.plate = None;
     }
 
     /// The `a` range of a plate, below a floor or above a ceiling.
@@ -173,19 +210,20 @@ impl Gen {
     /// The skin plate, cut into boxes around the openings (SURF-04).
     fn plate(&mut self, surf: i64, ceiling: bool, holes: &[Opening]) {
         let (s0, t0) = (self.s0(), self.t0());
+        let size = (self.span() * Q) as i32;
         let to_q = |v: i64, o: i64| ((v - o) * Q) as i32;
         let rects: Vec<Rect> = holes
             .iter()
             .map(|h| Rect {
-                x0: to_q(h.s0, s0).clamp(0, 65_536),
-                z0: to_q(h.t0, t0).clamp(0, 65_536),
-                x1: to_q(h.s1, s0).clamp(0, 65_536),
-                z1: to_q(h.t1, t0).clamp(0, 65_536),
+                x0: to_q(h.s0, s0).clamp(0, size),
+                z0: to_q(h.t0, t0).clamp(0, size),
+                x1: to_q(h.s1, s0).clamp(0, size),
+                z1: to_q(h.t1, t0).clamp(0, size),
             })
             .collect();
         let (a_lo, a_hi) = Self::plate_range(surf, ceiling);
         self.kind = Some(FeatureKind::SKIN);
-        for r in decompose(&rects) {
+        for r in decompose_in(&rects, size) {
             let (ls, hs) = (s0 + i64::from(r.x0) / Q, s0 + i64::from(r.x1) / Q);
             let (lt, ht) = (t0 + i64::from(r.z0) / Q, t0 + i64::from(r.z1) / Q);
             self.bx(
@@ -199,37 +237,10 @@ impl Gen {
         self.kind = None;
     }
 
-    /// The plate of a Tilted stack: one slab in the stack's frame, no openings (PW.2.4b).
-    fn tilted_plate(&mut self, surf: i64, ceiling: bool) {
-        let Some((tilt, yaw)) = self.tilt else { return };
-        let (cs, ct) = (self.s0() + L1_M / 2, self.t0() + L1_M / 2);
-        let y = surf + self.shift(cs, ct);
-        let q = |v: i64, axis: Axis| ((v - comp(self.origin, axis)) * Q) as i32;
-        let origin = QVec3::new(q(cs, Axis::X), q(y, Axis::Y), q(ct, Axis::Z));
-        let r = (4096 * Q) as i32;
-        let thick = (PLATE * Q) as i32;
-        let (y0, y1) = if ceiling { (0, thick) } else { (-thick, 0) };
-        let aabb = QAabb::new(QVec3::new(-r, y0, -r), QVec3::new(r, y1, r));
-        let shape = Shape::oriented(
-            Frame::table(yaw, tilt),
-            origin,
-            LocalShape::Box { aabb },
-            cell_clip(),
-        );
-        self.kind = Some(FeatureKind::SKIN);
-        self.push(
-            SURF_SKIN,
-            shape,
-            MaterialId::CONCRETE,
-            FeatureKind::SKIN,
-            PrimFlags::FAR_VISIBLE,
-        );
-        self.kind = None;
-    }
-
     /// Panel seams of a near-blank skin: 1 m strips every 128 m.
     fn seams(&mut self, surf: i64, ceiling: bool) {
         let (s0, t0) = (self.s0(), self.t0());
+        let span = self.span();
         let (a_lo, a_hi) = if ceiling {
             (surf - 1, surf)
         } else {
@@ -237,22 +248,22 @@ impl Gen {
         };
         self.kind = Some(FeatureKind::SKIN);
         let mut x = s0.div_euclid(128) * 128;
-        while x < s0 + L1_M {
+        while x < s0 + span {
             self.bx(
                 SURF_SKIN,
                 [x, t0, a_lo],
-                [x + 1, t0 + L1_M, a_hi],
+                [x + 1, t0 + span, a_hi],
                 MaterialId::CONCRETE,
                 PrimFlags::NONE,
             );
             x += 128;
         }
         let mut y = t0.div_euclid(128) * 128;
-        while y < t0 + L1_M {
+        while y < t0 + span {
             self.bx(
                 SURF_SKIN,
                 [s0, y, a_lo],
-                [s0 + L1_M, y + 1, a_hi],
+                [s0 + span, y + 1, a_hi],
                 MaterialId::CONCRETE,
                 PrimFlags::NONE,
             );
@@ -371,25 +382,26 @@ impl Gen {
     fn ceilingscape(&mut self, seed: WorldSeed, run: &Run, surf: i64) {
         let key = which_key(run, true);
         let (s0, t0) = (self.s0(), self.t0());
+        let span = self.span();
         self.kind = Some(FeatureKind::SKIN);
         let (a, b) = Self::out_range(surf, true, 10, 1);
         let mut x = s0.div_euclid(64) * 64;
-        while x < s0 + L1_M {
+        while x < s0 + span {
             self.bx(
                 SURF_CEILING,
                 [x, t0, a],
-                [x + 6, t0 + L1_M, b],
+                [x + 6, t0 + span, b],
                 MaterialId::CONCRETE,
                 PrimFlags::NONE,
             );
             x += 64;
         }
         let mut y = t0.div_euclid(64) * 64;
-        while y < t0 + L1_M {
+        while y < t0 + span {
             self.bx(
                 SURF_CEILING,
                 [s0, y, a],
-                [s0 + L1_M, y + 6, b],
+                [s0 + span, y + 6, b],
                 MaterialId::CONCRETE,
                 PrimFlags::NONE,
             );
@@ -417,7 +429,7 @@ impl Gen {
             );
         }
         // Pipe runs along s every 128 m.
-        for q in t0.div_euclid(128)..=(t0 + L1_M - 1).div_euclid(128) {
+        for q in t0.div_euclid(128)..=(t0 + span - 1).div_euclid(128) {
             let mut rng = site_rng(seed, q, -1, key, salt::SURFACE_LOT);
             if rng.below(100) >= 50 {
                 continue;
@@ -429,7 +441,7 @@ impl Gen {
                 0,
                 [0, q * 128 + 64, at],
                 s0,
-                s0 + L1_M,
+                s0 + span,
                 2,
                 MaterialId::PIPE,
                 PrimFlags::NO_COLLIDE,
@@ -733,7 +745,16 @@ mod tests {
             let ops = surface_openings(seed, c);
             for o in &ops {
                 assert!(o.s1 - o.s0 >= 32 && o.t1 - o.t0 >= 32, "{o:?}");
-                assert!((o.s1 - o.s0).max(o.t1 - o.t0) <= 400);
+                // Mouths of valleys, shafts and funnels are larger than lattice openings.
+                let mouths = voids_of_l0(seed, c.div_euclid(I64Vec3::splat(8)))
+                    .iter()
+                    .any(|v| {
+                        matches!(
+                            v.kind,
+                            VoidKind::Valley | VoidKind::Shaft | VoidKind::Funnel
+                        )
+                    });
+                assert!(mouths || (o.s1 - o.s0).max(o.t1 - o.t0) <= 400);
             }
             let pieces = surface_content(seed, c);
             for run in &runs {
@@ -795,7 +816,7 @@ mod tests {
         use glam::Vec3;
         let seed = WorldSeed(7);
         let mut rng = Rng::new(2);
-        let (mut checked, mut tilted_cells) = (0, 0);
+        let (mut checked, mut tilted_cells, mut holes_seen) = (0, 0, 0);
         for x in -10..10 {
             for z in -10..10 {
                 let home = I64Vec3::new(x, 0, z);
@@ -807,6 +828,8 @@ mod tests {
                     tilted_cells += 1;
                     let (g, runs) = begin(seed, c);
                     let pieces = surface_content(seed, c);
+                    let ops = surface_openings(seed, c);
+                    let [ex, _, ez] = crate::orient::Frame::table(yaw, tilt).axes();
                     for run in &runs {
                         for ceiling in [false, true] {
                             let surf = if ceiling { run.hi } else { run.lo };
@@ -824,12 +847,30 @@ mod tests {
                                             && p.prim.shape.contains(Vec3::new(lx, ly as f32, lz))
                                     })
                                 };
-                                if (0..L1_M).contains(&inside) {
+                                let d = glam::DVec3::new(
+                                    (wx - home.x * L0_M - L0_M / 2) as f64,
+                                    (sh + if ceiling { 4 } else { -4 }) as f64,
+                                    (wz - home.z * L0_M - L0_M / 2) as f64,
+                                );
+                                let (ps, pt) = (d.dot(ex).floor() as i64, d.dot(ez).floor() as i64);
+                                let in_hole = ops.iter().any(|o| {
+                                    o.plate
+                                        && o.run_key == run.key
+                                        && o.ceiling == ceiling
+                                        && (o.s0 - 3..o.s1 + 3).contains(&ps)
+                                        && (o.t0 - 3..o.t1 + 3).contains(&pt)
+                                });
+                                if (0..L1_M).contains(&inside) && !in_hole {
                                     assert!(
                                         solid(inside),
-                                        "{c:?} plate missing at {lx} {inside} {lz}"
+                                        "{c:?} plate missing at {lx} {inside} {lz} ceiling={ceiling} ps={ps} pt={pt} ops={:?}",
+                                        ops.iter()
+                                            .filter(|o| o.run_key == run.key)
+                                            .collect::<Vec<_>>()
                                     );
                                     checked += 1;
+                                } else if (0..L1_M).contains(&inside) {
+                                    holes_seen += 1;
                                 }
                                 if (0..L1_M).contains(&outside) {
                                     assert!(
@@ -846,8 +887,78 @@ mod tests {
             }
         }
         assert!(
-            tilted_cells > 0 && checked > 50,
-            "{tilted_cells} cells, {checked} checks"
+            tilted_cells > 0 && checked > 50 && holes_seen > 0,
+            "{tilted_cells} cells, {checked} checks, {holes_seen} in openings"
+        );
+    }
+
+    /// PW.2.6b: where a shaft, funnel or valley reaches a crust surface, the plate is open over
+    /// its footprint, in every stack geometry.
+    #[test]
+    fn void_mouths_open_the_skin() {
+        let seed = WorldSeed(1);
+        let (mut flat, mut tilted, mut vertical) = (0, 0, 0);
+        for x in -6..6 {
+            for z in -6..6 {
+                let home = I64Vec3::new(x, 0, z);
+                let geometry = regime(seed, home).web.stack;
+                for v in voids_of_l0(seed, home) {
+                    if !matches!(v.kind, VoidKind::Shaft) {
+                        continue;
+                    }
+                    let (lo, hi) = v.bounds();
+                    let c = (lo + hi) / 2;
+                    let l1 = c.div_euclid(I64Vec3::splat(L1_M));
+                    let ops = surface_openings(seed, l1);
+                    if ops.is_empty() {
+                        continue;
+                    }
+                    match geometry {
+                        StackGeometry::Tilted { .. } => {
+                            tilted += i32::from(ops.iter().any(|o| o.plate));
+                        }
+                        StackGeometry::Vertical { .. } => {
+                            vertical += i32::from(!ops.is_empty());
+                        }
+                        _ => flat += i32::from(!ops.is_empty()),
+                    }
+                }
+            }
+        }
+        assert!(
+            flat > 0 && tilted > 0 && vertical > 0,
+            "{flat} {tilted} {vertical}"
+        );
+    }
+
+    /// PW.2.4b: Tilted skins carry roofscape and ceiling-scape too, and stay inside the cell.
+    #[test]
+    fn tilted_skins_are_dressed() {
+        let seed = WorldSeed(7);
+        let e = (L1_M * Q) as i32;
+        let (mut roof, mut ceiling, mut cells) = (0, 0, 0);
+        for x in -10..10 {
+            for z in -10..10 {
+                let home = I64Vec3::new(x, 0, z);
+                if !matches!(regime(seed, home).web.stack, StackGeometry::Tilted { .. }) {
+                    continue;
+                }
+                for l in [(3, 2, 3), (4, 5, 1), (1, 6, 6), (6, 3, 2)] {
+                    let c = home * 8 + I64Vec3::new(l.0, l.1, l.2);
+                    cells += 1;
+                    for p in surface_content(seed, c) {
+                        let b = p.prim.aabb();
+                        assert!(b.min.x >= 0 && b.max.x <= e && b.min.y >= 0 && b.max.y <= e);
+                        assert!(b.min.z >= 0 && b.max.z <= e);
+                        roof += i32::from(p.tag == SURF_ROOF);
+                        ceiling += i32::from(p.tag == SURF_CEILING);
+                    }
+                }
+            }
+        }
+        assert!(
+            cells > 0 && roof > 0 && ceiling > 0,
+            "{cells} {roof} {ceiling}"
         );
     }
 

@@ -8,10 +8,11 @@ use worldgen::prim::{Dir4, Primitive, Q_PER_M, QAabb, QVec3, Shape};
 use crate::mesh::Mesh;
 use crate::vertex::{Vertex, oct_decode};
 
-/// Segments grow with radius so large trunks stay round and thin pipes stay cheap.
-#[allow(clippy::cast_sign_loss)] // clamped to 8..=48 above the cast
+/// Segments grow with radius so large trunks stay round and thin pipes stay cheap: 6 to 24
+/// (the Web has thousands of cylinders in a cell, and every side is a quad of its own).
+#[allow(clippy::cast_sign_loss)] // clamped to 6..=24 above the cast
 fn cylinder_sides(radius_m: f32) -> usize {
-    (8.0 + radius_m * 4.0).round().clamp(8.0, 48.0) as usize
+    (6.0 + radius_m * 2.0).round().clamp(6.0, 24.0) as usize
 }
 
 fn m(q: i32) -> f32 {
@@ -314,9 +315,9 @@ mod tests {
 
     #[test]
     fn cylinder_segments_scale_with_radius() {
-        assert_eq!(cylinder_sides(0.25), 9);
-        assert_eq!(cylinder_sides(2.0), 16);
-        assert_eq!(cylinder_sides(100.0), 48);
+        assert_eq!(cylinder_sides(0.25), 7);
+        assert_eq!(cylinder_sides(2.0), 10);
+        assert_eq!(cylinder_sides(100.0), 24);
     }
 
     #[test]

@@ -2,6 +2,8 @@
 //! buried against other boxes. Coordinates stay in integer quanta until a quad is emitted, so
 //! touching faces cancel exactly (`docs/spec/primitives.md` §1).
 
+use std::collections::BTreeMap;
+
 use glam::Vec3;
 use worldgen::cell::Axis;
 use worldgen::prim::{Dir4, Primitive, Q, Q_PER_M, QAabb, Shape};
@@ -127,6 +129,9 @@ fn stair_boxes(aabb: QAabb, rise: Dir4, steps: u16, mut push: impl FnMut(QAabb))
     }
 }
 
+/// A face left in at least this many fragments by the boxes beside it is drawn whole.
+const WHOLE_FACE_FRAGMENTS: usize = 3;
+
 /// Broadphase cell edge in quanta (64 m).
 const GRID: Q = 1024;
 
@@ -227,6 +232,7 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
         boxes: boxes.len(),
         tris_unculled: boxes.len() * 12,
     };
+    let mut quads: BTreeMap<(u8, bool, Q, u16), Vec<Rect>> = BTreeMap::new();
     let mut pieces = Vec::new();
     let mut next = Vec::new();
     let mut near = Vec::new();
@@ -268,13 +274,68 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
                         break;
                     }
                 }
-                for r in &pieces {
-                    emit_quad(&mut mesh, axis, positive, c, *r, b.material);
+                if !pieces.is_empty() {
+                    // A face that other boxes leave in three fragments or more is drawn whole:
+                    // what hides behind them is invisible, and the fragments cost more quads
+                    // than the face (a plate with a hundred little boxes on it).
+                    if pieces.len() >= WHOLE_FACE_FRAGMENTS {
+                        pieces.clear();
+                        pieces.push(rect_of(&b.aabb, u, v));
+                    }
+                    quads
+                        .entry((axis as u8, positive, c, b.material))
+                        .or_default()
+                        .extend(pieces.iter().copied());
                 }
             }
         }
     }
+    // Coplanar quads that touch along a whole edge become one: boxes laid side by side (plates,
+    // steps, tiles) share a plane, and the culling above leaves each face in fragments.
+    for ((axis, positive, plane, material), mut rects) in quads {
+        merge(&mut rects);
+        let axis = [Axis::X, Axis::Y, Axis::Z][usize::from(axis)];
+        for r in rects {
+            emit_quad(&mut mesh, axis, positive, plane, r, material);
+        }
+    }
     (mesh, stats)
+}
+
+/// Merges rectangles that share a full edge, along `u` and then `v`, until no pair does.
+fn merge(rects: &mut Vec<Rect>) {
+    for _ in 0..6 {
+        let before = rects.len();
+        for along_u in [true, false] {
+            rects.sort_unstable_by_key(|r| {
+                if along_u {
+                    (r.v0, r.v1, r.u0, r.u1)
+                } else {
+                    (r.u0, r.u1, r.v0, r.v1)
+                }
+            });
+            let mut out: Vec<Rect> = Vec::with_capacity(rects.len());
+            for r in rects.drain(..) {
+                match out.last_mut() {
+                    Some(last)
+                        if along_u && last.v0 == r.v0 && last.v1 == r.v1 && last.u1 == r.u0 =>
+                    {
+                        last.u1 = r.u1;
+                    }
+                    Some(last)
+                        if !along_u && last.u0 == r.u0 && last.u1 == r.u1 && last.v1 == r.v0 =>
+                    {
+                        last.v1 = r.v1;
+                    }
+                    _ => out.push(r),
+                }
+            }
+            *rects = out;
+        }
+        if rects.len() == before {
+            break;
+        }
+    }
 }
 
 fn emit_quad(mesh: &mut Mesh, axis: Axis, positive: bool, plane: Q, r: Rect, material: u16) {
@@ -357,8 +418,9 @@ mod tests {
     fn touching_boxes_lose_their_shared_face() {
         let (mesh, _) =
             mesh_primitives(&[bx([0, 0, 0], [16, 16, 16]), bx([16, 0, 0], [32, 16, 16])]);
-        // Two 1 m cubes side by side: a 2x1x1 block, 10 unit faces, one quad each.
-        assert_eq!(mesh.indices.len() / 3, 20);
+        // Two 1 m cubes side by side: a 2x1x1 block, whose coplanar unit faces merge into six
+        // quads (twelve triangles) of the same total area, 10.
+        assert_eq!(mesh.indices.len() / 3, 12);
         assert!((surface_area(&mesh) - 10.0).abs() < 1e-3);
         assert_winding(&mesh);
     }
@@ -424,6 +486,85 @@ mod tests {
             (surface_area(&mesh) - expected).abs() < 1e-2,
             "{} vs {expected}",
             surface_area(&mesh)
+        );
+    }
+}
+
+#[cfg(test)]
+mod budget {
+    use super::*;
+    use glam::I64Vec3;
+    use worldgen::cell::{CellKey, Level};
+    use worldgen::l2_port::L1Cache;
+    use worldgen::seed::WorldSeed;
+
+    fn bytes(m: &Mesh) -> usize {
+        m.vertices.len() * 20 + m.indices.len() * 4
+    }
+
+    /// Exploration helper (PW.3.21c): the mesh bytes of sample L1 and L2 cells, and what the
+    /// bytes are made of.
+    #[test]
+    #[ignore = "measurement: prints the mesh bytes of sample cells"]
+    fn print_mesh_bytes() {
+        let seed = WorldSeed(0);
+        let cache = L1Cache::default();
+        for k in 0..4i64 {
+            let cell = CellKey::new(Level::L1, I64Vec3::new(k % 2, 0, k / 2));
+            let (prims, _) = worldgen::l2_web::l1_primitives_carved(seed, &cache, cell);
+            let (m, stats) = mesh_primitives(&prims);
+            let oriented = prims
+                .iter()
+                .filter(|p| matches!(p.shape, Shape::Oriented(_)))
+                .count();
+            let mut by_kind: BTreeMap<String, (usize, usize)> = BTreeMap::default();
+            for p in &prims {
+                let mut one = Mesh::default();
+                if !matches!(p.shape, Shape::Box { .. } | Shape::StairRun { .. }) {
+                    primmesh::add_primitive(&mut one, p);
+                    let name = match p.shape {
+                        Shape::Cylinder { .. } => "cylinder".to_string(),
+                        Shape::Ramp { .. } => "ramp".to_string(),
+                        Shape::Oriented(o) => format!(
+                            "oriented {}",
+                            match o.local {
+                                worldgen::orient::LocalShape::Box { .. } => "box",
+                                worldgen::orient::LocalShape::Cylinder { .. } => "cylinder",
+                                _ => "other",
+                            }
+                        ),
+                        _ => "other".to_string(),
+                    };
+                    let e = by_kind.entry(name).or_default();
+                    e.0 += 1;
+                    e.1 += one.vertices.len();
+                }
+            }
+            println!("L1 non-box verts: {by_kind:?}");
+            println!(
+                "L1 {:?}: {} prims ({} oriented), {} boxes, {} verts, {:.1} MiB",
+                cell.coords,
+                prims.len(),
+                oriented,
+                stats.boxes,
+                m.vertices.len(),
+                bytes(&m) as f64 / 1_048_576.0
+            );
+        }
+        let mut sizes: Vec<f64> = Vec::new();
+        for k in 0..120i64 {
+            let key = CellKey::new(
+                Level::L2,
+                I64Vec3::new(k % 6 + 8, k / 6 % 4 + 1, k / 24 + 3),
+            );
+            let out = worldgen::l2_web::l2_cell_web(seed, &cache, key);
+            let (m, _) = mesh_primitives(&out.primitives);
+            sizes.push(bytes(&m) as f64 / 1_048_576.0);
+        }
+        sizes.sort_by(f64::total_cmp);
+        println!(
+            "L2 MiB over 120 cells: median {:.1}, p90 {:.1}, max {:.1}",
+            sizes[60], sizes[108], sizes[119]
         );
     }
 }

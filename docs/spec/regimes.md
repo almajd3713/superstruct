@@ -476,6 +476,14 @@ An RNG seeded with `absorb(hash(seed, 0, cell, STRATUM_CHAR), k)` (`k` is the st
 
 `character_at(cell, u)` returns the `Character` of the stratum whose crust contains `u`, or `None` inside a Between. Between content (tethers, drips) uses the character of the **nearer** crust (ties go to the lower one) for its materials and light.
 
+### 10.5 As implemented (PW.2.10, `worldgen::character`)
+
+- `character(seed, l0, k)`, `character_at` (crust only) and `character_near` (the nearer crust inside a Between, ties to the lower one). Salt `STRATUM_CHAR` (0x0115) with `k` absorbed.
+- A regime weight of 0 stays 0 (the regime's ban is not lifted by the perturbation); the draw is still made. Boost picks are weighted by the current weights. A ban is skipped when it would zero every entry or the WALK/STAIR path families.
+- The orientation exception draws the policy and its tilt cap every time (three draws), then keeps the regime's policy with probability 3/4.
+- `light` stays 0 in blackout cells. The palette is a different one of the style's list with probability 1/3.
+- Not yet consumed: L2/L3 read the record from PW.3 on; the stratum weights on port types (§4W.5.1) and the seam rule (SC-10) wait for those consumers.
+
 ## 11. Census tags
 
 Every Web field has a tag for the census (MET-11): the registry ID (`REG-01`, `BTW-03`, `SC-05`, …). The regime tags the cell with its stack geometry, its orientation policy and its Between kinds; each stratum tags its character fields. `web-report --census` counts the tags in the sample region.

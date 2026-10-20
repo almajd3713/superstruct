@@ -32,6 +32,8 @@ salts! {
     SEAM_BETWEEN_X = 0x0113;
     /// Keyed by the L0 cell on the + side: the seam along Z (Vertical stacks).
     SEAM_BETWEEN_Z = 0x0114;
+    /// Keyed by the L0 cell with the stratum index absorbed: the stratum character (`regimes.md` §10.2).
+    STRATUM_CHAR = 0x0115;
     /// Keyed by an L1 cell or a grain cell, with the grain size absorbed: frame yaw (§7.4).
     ORI_YAW = 0x0116;
     /// Keyed by the L0 cell: lean heading and wall axis of the stack.
@@ -92,6 +94,22 @@ salts! {
     SURFACE_LOT = 0x021E;
     /// `(block, row, face key)`: window blocks of a section cliff.
     CLIFF_WINDOW = 0x021F;
+
+    // L2 tissue of the Web: 0x031x (`levels.md` §5W.10)
+    /// Keyed by the L2 cell: the four steps of the tissue.
+    TISSUE = 0x0310;
+    /// Keyed by the L2 cell: the frame of a structure in a grain.
+    TISSUE_FRAME = 0x0311;
+    /// Keyed by the L2 cell: set-piece draws.
+    SET_PIECE = 0x0312;
+    /// Keyed by a skin tile: window lights, shared with the far band.
+    SKIN_WINDOWS = 0x0313;
+    /// Keyed by the L2 cell: path types and their modifiers.
+    PATHS = 0x0314;
+    /// Keyed by the L2 cell: thresholds on entrances and bored passages.
+    THRESHOLDS = 0x0315;
+    /// Keyed by the L2 cell: the modifiers of each path segment (MOD-01..09).
+    MODS = 0x0316;
 
     // L2 districts: 0x03xx
     MASS = 0x0301;

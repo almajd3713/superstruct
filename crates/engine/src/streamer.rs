@@ -67,6 +67,9 @@ impl ChunkSink for RendererSink<'_> {
     }
 }
 
+/// How many times the upload budget a single chunk may be and still be uploaded (alone).
+const OVERSIZE_FACTOR: u64 = 4;
+
 #[derive(Debug, Clone, Copy)]
 pub struct StreamerConfig {
     pub stream: StreamConfig,
@@ -365,17 +368,24 @@ impl Streamer {
         while i < self.ready.len() {
             let chunk = &self.ready[i];
             let bytes = chunk.upload_bytes();
-            if bytes > self.cfg.upload_budget_bytes {
+            let budget = self.cfg.upload_budget_bytes;
+            // A chunk over the frame's budget uploads alone, in a frame of its own, up to four
+            // times the budget (the Web L1 and L2 cells are heavy: PW.3.21c); beyond that it is
+            // dropped.
+            if bytes > budget * OVERSIZE_FACTOR {
                 tracing::error!(
-                    "chunk {:?} is {bytes} bytes, over the {} byte upload budget; dropped",
-                    chunk.id,
-                    self.cfg.upload_budget_bytes
+                    "chunk {:?} is {bytes} bytes, over {OVERSIZE_FACTOR} times the {budget} byte upload budget; dropped",
+                    chunk.id
                 );
                 self.stats.rejected += 1;
                 self.ready.remove(i);
                 continue;
             }
-            if used + bytes > self.cfg.upload_budget_bytes {
+            if bytes > budget && used > 0 {
+                i += 1;
+                continue;
+            }
+            if bytes <= budget && used + bytes > budget {
                 i += 1;
                 continue;
             }

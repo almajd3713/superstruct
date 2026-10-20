@@ -24,7 +24,7 @@ SOURCES = {
     "ideas": ROOT / "docs/proposals/the-web-ideas.md",
 }
 ID = r"[A-Z][A-Z0-9]{1,5}-\d{2}"
-ITEM = re.compile(r"^- \[( |x)\] \*\*(PW\.[0-9]+\.[0-9]+)\*\*(.*)$")
+ITEM = re.compile(r"^- \[( |x)\] \*\*(PW\.[0-9]+\.[0-9]+[a-z]?)\*\*(.*)$")
 
 
 def norm(text: str) -> str:

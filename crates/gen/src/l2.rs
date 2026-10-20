@@ -46,8 +46,8 @@ pub fn l2_cell_in(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutput
 
 /// The L2 output together with its masses, which L3 and the entrance rules need.
 pub fn l2_build(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> (CellOutput, Vec<MassInfo>) {
-    let (out, infos, _) = l2_build_stats(seed, cache, cell);
-    (out, infos)
+    // Version 11: the Web tissue. It has no masses for L3 until PW.4.
+    (crate::l2_web::l2_cell_web(seed, cache, cell), Vec::new())
 }
 
 /// [`l2_build`] with the statistics of the walking links.

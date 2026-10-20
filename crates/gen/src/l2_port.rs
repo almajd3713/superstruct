@@ -39,9 +39,15 @@ const SLOTS: u32 = 2;
 #[derive(Default)]
 pub struct L1Cache {
     cells: RefCell<HashMap<CellKey, Rc<CellOutput>>>,
+    /// The parents the Web tissue reads (`tissue::TissueCache`), for the same batch.
+    tissue: crate::tissue::TissueCache,
 }
 
 impl L1Cache {
+    pub fn tissue(&self) -> &crate::tissue::TissueCache {
+        &self.tissue
+    }
+
     pub fn get(&self, seed: WorldSeed, cell: CellKey) -> Rc<CellOutput> {
         Rc::clone(
             self.cells

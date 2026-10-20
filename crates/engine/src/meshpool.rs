@@ -16,7 +16,7 @@ use glam::Vec3;
 use worldgen::cell::Axis;
 use worldgen::cell::{CellKey, Level, floor_div_pow2};
 use worldgen::coord::{CoordError, WorldPos};
-use worldgen::l1::{l1_cell, l1_far_primitives};
+use worldgen::l1::l1_far_primitives;
 use worldgen::l2::l2_build;
 use worldgen::l2_port::L1Cache;
 use worldgen::l3::{Parent, block_is_active, l3_block_with, l3_parent};
@@ -287,6 +287,10 @@ fn far_digest(id: ChunkId, prims: &[Primitive]) -> Option<u64> {
     Some(h.finish())
 }
 
+/// Whether L3 blocks refine the envelopes of L2 structures. The v6 L3 does not fit the Web L2;
+/// the Web L3 is PW.4, and until then structures are solid blocks.
+pub const L3_ENABLED: bool = false;
+
 /// The mid band draws an L2 cell's exterior masses only: the `ENVELOPE` primitives, which are
 /// exactly what the finer levels refine, so the silhouette matches the full chunk's.
 pub fn mid_primitives(mut prims: Vec<Primitive>) -> Vec<Primitive> {
@@ -498,11 +502,15 @@ fn build(
                 modules = Some(expand(&rails));
             }
             let draw = mesh_prims_l2(&out.primitives, &out.ports, true);
-            // Interiors collide through their L3 blocks, not through the envelope.
+            // Interiors collide through their L3 blocks, not through the envelope. Until the Web
+            // L3 exists (PW.4) a structure is solid and collides as it is drawn.
             let mut solid = out.primitives;
-            solid.retain(|p| !p.flags.contains(PrimFlags::ENVELOPE));
+            if L3_ENABLED {
+                solid.retain(|p| !p.flags.contains(PrimFlags::ENVELOPE));
+            }
             (solid, Some(draw))
         }
+        (Level::L3, _) if !L3_ENABLED => (Vec::new(), None),
         (Level::L3, _) => {
             let parent_key = CellKey::new(Level::L2, id.key.coords.map(|v| floor_div_pow2(v, 3)));
             if parents.len() > 48 {
@@ -525,7 +533,8 @@ fn build(
         }
         (_, Detail::Far) => (l1_far_primitives(seed, id.key), None),
         _ => {
-            let mut prims = l1_cell(seed, id.key).primitives;
+            // The bored passages of its L2 cells are cut out of the solid (PW.3.21b).
+            let (mut prims, _) = worldgen::l2_web::l1_primitives_carved(seed, cache, id.key);
             // Static tram track: drawn with the L1 full chunk, never collidable.
             prims.extend(worldgen::tram::tram_pieces(seed, id.key));
             (prims, None)
@@ -789,7 +798,7 @@ mod tests {
                         else {
                             continue;
                         };
-                        let prims = l1_cell(seed, cell).primitives;
+                        let prims = worldgen::l1::l1_cell(seed, cell).primitives;
                         let reach = |p: &Primitive| {
                             let b = p.aabb();
                             match (dx, dz) {

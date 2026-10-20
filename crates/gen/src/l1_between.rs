@@ -258,6 +258,7 @@ pub(crate) fn begin(seed: WorldSeed, l1: I64Vec3) -> (Gen, Vec<Run>) {
         },
         out: Vec::new(),
         kind: None,
+        plate: None,
     };
     (g, runs(seed, home, &web, &st))
 }
@@ -271,6 +272,50 @@ pub(crate) struct Gen {
     pub(crate) out: Vec<WebPiece>,
     /// Replaces the `FeatureKind` of the pieces pushed while set.
     pub(crate) kind: Option<FeatureKind>,
+    /// Set while features are laid on a Tilted stack's surface in the stack's own frame.
+    pub(crate) plate: Option<Plate>,
+}
+
+/// The surface of a Tilted stack as a frame: features are placed in plane coordinates
+/// `(s, t)` (metres along the frame's x and z from the anchor, the L0 centre on the plane)
+/// and a height above the plane, so every cell derives the same feature and clips its part.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Plate {
+    pub(crate) frame: Frame,
+    /// The anchor, in quanta relative to the cell: an integer world point, so it is exact.
+    pub(crate) origin: QVec3,
+    pub(crate) surf: i64,
+    /// The window of plane coordinates around the cell that features are generated for.
+    pub(crate) s0: i64,
+    pub(crate) t0: i64,
+}
+
+/// Edge of the plane window of a cell: the cell's footprint turned by up to 45° and stretched
+/// by the steepest slope fits in 6800 m.
+pub(crate) const PLATE_SPAN: i64 = 6800;
+
+impl Plate {
+    /// The plate of the surface at `surf` (world metres of the unshifted surface) as seen from
+    /// the Tilted cell `g`.
+    #[allow(clippy::cast_possible_truncation)] // metres of one L0 cell
+    pub(crate) fn new(g: &Gen, surf: i64) -> Option<Self> {
+        let (tilt, yaw) = g.tilt?;
+        let frame = Frame::table(yaw, tilt);
+        let [ex, _, ez] = frame.axes();
+        let half = L0_M / 2;
+        let (ax, az) = (g.home.x * L0_M + half, g.home.z * L0_M + half);
+        let (cs, ct) = (g.origin.x + L1_M / 2, g.origin.z + L1_M / 2);
+        let d = glam::DVec3::new((cs - ax) as f64, g.shift(cs, ct) as f64, (ct - az) as f64);
+        let (sc, tc) = (d.dot(ex).round() as i64, d.dot(ez).round() as i64);
+        let q = |v: i64| (v * Q) as i32;
+        Some(Self {
+            frame,
+            origin: QVec3::new(q(ax - g.origin.x), q(surf - g.origin.y), q(az - g.origin.z)),
+            surf,
+            s0: sc - PLATE_SPAN / 2,
+            t0: tc - PLATE_SPAN / 2,
+        })
+    }
 }
 
 type V3 = [i64; 3];
@@ -278,11 +323,22 @@ type V3 = [i64; 3];
 impl Gen {
     /// Cell range across the stack: `[s0, s0 + 4096)` and `[t0, t0 + 4096)`.
     pub(crate) fn s0(&self) -> i64 {
-        comp(self.origin, self.map.s)
+        self.plate
+            .map_or_else(|| comp(self.origin, self.map.s), |p| p.s0)
     }
 
     pub(crate) fn t0(&self) -> i64 {
-        comp(self.origin, self.map.t)
+        self.plate
+            .map_or_else(|| comp(self.origin, self.map.t), |p| p.t0)
+    }
+
+    /// Edge of the footprint that features are generated for: the cell, or the plane window.
+    pub(crate) fn span(&self) -> i64 {
+        if self.plate.is_some() {
+            PLATE_SPAN
+        } else {
+            L1_M
+        }
     }
 
     pub(crate) fn a0(&self) -> i64 {
@@ -348,6 +404,22 @@ impl Gen {
         material: MaterialId,
         flags: PrimFlags,
     ) {
+        if let Some(p) = self.plate {
+            let q = |v: i64| (v * Q) as i32;
+            let ends = |k: usize, o: i64| (q(lo[k].min(hi[k]) - o), q(lo[k].max(hi[k]) - o));
+            let (s0, s1) = ends(0, 0);
+            let (t0, t1) = ends(1, 0);
+            let (a0, a1) = ends(2, p.surf);
+            let local = QAabb::new(QVec3::new(s0, a0, t0), QVec3::new(s1, a1, t1));
+            let shape = Shape::oriented(
+                p.frame,
+                p.origin,
+                LocalShape::Box { aabb: local },
+                cell_clip(),
+            );
+            self.push(tag, shape, material, FeatureKind::TETHER, flags);
+            return;
+        }
         let (a, b) = (self.world(lo), self.world(hi));
         let (lo, hi) = (a.min(b), a.max(b));
         let mut min = [0i32; 3];
@@ -389,6 +461,22 @@ impl Gen {
         flags: PrimFlags,
     ) {
         if end <= start || radius <= 0 {
+            return;
+        }
+        if let Some(p) = self.plate {
+            let q = |v: i64| (v * Q) as i32;
+            let mut c = centre;
+            c[k] = start;
+            let base = QVec3::new(q(c[0]), q(c[2] - p.surf), q(c[1]));
+            let local_axis = [Axis::X, Axis::Z, Axis::Y][k];
+            let shape = Shape::cylinder(local_axis, base, q(end - start), q(radius));
+            let kind = if matches!(material, MaterialId::PIPE) {
+                FeatureKind::CABLE
+            } else {
+                FeatureKind::TETHER
+            };
+            let shape = Shape::oriented(p.frame, p.origin, local_of(shape), cell_clip());
+            self.push(tag, shape, material, kind, flags);
             return;
         }
         let axes = self.map.axes();
@@ -489,8 +577,9 @@ impl Gen {
     /// Lattice cells `(p, q)` of pitch `pitch` that overlap the cell's footprint.
     pub(crate) fn lattice(&self, pitch: i64) -> Vec<(i64, i64)> {
         let (s0, t0) = (self.s0(), self.t0());
-        let (p0, p1) = (s0.div_euclid(pitch), (s0 + L1_M - 1).div_euclid(pitch));
-        let (q0, q1) = (t0.div_euclid(pitch), (t0 + L1_M - 1).div_euclid(pitch));
+        let span = self.span();
+        let (p0, p1) = (s0.div_euclid(pitch), (s0 + span - 1).div_euclid(pitch));
+        let (q0, q1) = (t0.div_euclid(pitch), (t0 + span - 1).div_euclid(pitch));
         let mut v = Vec::new();
         for p in p0..=p1 {
             for q in q0..=q1 {
