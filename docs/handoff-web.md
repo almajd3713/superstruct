@@ -59,7 +59,7 @@ The user wants wild, varied ideas, not literal readings. Their examples, and the
 - `SUPERSTRUCT_AUTOSHOT=settle` shoots once streaming has been idle for 60 frames.
 - `SUPERSTRUCT_SHOT_NAME=<name>` fixes the output name.
 - All of these are forwarded by `scripts/win.sh` and listed in `docs/controls.md`.
-- **CLAUDE.md §7 still lists the old environment switches only.** It changes only with the user's agreement, so ask before adding the new ones.
+- CLAUDE.md §7 lists the new switches (the user agreed, 2026-10-20).
 - Check: run `SS_TARGET=ss-target-claude SUPERSTRUCT_SHOT=out/replay-a.toml SUPERSTRUCT_AUTOSHOT=settle SUPERSTRUCT_SHOT_NAME=replay-b scripts/win.sh run --release`, then compare `out/replay-a.png` with `out/replay-b.png`. They differ in 3 scene pixels.
 - One unexplained difference: the altitude readout appeared in run A and not in run B. Look at it if HUD state matters for comparisons. The simplest fix is to hide the HUD in autoshots.
 - `docs/playtests/viewpoints/2026-10-20/*.toml` holds the 17 shots that had the overlay on. Their yaw and pitch are 0, because the old shots did not record them. Ask the user to re-take the important ones with F12.
