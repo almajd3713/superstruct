@@ -38,10 +38,13 @@ pub mod l2_vista;
 pub mod l2_walk;
 pub mod l2_web;
 pub mod l3;
+pub mod l3_arch;
+pub mod l3_dress;
 pub mod l3_plan;
+pub mod l3_rooms;
 pub mod l3_solver;
 pub mod l3_tiles;
-pub mod l3_validate;
+pub mod l3_web;
 pub mod l4;
 pub mod locals;
 pub mod modifiers;
@@ -76,4 +79,4 @@ mod zfight;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 16;
+pub const GEN_VERSION: u32 = 17;

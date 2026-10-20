@@ -1684,6 +1684,17 @@ fn dir_between(lat: &Lattice, from: usize, to: usize) -> Dir6 {
 impl Structure {
     /// The structure's pieces in cell-local quanta.
     pub fn primitives(&self, lat: &Lattice) -> Vec<Primitive> {
+        self.primitives_with(lat, &|_| None)
+    }
+
+    /// [`Structure::primitives`] where `interior(part)` is the entrances of a part that L3
+    /// fills (§6W): such a part is a hollow shell with its doors and hatches cut, flagged
+    /// `INTERIOR`.
+    pub fn primitives_with(
+        &self,
+        lat: &Lattice,
+        interior: &dyn Fn(usize) -> Option<Vec<crate::l3_plan::Entrance>>,
+    ) -> Vec<Primitive> {
         let mut e = Emitter::new(lat);
         let flags = PrimFlags::ENVELOPE | PrimFlags::FAR_VISIBLE;
         let material = if self.dark {
@@ -1691,8 +1702,17 @@ impl Structure {
         } else {
             MaterialId::CONCRETE
         };
-        for b in &self.parts {
-            e.slot_box(b, material, FeatureKind::MASS, flags);
+        for (i, b) in self.parts.iter().enumerate() {
+            match interior(i) {
+                Some(ents) => {
+                    let cuts: Vec<_> = ents
+                        .iter()
+                        .map(|en| crate::l3_web::entrance_cut(en, b))
+                        .collect();
+                    e.interior_shell(b, material, flags | PrimFlags::INTERIOR, &cuts);
+                }
+                None => e.slot_box(b, material, FeatureKind::MASS, flags),
+            }
         }
         for b in &self.inner {
             e.slot_box(b, MaterialId::METAL, FeatureKind::MASS, PrimFlags::NONE);
@@ -1739,6 +1759,30 @@ impl Structure {
         });
         e.out
     }
+}
+
+/// `a` minus `c`: up to six boxes (lattice-frame metres).
+fn subtract_box(a: ([f64; 3], [f64; 3]), c: ([f64; 3], [f64; 3])) -> Vec<([f64; 3], [f64; 3])> {
+    let (mut lo, mut hi) = a;
+    if (0..3).any(|k| c.0[k] >= hi[k] || c.1[k] <= lo[k]) {
+        return vec![a];
+    }
+    let mut out = Vec::new();
+    for k in 0..3 {
+        if c.0[k] > lo[k] {
+            let mut h = hi;
+            h[k] = c.0[k];
+            out.push((lo, h));
+            lo[k] = c.0[k];
+        }
+        if c.1[k] < hi[k] {
+            let mut l = lo;
+            l[k] = c.1[k];
+            out.push((l, hi));
+            hi[k] = c.1[k];
+        }
+    }
+    out
 }
 
 /// Turns slot geometry into cell-local primitives.
@@ -1814,6 +1858,46 @@ impl<'a> Emitter<'a> {
             kind,
             flags,
         });
+    }
+
+    /// A part as a hollow shell 0.5 m thick (six slabs) with `cuts` (lattice-frame boxes in
+    /// metres) taken out of it.
+    fn interior_shell(
+        &mut self,
+        b: &SlotBox,
+        material: MaterialId,
+        flags: PrimFlags,
+        cuts: &[([f64; 3], [f64; 3])],
+    ) {
+        const T: f64 = 0.5;
+        let (lo, hi) = (self.corner(b.lo), self.corner(b.hi));
+        let slab = |l: [f64; 3], h: [f64; 3]| (l, h);
+        let slabs = [
+            slab(lo, [lo[0] + T, hi[1], hi[2]]),
+            slab([hi[0] - T, lo[1], lo[2]], hi),
+            slab([lo[0] + T, lo[1], lo[2]], [hi[0] - T, hi[1], lo[2] + T]),
+            slab([lo[0] + T, lo[1], hi[2] - T], [hi[0] - T, hi[1], hi[2]]),
+            slab(
+                [lo[0] + T, lo[1], lo[2] + T],
+                [hi[0] - T, lo[1] + T, hi[2] - T],
+            ),
+            slab(
+                [lo[0] + T, hi[1] - T, lo[2] + T],
+                [hi[0] - T, hi[1], hi[2] - T],
+            ),
+        ];
+        for s in slabs {
+            let mut pieces = vec![s];
+            for c in cuts {
+                pieces = pieces
+                    .into_iter()
+                    .flat_map(|p| subtract_box(p, *c))
+                    .collect();
+            }
+            for (l, h) in pieces {
+                self.frame_box(l, h, material, FeatureKind::MASS, flags);
+            }
+        }
     }
 
     fn slot_box(&mut self, b: &SlotBox, material: MaterialId, kind: FeatureKind, flags: PrimFlags) {

@@ -13,6 +13,7 @@
 
 use crate::cell::CellKey;
 use crate::hash::hash;
+use crate::l3_arch::Archetype;
 use crate::prim::{Q, QAabb};
 use crate::rng::Rng;
 use crate::salt;
@@ -24,16 +25,34 @@ pub const STOREY: Q = 64;
 /// Directions in side order: -z, +x, +z, -x.
 pub const DELTA: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
-/// A doorway in a mass face (`docs/spec/levels.md` §6.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Doorway {
-    /// The face it is in: 0 = -z, 1 = +x, 2 = +z, 3 = -x.
+/// What kind of way in an entrance is (`levels.md` §6W.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EntranceKind {
+    /// A doorway in a side wall, at any storey.
+    Door,
+    /// An opening in the roof of the top storey, to a ladder well.
+    RoofHatch,
+    /// An opening in the floor of the bottom storey.
+    FloorHatch,
+    /// A ladder port: a hatch whose way up or down is a ladder well.
+    Ladder,
+}
+
+/// An entrance of a mass, on the L2 cell's lattice: a vestibule on one or two columns of one
+/// storey.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entrance {
+    pub kind: EntranceKind,
+    /// The face a door is in: 0 = -z, 1 = +x, 2 = +z, 3 = -x (0 for hatches).
     pub side: u8,
-    /// Along the face (z for x faces, x for z faces): 4 m wide inside one IN column.
+    /// A door's range along its face (z for x faces, x for z faces), 4 m wide; for hatches the
+    /// 4 m by 4 m opening's x range.
     pub u0: Q,
     pub u1: Q,
-    /// Floor height outside, the mass bottom.
-    pub floor: Q,
+    /// The vestibule columns: the columns the opening overlaps, one or two.
+    pub cols: Vec<(i32, i32)>,
+    /// The storey of the vestibule (the lattice's, not the mass's).
+    pub t: i32,
 }
 
 /// The IN columns of a mass: a rectangle `[cx0, cx1) × [cz0, cz1)` of 8 m columns, world-aligned
@@ -93,14 +112,6 @@ impl Cols {
     }
 }
 
-/// The column of `cols` behind a doorway: the IN column of the facing row whose range holds it.
-pub fn entrance_column(cols: &Cols, door: &Doorway) -> Option<(i32, i32)> {
-    cols.row(door.side).into_iter().find(|&(cx, cz)| {
-        let u = if door.side.is_multiple_of(2) { cx } else { cz };
-        u * COL <= door.u0 && door.u1 <= (u + 1) * COL
-    })
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanClass {
     /// No entrance, or no whole column: every `Core` slot is solid.
@@ -110,7 +121,7 @@ pub enum PlanClass {
     Full,
 }
 
-/// The spine: a spiral stair through every storey of one column, with its door towards `d`.
+/// A spine: a spiral stair through every storey of one column, with its door towards `d`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Spine {
     pub col: (i32, i32),
@@ -128,9 +139,10 @@ pub struct MassPlan {
     pub t0: i32,
     pub t1: i32,
     pub class: PlanClass,
-    pub doorway: Option<Doorway>,
-    pub entrance_col: Option<(i32, i32)>,
-    pub spine: Option<Spine>,
+    pub entrances: Vec<Entrance>,
+    pub archetype: Archetype,
+    /// One to four spines, in draw order.
+    pub spines: Vec<Spine>,
     /// Per storey (from `t0`) and column: bit `k` set when the skeleton has an edge to the
     /// neighbour in direction `k`.
     skeleton: Vec<Vec<u8>>,
@@ -148,13 +160,14 @@ fn permutation(mut n: u32) -> [usize; 4] {
 }
 
 impl MassPlan {
-    /// The plan of mass `index` (in `Envelope` order) of the L2 cell `parent`.
+    /// The plan of mass `index` of the L2 cell `parent`, with all its entrances (§6W.3).
     pub fn new(
         seed: WorldSeed,
         parent: CellKey,
         index: usize,
         aabb: QAabb,
-        doorway: Option<Doorway>,
+        entrances: Vec<Entrance>,
+        archetype: Archetype,
     ) -> Self {
         let cols = Cols::of(&aabb);
         let (t0, t1) = (aabb.min.y.div_euclid(STOREY), aabb.max.y.div_euclid(STOREY));
@@ -164,18 +177,20 @@ impl MassPlan {
             t0,
             t1,
             class: PlanClass::Sealed,
-            doorway,
-            entrance_col: None,
-            spine: None,
+            entrances: Vec::new(),
+            archetype,
+            spines: Vec::new(),
             skeleton: Vec::new(),
         };
-        let Some(door) = doorway else {
+        // An entrance whose vestibule is not inside the columns and storeys does not count.
+        let entrances: Vec<Entrance> = entrances
+            .into_iter()
+            .filter(|e| (t0..t1).contains(&e.t) && e.cols.iter().all(|&c| cols.contains(c)))
+            .collect();
+        if entrances.is_empty() {
             return plan;
-        };
-        let Some(ce) = entrance_column(&cols, &door) else {
-            return plan;
-        };
-        plan.entrance_col = Some(ce);
+        }
+        plan.entrances = entrances;
         if cols.count() == 1 {
             plan.class = PlanClass::VestibuleOnly;
             return plan;
@@ -192,7 +207,7 @@ impl MassPlan {
             s_i = seeds.next_u64();
         }
         let mut rng = Rng::new(s_i);
-        plan.build_full(ce, &mut rng);
+        plan.build_full(&mut rng);
         plan
     }
 
@@ -201,56 +216,131 @@ impl MassPlan {
         self.cols.contains(n).then_some(n)
     }
 
-    /// IN columns whose removal leaves the rest 4-connected, other than `ce`.
-    fn spine_candidates(&self, ce: (i32, i32)) -> Vec<(i32, i32)> {
-        let c = &self.cols;
-        let mut out = Vec::new();
-        for i in 0..c.count() as usize {
-            let col = c.at(i);
-            if col == ce {
-                continue;
-            }
-            let strip = c.nx() == 1 || c.nz() == 1;
-            let end = if c.nx() == 1 {
-                col.1 == c.cz0 || col.1 == c.cz1 - 1
-            } else {
-                col.0 == c.cx0 || col.0 == c.cx1 - 1
-            };
-            if !strip || end {
-                out.push(col);
+    /// Whether the columns of IN that are not `removed` form one 4-connected set.
+    fn connected_without(&self, removed: &[(i32, i32)]) -> bool {
+        let n = self.cols.count() as usize;
+        let gone: Vec<bool> = (0..n).map(|i| removed.contains(&self.cols.at(i))).collect();
+        let Some(start) = (0..n).find(|&i| !gone[i]) else {
+            return true;
+        };
+        let mut seen = vec![false; n];
+        seen[start] = true;
+        let mut stack = vec![self.cols.at(start)];
+        let mut count = 1;
+        while let Some(c) = stack.pop() {
+            for k in 0..4 {
+                let Some(nb) = self.neighbour(c, k) else {
+                    continue;
+                };
+                let i = self.cols.index(nb);
+                if !gone[i] && !seen[i] {
+                    seen[i] = true;
+                    count += 1;
+                    stack.push(nb);
+                }
             }
         }
-        out
+        count == gone.iter().filter(|&&g| !g).count()
     }
 
-    fn build_full(&mut self, ce: (i32, i32), rng: &mut Rng) {
-        let cands = self.spine_candidates(ce);
-        let s = cands[rng.below(cands.len() as u64) as usize];
-        let dirs: Vec<usize> = (0..4).filter(|&k| self.neighbour(s, k).is_some()).collect();
-        let rot = dirs[rng.below(dirs.len() as u64) as usize];
-        let Some(d) = self.neighbour(s, rot) else {
+    fn is_vestibule_col(&self, c: (i32, i32)) -> bool {
+        self.entrances.iter().any(|e| e.cols.contains(&c))
+    }
+
+    #[allow(clippy::too_many_lines)] // spines, then a tree per storey
+    fn build_full(&mut self, rng: &mut Rng) {
+        // Spines: one to four, each a column that is not a vestibule column and whose removal,
+        // with the earlier spines, keeps the rest connected.
+        let want = ((1 + self.cols.count() / 16) as usize + self.archetype.extra_spines()).min(4);
+        let mut taken: Vec<(i32, i32)> = Vec::new();
+        for _ in 0..want {
+            let cands: Vec<(i32, i32)> = (0..self.cols.count() as usize)
+                .map(|i| self.cols.at(i))
+                .filter(|&c| !self.is_vestibule_col(c) && !taken.contains(&c))
+                .filter(|&c| {
+                    let mut gone = taken.clone();
+                    gone.push(c);
+                    self.connected_without(&gone)
+                })
+                .collect();
+            if cands.is_empty() {
+                break;
+            }
+            let s = cands[rng.below(cands.len() as u64) as usize];
+            taken.push(s);
+            let dirs: Vec<usize> = (0..4)
+                .filter(|&k| self.neighbour(s, k).is_some_and(|n| !taken.contains(&n)))
+                .collect();
+            if dirs.is_empty() {
+                taken.pop();
+                continue;
+            }
+            let rot = dirs[rng.below(dirs.len() as u64) as usize];
+            let d = self.neighbour(s, rot).unwrap_or(s);
+            self.spines.push(Spine {
+                col: s,
+                rot: rot as u8,
+                d,
+            });
+        }
+        // A door neighbour that a later spine took is moved to the nearest column that is not
+        // a spine, so every spine has a door onto the tree.
+        let cols_of_spines: Vec<(i32, i32)> = self.spines.iter().map(|s| s.col).collect();
+        for sp in &mut self.spines {
+            if cols_of_spines.contains(&sp.d) {
+                for (k, delta) in DELTA.iter().enumerate() {
+                    let n = (sp.col.0 + delta.0, sp.col.1 + delta.1);
+                    if self.cols.contains(n) && !cols_of_spines.contains(&n) {
+                        sp.rot = k as u8;
+                        sp.d = n;
+                        break;
+                    }
+                }
+            }
+        }
+        self.spines.retain(|s| !cols_of_spines.contains(&s.d));
+        let Some(first) = self.spines.first().copied() else {
+            // No spine can stand (a one-column-wide mass of vestibules): the vestibules are
+            // the skeleton, as in a vestibule-only plan.
+            self.class = PlanClass::VestibuleOnly;
             return;
         };
-        self.spine = Some(Spine {
-            col: s,
-            rot: rot as u8,
-            d,
-        });
-        let targets = self.static_targets(s, d);
+        let targets = self.static_targets();
         let n = self.cols.count() as usize;
         let storeys = (self.t1 - self.t0) as usize;
+        let spine_cols: Vec<(i32, i32)> = self.spines.iter().map(|s| s.col).collect();
         let mut sk = Vec::with_capacity(storeys);
         for t in 0..storeys {
             let perm = permutation(rng.below(24) as u32);
             let mut mask = vec![0u8; n];
-            // BFS from d over IN minus the spine, expanding neighbours in the drawn order.
+            // BFS from the first spine's door over IN minus the spines, expanding neighbours
+            // in the drawn order.
             let mut parent: Vec<Option<(i32, i32)>> = vec![None; n];
             let mut seen = vec![false; n];
+            for c in &spine_cols {
+                seen[self.cols.index(*c)] = true;
+            }
             let mut queue = std::collections::VecDeque::new();
-            seen[self.cols.index(d)] = true;
-            seen[self.cols.index(s)] = true;
-            queue.push_back(d);
-            while let Some(c) = queue.pop_front() {
+            seen[self.cols.index(first.d)] = true;
+            queue.push_back(first.d);
+            // Radial and twisted plans grow along spokes first: the row and column through the
+            // spine, or the one ray that turns a quarter every storey, then the rest.
+            let spoke = |c: (i32, i32)| match self.archetype {
+                Archetype::Radial => c.0 == first.col.0 || c.1 == first.col.1,
+                Archetype::Twisted => {
+                    let (dx, dz) = (c.0 - first.col.0, c.1 - first.col.1);
+                    match t % 4 {
+                        0 => dz == 0 && dx >= 0,
+                        1 => dx == 0 && dz >= 0,
+                        2 => dz == 0 && dx <= 0,
+                        _ => dx == 0 && dz <= 0,
+                    }
+                }
+                _ => false,
+            };
+            let spokes = matches!(self.archetype, Archetype::Radial | Archetype::Twisted);
+            let mut later = std::collections::VecDeque::new();
+            while let Some(c) = queue.pop_front().or_else(|| later.pop_front()) {
                 for &k in &perm {
                     let Some(nb) = self.neighbour(c, k) else {
                         continue;
@@ -259,13 +349,19 @@ impl MassPlan {
                     if !seen[i] {
                         seen[i] = true;
                         parent[i] = Some(c);
-                        queue.push_back(nb);
+                        if !spokes || spoke(nb) {
+                            queue.push_back(nb);
+                        } else {
+                            later.push_back(nb);
+                        }
                     }
                 }
             }
-            let mut want = targets.clone();
-            if t == 0 {
-                want.push(ce);
+            let mut want: Vec<(i32, i32)> = targets.clone();
+            want.extend(self.spines.iter().map(|s| s.d));
+            let here = self.t0 + t as i32;
+            for e in self.entrances.iter().filter(|e| e.t == here) {
+                want.extend(e.cols.iter().copied());
             }
             for target in want {
                 let mut at = target;
@@ -274,8 +370,10 @@ impl MassPlan {
                     at = p;
                 }
             }
-            // The spine's door edge at every storey.
-            self.link(&mut mask, s, d);
+            // Every spine's door edge at every storey.
+            for sp in &self.spines {
+                self.link(&mut mask, sp.col, sp.d);
+            }
             sk.push(mask);
         }
         self.skeleton = sk;
@@ -290,14 +388,20 @@ impl MassPlan {
         }
     }
 
-    /// Per block column range and component of IN∖{s}, the column nearest `d`.
-    fn static_targets(&self, s: (i32, i32), d: (i32, i32)) -> Vec<(i32, i32)> {
+    /// Per block column range and component of IN minus the spines, the column nearest the
+    /// first spine's door.
+    fn static_targets(&self) -> Vec<(i32, i32)> {
         let c = &self.cols;
+        let d = self.spines[0].d;
+        let spine_cols: Vec<(i32, i32)> = self.spines.iter().map(|s| s.col).collect();
         let mut targets = vec![d];
         for bx in c.cx0.div_euclid(8)..=(c.cx1 - 1).div_euclid(8) {
             for bz in c.cz0.div_euclid(8)..=(c.cz1 - 1).div_euclid(8) {
                 let inside = |p: (i32, i32)| {
-                    c.contains(p) && p != s && p.0.div_euclid(8) == bx && p.1.div_euclid(8) == bz
+                    c.contains(p)
+                        && !spine_cols.contains(&p)
+                        && p.0.div_euclid(8) == bx
+                        && p.1.div_euclid(8) == bz
                 };
                 let mut done: Vec<(i32, i32)> = Vec::new();
                 for z in c.cz0.max(bz * 8)..c.cz1.min(bz * 8 + 8) {
@@ -335,19 +439,30 @@ impl MassPlan {
         targets
     }
 
+    /// The entrances whose vestibule is the slot `(col, storey)`.
+    pub fn entrances_at(&self, col: (i32, i32), storey: i32) -> impl Iterator<Item = &Entrance> {
+        self.entrances
+            .iter()
+            .filter(move |e| e.t == storey && e.cols.contains(&col))
+    }
+
+    pub fn is_vestibule(&self, col: (i32, i32), storey: i32) -> bool {
+        self.entrances_at(col, storey).next().is_some()
+    }
+
+    pub fn spine_at(&self, col: (i32, i32)) -> Option<&Spine> {
+        self.spines.iter().find(|s| s.col == col)
+    }
+
     /// Whether the slot is part of the skeleton: spine, vestibule or a tree slot.
     pub fn in_skeleton(&self, col: (i32, i32), storey: i32) -> bool {
         match self.class {
             PlanClass::Sealed => false,
-            PlanClass::VestibuleOnly => storey == self.t0 && Some(col) == self.entrance_col,
+            PlanClass::VestibuleOnly => self.is_vestibule(col, storey),
             PlanClass::Full => {
-                if Some(col) == self.spine.map(|s| s.col) {
-                    return true;
-                }
-                if storey == self.t0 && Some(col) == self.entrance_col {
-                    return true;
-                }
-                self.edges(col, storey) != 0
+                self.spine_at(col).is_some()
+                    || self.is_vestibule(col, storey)
+                    || self.edges(col, storey) != 0
             }
         }
     }
@@ -362,159 +477,5 @@ impl MassPlan {
             return 0;
         };
         row[self.cols.index(col)]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use glam::I64Vec3;
-
-    use super::*;
-    use crate::cell::Level;
-    use crate::prim::QVec3;
-
-    fn mass(x: (Q, Q), y: (Q, Q), z: (Q, Q)) -> QAabb {
-        QAabb::new(QVec3::new(x.0, y.0, z.0), QVec3::new(x.1, y.1, z.1))
-    }
-
-    fn door_at(aabb: &QAabb, side: u8) -> Doorway {
-        let cols = Cols::of(aabb);
-        let col = cols.row(side)[0];
-        let u = if side.is_multiple_of(2) { col.0 } else { col.1 };
-        Doorway {
-            side,
-            u0: u * COL + 32,
-            u1: u * COL + 96,
-            floor: aabb.min.y,
-        }
-    }
-
-    #[test]
-    fn columns_are_the_whole_aligned_columns_inside_the_footprint() {
-        let a = mass(
-            (1024 + 64, 1024 + 64 + 64 * 20),
-            (0, 640),
-            (2048, 2048 + 64 * 9),
-        );
-        let c = Cols::of(&a);
-        // x: 1088..2368 holds columns 9..18 (1152..2304); z: 2048..2624 holds 16..20.
-        assert_eq!((c.cx0, c.cx1, c.cz0, c.cz1), (9, 18, 16, 20));
-        let thin = mass((100, 200), (0, 256), (0, 1024));
-        assert_eq!(Cols::of(&thin).count(), 0);
-    }
-
-    #[test]
-    fn permutations_cover_all_24_orders() {
-        let mut seen = std::collections::BTreeSet::new();
-        for n in 0..24 {
-            let p = permutation(n);
-            let mut s = p;
-            s.sort_unstable();
-            assert_eq!(s, [0, 1, 2, 3]);
-            seen.insert(p);
-        }
-        assert_eq!(seen.len(), 24);
-        assert_eq!(permutation(0), [0, 1, 2, 3]);
-        assert_eq!(permutation(23), [3, 2, 1, 0]);
-    }
-
-    #[test]
-    fn plan_classes() {
-        let seed = WorldSeed(5);
-        let parent = CellKey::new(Level::L2, I64Vec3::new(1, 2, 3));
-        let big = mass(
-            (1024, 1024 + 128 * 6),
-            (640, 640 + 64 * 8),
-            (1024, 1024 + 128 * 5),
-        );
-        assert_eq!(
-            MassPlan::new(seed, parent, 0, big, None).class,
-            PlanClass::Sealed
-        );
-        let p = MassPlan::new(seed, parent, 0, big, Some(door_at(&big, 0)));
-        assert_eq!(p.class, PlanClass::Full);
-        let single = mass((1024, 1024 + 128), (640, 640 + 64 * 4), (1024, 1024 + 128));
-        let p = MassPlan::new(seed, parent, 0, single, Some(door_at(&single, 2)));
-        assert_eq!(p.class, PlanClass::VestibuleOnly);
-        assert!(p.in_skeleton((8, 8), 10) && !p.in_skeleton((8, 8), 11));
-    }
-
-    #[test]
-    fn skeleton_is_connected_on_every_storey_and_reaches_every_block_part() {
-        let seed = WorldSeed(11);
-        let parent = CellKey::new(Level::L2, I64Vec3::new(4, 1, -2));
-        for (k, (nx, nz, side)) in [(6, 5, 0u8), (16, 9, 1), (1, 7, 3), (2, 2, 2), (9, 1, 0)]
-            .into_iter()
-            .enumerate()
-        {
-            let a = mass(
-                (1024, 1024 + 128 * nx),
-                (640, 640 + 64 * 6),
-                (3 * 128, 3 * 128 + 128 * nz),
-            );
-            let door = door_at(&a, side);
-            let p = MassPlan::new(seed, parent, k, a, Some(door));
-            if p.class != PlanClass::Full {
-                continue;
-            }
-            let s = p.spine.unwrap();
-            for t in p.t0..p.t1 {
-                // Flood fill over skeleton edges from d.
-                let mut seen = vec![s.d];
-                let mut i = 0;
-                while i < seen.len() {
-                    let c = seen[i];
-                    i += 1;
-                    for (dir, delta) in DELTA.iter().enumerate() {
-                        if p.edges(c, t) >> dir & 1 == 1 {
-                            let n = (c.0 + delta.0, c.1 + delta.1);
-                            if !seen.contains(&n) {
-                                seen.push(n);
-                            }
-                        }
-                    }
-                }
-                assert!(seen.contains(&s.col), "door edge missing at storey {t}");
-                // Every slot with an edge is in the connected skeleton.
-                for z in p.cols.cz0..p.cols.cz1 {
-                    for x in p.cols.cx0..p.cols.cx1 {
-                        if p.edges((x, z), t) != 0 {
-                            assert!(
-                                seen.contains(&(x, z)),
-                                "stray skeleton slot at {x},{z} storey {t}"
-                            );
-                        }
-                    }
-                }
-                if t == p.t0 {
-                    assert!(seen.contains(&p.entrance_col.unwrap()));
-                }
-                // Every block column range keeps a skeleton slot.
-                for bx in p.cols.cx0.div_euclid(8)..=(p.cols.cx1 - 1).div_euclid(8) {
-                    for bz in p.cols.cz0.div_euclid(8)..=(p.cols.cz1 - 1).div_euclid(8) {
-                        let any = seen
-                            .iter()
-                            .chain(std::iter::once(&s.col))
-                            .any(|c| c.0.div_euclid(8) == bx && c.1.div_euclid(8) == bz);
-                        assert!(
-                            any,
-                            "block range ({bx}, {bz}) has no skeleton slot at storey {t}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn plans_are_pure() {
-        let seed = WorldSeed(3);
-        let parent = CellKey::new(Level::L2, I64Vec3::new(0, 0, 0));
-        let a = mass((1024, 1024 + 128 * 7), (0, 64 * 9), (1024, 1024 + 128 * 7));
-        let d = door_at(&a, 1);
-        let p1 = MassPlan::new(seed, parent, 2, a, Some(d));
-        let p2 = MassPlan::new(seed, parent, 2, a, Some(d));
-        assert_eq!(p1.spine, p2.spine);
-        assert_eq!(p1.skeleton, p2.skeleton);
     }
 }

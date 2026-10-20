@@ -23,15 +23,15 @@ use glam::I64Vec3;
 
 use crate::cell::{Axis, CellKey, FaceKey, Level, floor_div_pow2, floor_mod_pow2};
 use crate::hash::hash;
-use crate::l2::{CELL as L2_CELL, MassInfo, l2_build};
-use crate::l2_entrance::entrances;
+use crate::l2::CELL as L2_CELL;
 use crate::l2_port::L1Cache;
-use crate::l3_plan::{COL, DELTA, Doorway, MassPlan, PlanClass};
-use crate::l3_solver::{Dims, Domain, Scratch, domain_of, solve_active, tile_of};
+use crate::l3_plan::{COL, DELTA, EntranceKind, MassPlan, PlanClass};
+use crate::l3_solver::{Dims, Domain, Scratch, domain_of, solve_weighted, tile_of};
 use crate::l3_tiles::{
     self as tiles, D, F, Family, N_TILES, O, ROOM0, SOLID, SPIRAL_BASE0, SPIRAL_TOP0, SPIRAL0,
     STOREY, W,
 };
+pub use crate::l3_web::web_parent as l3_parent;
 use crate::port::{Port, PortKind};
 use crate::prim::{
     CellMeta, CellOutput, ChildConstraint, FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb,
@@ -89,6 +89,10 @@ pub struct PipeRun {
 pub struct L3Layout {
     pub slots: Vec<SlotInfo>,
     pub pipes: Vec<PipeRun>,
+    /// Corridor kinds drawn in the block (`l3_dress::CorridorKind` numbers) with counts.
+    pub corridors: Vec<(u8, u16)>,
+    /// Set-piece rooms drawn in the block (`l3_rooms::RoomKind` numbers) with counts.
+    pub rooms: Vec<(u8, u16)>,
 }
 
 /// `attempt` is 0 to `ATTEMPTS - 1`, or `ATTEMPTS` when the fallback was used.
@@ -130,6 +134,15 @@ pub struct Parent {
 }
 
 impl Parent {
+    /// The parent of an L2 cell from its mass plans and the zones that reach into it.
+    pub fn new(plans: Vec<MassPlan>, zones: Vec<(QAabb, ZoneKind)>) -> Self {
+        Self { plans, zones }
+    }
+
+    pub fn plans(&self) -> &[MassPlan] {
+        &self.plans
+    }
+
     fn classify(&self, cx: i32, t: i32, cz: i32) -> Cls {
         if !(0..64).contains(&cx) || !(0..64).contains(&cz) || !(0..128).contains(&t) {
             return Cls::Out;
@@ -160,14 +173,14 @@ impl Parent {
         match p.class {
             PlanClass::Sealed => Fixed::Solid,
             PlanClass::VestibuleOnly => {
-                if t == p.t0 && Some(col) == p.entrance_col {
+                if p.is_vestibule(col, t) {
                     Fixed::Vestibule
                 } else {
                     Fixed::Solid
                 }
             }
             PlanClass::Full => {
-                if let Some(s) = p.spine.filter(|s| s.col == col) {
+                if let Some(s) = p.spine_at(col) {
                     let base = if t == p.t0 {
                         SPIRAL_BASE0
                     } else if t == p.t1 - 1 {
@@ -176,7 +189,7 @@ impl Parent {
                         SPIRAL0
                     };
                     Fixed::Tile(base + usize::from(s.rot))
-                } else if t == p.t0 && Some(col) == p.entrance_col {
+                } else if p.is_vestibule(col, t) {
                     Fixed::Vestibule
                 } else {
                     Fixed::Free
@@ -342,97 +355,6 @@ fn bx_prim(b: [Q; 6], material: MaterialId, kind: FeatureKind) -> Primitive {
     }
 }
 
-/// The masses as L3 builds them: an attached mass embeds into its trunk's concrete, so its inner
-/// face moves outward until the box clears the trunk's disc. What lies between stays trunk.
-#[allow(clippy::cast_possible_truncation)] // a root of quanta
-pub fn clear_of_trunks(masses: &[MassInfo], parent: &CellOutput, cell: CellKey) -> Vec<MassInfo> {
-    let o = cell
-        .coords
-        .map(|v| floor_mod_pow2(v, 3) * i64::from(L2_CELL));
-    let ctx = crate::l2_mass::Parent::new(parent, [o.x as Q, o.y as Q, o.z as Q]);
-    masses
-        .iter()
-        .map(|m| {
-            let mut m = *m;
-            let Some(walk) = m.walk else {
-                return m;
-            };
-            for &(cx, cz, r) in ctx.trunk_circles() {
-                let (c, t_c, lo, hi, t0, t1) = if walk.axis == Axis::X {
-                    (
-                        cx,
-                        cz,
-                        m.aabb.min.x,
-                        m.aabb.max.x,
-                        m.aabb.min.z,
-                        m.aabb.max.z,
-                    )
-                } else {
-                    (
-                        cz,
-                        cx,
-                        m.aabb.min.z,
-                        m.aabb.max.z,
-                        m.aabb.min.x,
-                        m.aabb.max.x,
-                    )
-                };
-                let t = if (t0..=t1).contains(&t_c) {
-                    0
-                } else {
-                    (t0 - t_c).abs().min((t1 - t_c).abs())
-                };
-                let (r, t) = (i64::from(r), i64::from(t));
-                if r * r <= t * t {
-                    continue;
-                }
-                let need = Q::try_from((r * r - t * t).isqrt() + 1).unwrap_or(Q::MAX);
-                let (mut lo2, mut hi2) = (lo, hi);
-                if walk.inward > 0 && lo - c < need && hi - c > -need {
-                    lo2 = (c + need).min(hi);
-                } else if walk.inward < 0 && c - hi < need && c - lo > -need {
-                    hi2 = (c - need).max(lo);
-                }
-                if walk.axis == Axis::X {
-                    m.aabb.min.x = lo2;
-                    m.aabb.max.x = hi2;
-                } else {
-                    m.aabb.min.z = lo2;
-                    m.aabb.max.z = hi2;
-                }
-            }
-            m
-        })
-        .collect()
-}
-
-/// Everything about a block's parent that the block needs, built once per L2 cell.
-/// The parent context of L2 cell `parent_cell`.
-pub fn l3_parent(seed: WorldSeed, cache: &L1Cache, parent_cell: CellKey) -> Parent {
-    let (out, masses): (CellOutput, Vec<MassInfo>) = l2_build(seed, cache, parent_cell);
-    let parent_l1 = cache.get(
-        seed,
-        CellKey::new(Level::L1, parent_cell.coords.map(|v| floor_div_pow2(v, 3))),
-    );
-    let masses = clear_of_trunks(&masses, &parent_l1, parent_cell);
-    let doors = entrances(seed, parent_cell, &parent_l1, &masses, &out.primitives);
-    let plans = masses
-        .iter()
-        .zip(&doors)
-        .enumerate()
-        .map(|(i, (m, e))| MassPlan::new(seed, parent_cell, i, m.aabb, e.map(|e| e.doorway)))
-        .collect();
-    let zones = out
-        .child_constraints
-        .iter()
-        .filter_map(|c| match c {
-            ChildConstraint::Zone { aabb, kind } => Some((*aabb, *kind)),
-            _ => None,
-        })
-        .collect();
-    Parent { plans, zones }
-}
-
 /// One block with everything the stages share.
 struct Blk<'a> {
     parent: &'a Parent,
@@ -510,14 +432,14 @@ impl Blk<'_> {
 pub fn l3_block(seed: WorldSeed, cache: &L1Cache, block: CellKey) -> L3Block {
     debug_assert_eq!(block.level, Level::L3);
     let parent_cell = CellKey::new(Level::L2, block.coords.map(|v| floor_div_pow2(v, 3)));
-    let parent = l3_parent(seed, cache, parent_cell);
+    let parent = crate::l3_web::web_parent(seed, cache, parent_cell);
     l3_block_in(seed, &parent, block, false)
 }
 
 /// [`l3_block`] with the fallback forced, to test it on every kind of boundary condition.
 pub fn l3_block_fallback(seed: WorldSeed, cache: &L1Cache, block: CellKey) -> L3Block {
     let parent_cell = CellKey::new(Level::L2, block.coords.map(|v| floor_div_pow2(v, 3)));
-    let parent = l3_parent(seed, cache, parent_cell);
+    let parent = crate::l3_web::web_parent(seed, cache, parent_cell);
     l3_block_in(seed, &parent, block, true)
 }
 
@@ -529,7 +451,7 @@ pub fn l3_blocks_of(
     parent_cell: CellKey,
 ) -> Vec<(CellKey, L3Block)> {
     debug_assert_eq!(parent_cell.level, Level::L2);
-    let parent = l3_parent(seed, cache, parent_cell);
+    let parent = crate::l3_web::web_parent(seed, cache, parent_cell);
     let mut out = Vec::new();
     for k in 0..512i64 {
         let idx = I64Vec3::new(k % 8, k / 64, k / 8 % 8);
@@ -599,6 +521,17 @@ fn l3_block_in(seed: WorldSeed, parent: &Parent, block: CellKey, force_fallback:
 
     let forced = forced_paths(&blk);
     let (active, base) = initial_domains(&blk, &masks, &forced);
+    // The archetype of the mass a slot is in weighs the tiles slot by slot.
+    let wm = |i: usize, tile: usize| -> u32 {
+        match blk.mass_of(i) {
+            Some(m) => {
+                let plan = &parent.plans[m];
+                let (_, t, _) = blk.gl(i);
+                crate::l3_arch::weight_mult(plan.archetype, &tiles::table()[tile], t - plan.t0)
+            }
+            None => 8,
+        }
+    };
     let mut scratch = Scratch::default();
     let block_hash = |s: u64| hash(seed.0, Level::L3, block.coords, s);
     let mut retry = Rng::new(block_hash(salt::L3_RETRY));
@@ -610,7 +543,16 @@ fn l3_block_in(seed: WorldSeed, parent: &Parent, block: CellKey, force_fallback:
             Rng::new(retry.next_u64())
         };
         let mut d = base.clone();
-        if solve_active(&ts, DIMS, &mut d, Some(&active), &mut rng, &mut scratch).is_ok()
+        if solve_weighted(
+            &ts,
+            DIMS,
+            &mut d,
+            Some(&active),
+            &mut rng,
+            &mut scratch,
+            Some(&wm),
+        )
+        .is_ok()
             && let Some(s) = accept(&blk, &d, &active)
         {
             chosen = Some((s, attempt as u8));
@@ -787,8 +729,8 @@ fn walk_components(blk: &Blk, tile: &[u16]) -> Vec<usize> {
                 matches!((a, c), (Some(p), Some(q)) if p == q && p >= 4)
             } else {
                 matches!(a, Some(O | D)) && matches!(c, Some(O | D)) && a == c
-                    || (tile[i] == VESTIBULE && c == Some(D))
-                    || (tile[j] == VESTIBULE && a == Some(D))
+                    || (tile[i] == VESTIBULE && matches!(c, Some(O | D)))
+                    || (tile[j] == VESTIBULE && matches!(a, Some(O | D)))
             };
             if linked {
                 let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
@@ -1118,6 +1060,34 @@ fn assemble(
     let parent = blk.parent;
     let mut prims: Vec<Primitive> = Vec::new();
 
+    // Corridor kinds (§6W.5), from the tiles chosen.
+    let view: Vec<crate::l3_dress::SlotView> = (0..n)
+        .map(|i| {
+            let Cls::Core(m) = blk.cls[i] else {
+                return crate::l3_dress::SlotView {
+                    tile: NONE_TILE,
+                    ..Default::default()
+                };
+            };
+            let (cx, t, cz) = blk.gl(i);
+            let plan = &parent.plans[m];
+            crate::l3_dress::SlotView {
+                tile: solved.tile[i],
+                core: plan.class != PlanClass::Sealed,
+                skeleton: plan.in_skeleton((cx, cz), t),
+                edges: plan.edges((cx, cz), t),
+                outer: std::array::from_fn(|k| {
+                    !matches!(
+                        parent.classify(cx + DELTA[k].0, t, cz + DELTA[k].1),
+                        Cls::Core(j) if j == m
+                    )
+                }),
+            }
+        })
+        .collect();
+    let dress = crate::l3_dress::corridor_kinds(seed, block, &view);
+    let (room_pieces, room_kinds) = crate::l3_rooms::rooms(seed, block, &view, &dress.holes);
+
     // Layout.
     let slots: Vec<SlotInfo> = (0..n)
         .map(|i| SlotInfo {
@@ -1138,7 +1108,7 @@ fn assemble(
 
     // Solid and rind boxes, merged. A sealed mass is one box per block.
     let mut solids: Vec<[Q; 6]> = Vec::new();
-    let mut extra: Vec<Primitive> = Vec::new();
+    let extra: Vec<Primitive> = Vec::new();
     for (m, plan) in parent.plans.iter().enumerate() {
         if plan.class == PlanClass::Sealed
             && let Some(c) = clip(&plan.aabb, &block_box)
@@ -1166,26 +1136,7 @@ fn assemble(
                 let Some(c) = clip(&full, &plan.aabb) else {
                     continue;
                 };
-                let carved = plan.doorway.filter(|d| {
-                    t == plan.t0
-                        && plan.entrance_col.is_some_and(|ce| {
-                            (
-                                ce.0 + DELTA[usize::from(d.side)].0,
-                                ce.1 + DELTA[usize::from(d.side)].1,
-                            ) == (cx, cz)
-                        })
-                });
-                if let Some(d) = carved {
-                    for p in carve_passage(&c, &d) {
-                        extra.push(bx_prim(
-                            box6(&local(&p)),
-                            MaterialId::CONCRETE,
-                            FeatureKind::MASS,
-                        ));
-                    }
-                } else {
-                    solids.push(box6(&local(&c)));
-                }
+                solids.push(box6(&local(&c)));
             }
             Cls::Core(_) if solved.tile[i] == SOLID as u16 => solids.push(box6(&slot_box(i))),
             _ => {}
@@ -1217,14 +1168,31 @@ fn assemble(
         let o = [x as Q * COL, t as Q * STOREY, z as Q * COL];
         let (cx, ts_, cz) = blk.gl(i);
         let pieces = if tile == VESTIBULE {
-            let door_side = plan.doorway.map_or(0, |d| usize::from(d.side));
             let inner: [bool; 4] = std::array::from_fn(|k| {
                 matches!(
                     parent.classify(cx + DELTA[k].0, ts_, cz + DELTA[k].1),
                     Cls::Core(j) if j == m
                 )
             });
-            tiles::vestibule_pieces(door_side, inner, reg.style)
+            let mut doors: Vec<tiles::VDoor> = Vec::new();
+            let mut hatch = tiles::Hatch::None;
+            for e in plan.entrances_at((cx, cz), ts_) {
+                match e.kind {
+                    EntranceKind::Door => {
+                        let c0 = if e.side % 2 == 0 { cx } else { cz } * COL;
+                        let open = ((e.u0 - c0).max(0), (e.u1 - c0).min(COL));
+                        if open.0 < open.1 {
+                            doors.push(tiles::VDoor {
+                                side: usize::from(e.side),
+                                open,
+                            });
+                        }
+                    }
+                    EntranceKind::FloorHatch => hatch = tiles::Hatch::Floor,
+                    EntranceKind::RoofHatch | EntranceKind::Ladder => hatch = tiles::Hatch::Roof,
+                }
+            }
+            tiles::vestibule_pieces(&doors, hatch, inner, reg.style)
         } else {
             cache
                 .entry(tile)
@@ -1233,6 +1201,19 @@ fn assemble(
         };
         for p in pieces {
             match translate(p.shape, o) {
+                Shape::Box { aabb } if is_floor_slab(&aabb) && dress.holes.contains(&i) => {
+                    // A ladder well: the slab round a 1 m hole.
+                    floors.extend(
+                        crate::l3_dress::holed_floor(o)
+                            .into_iter()
+                            .map(|a| Primitive {
+                                shape: a.shape,
+                                material: a.material,
+                                kind: a.kind,
+                                flags: a.flags,
+                            }),
+                    );
+                }
                 Shape::Box { aabb } if is_floor_slab(&aabb) => floors.push(Primitive {
                     shape: Shape::Box { aabb },
                     material: p.material,
@@ -1253,7 +1234,11 @@ fn assemble(
         }
         // Roof where nothing of the same mass stands above.
         let above_core = matches!(parent.classify(cx, ts_ + 1, cz), Cls::Core(j) if j == m);
-        if !above_core {
+        let roof_hatch = tile == VESTIBULE
+            && plan
+                .entrances_at((cx, cz), ts_)
+                .any(|e| matches!(e.kind, EntranceKind::RoofHatch | EntranceKind::Ladder));
+        if !above_core && !roof_hatch {
             groups
                 .entry((MaterialId::CONCRETE.0, FeatureKind::MASS.0))
                 .or_default()
@@ -1283,6 +1268,12 @@ fn assemble(
     }
     prims.extend(floors);
     prims.extend(others);
+    prims.extend(dress.pieces.iter().chain(&room_pieces).map(|a| Primitive {
+        shape: a.shape,
+        material: a.material,
+        kind: a.kind,
+        flags: a.flags,
+    }));
     prims.extend(extra);
 
     // Pipes.
@@ -1396,7 +1387,12 @@ fn assemble(
                 flags: crate::prim::MetaFlags(flags),
             },
         },
-        layout: L3Layout { slots, pipes },
+        layout: L3Layout {
+            slots,
+            pipes,
+            corridors: dress.kinds.iter().map(|&(k, n)| (k as u8, n)).collect(),
+            rooms: room_kinds.iter().map(|&(k, n)| (k as u8, n)).collect(),
+        },
         meta: L3Meta {
             attempt,
             fallback,
@@ -1421,36 +1417,6 @@ fn door_keepout(i: usize, k: usize) -> QAabb {
         QVec3::new(o.x + x.0, o.y + 4, o.z + z.0),
         QVec3::new(o.x + x.1, o.y + 48, o.z + z.1),
     )
-}
-
-/// The rind slot box `c` of the entrance, as solid minus the doorway's passage (§6.4 step 4):
-/// the passage runs through the whole rind from the storey line, with a 4 Q floor.
-fn carve_passage(c: &QAabb, d: &Doorway) -> Vec<QAabb> {
-    let (y0, y1) = (c.min.y, c.max.y);
-    let along_x = !d.side.is_multiple_of(2); // x faces have u along z
-    let (u_lo, u_hi) = if along_x {
-        (c.min.z, c.max.z)
-    } else {
-        (c.min.x, c.max.x)
-    };
-    let mk = |u: (Q, Q), y: (Q, Q)| {
-        if along_x {
-            QAabb::new(QVec3::new(c.min.x, y.0, u.0), QVec3::new(c.max.x, y.1, u.1))
-        } else {
-            QAabb::new(QVec3::new(u.0, y.0, c.min.z), QVec3::new(u.1, y.1, c.max.z))
-        }
-    };
-    let mut out = vec![
-        mk((u_lo, u_hi), (y0, y0 + 4)),
-        mk((u_lo, u_hi), (y0 + 48, y1)),
-    ];
-    if u_lo < d.u0 {
-        out.push(mk((u_lo, d.u0), (y0 + 4, y0 + 48)));
-    }
-    if d.u1 < u_hi {
-        out.push(mk((d.u1, u_hi), (y0 + 4, y0 + 48)));
-    }
-    out
 }
 
 /// The pipe overlay (§6.9): runs along rooms, atria and voids, drawn after acceptance so they

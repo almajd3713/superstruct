@@ -278,6 +278,24 @@ pub fn solve_active(
     rng: &mut Rng,
     scratch: &mut Scratch,
 ) -> Result<(), Contradiction> {
+    solve_weighted(ts, dims, domains, active, rng, scratch, None)
+}
+
+/// A multiplier, in eighths, on the weight of `tile` at `slot` (8 leaves it as it is, 0 never
+/// picks it unless nothing else is left).
+pub type WeightMod<'a> = &'a dyn Fn(usize, usize) -> u32;
+
+/// [`solve_active`] with a per-slot weight multiplier (the archetypes of `levels.md` §6W.4).
+#[allow(clippy::too_many_arguments)]
+pub fn solve_weighted(
+    ts: &TileSet,
+    dims: Dims,
+    domains: &mut [Domain],
+    active: Option<&[bool]>,
+    rng: &mut Rng,
+    scratch: &mut Scratch,
+    weight_mod: Option<WeightMod<'_>>,
+) -> Result<(), Contradiction> {
     debug_assert_eq!(domains.len(), dims.len());
     let on = |i: usize| active.is_none_or(|a| a[i]);
     if let Some(i) = (0..dims.len()).find(|&i| on(i) && is_empty(&domains[i])) {
@@ -313,7 +331,10 @@ pub fn solve_active(
         for t in 0..ts.len() {
             if contains(&domains[i], t) {
                 scratch.tiles.push(t);
-                scratch.weights.push(ts.weights[t]);
+                let w = ts.weights[t];
+                scratch
+                    .weights
+                    .push(weight_mod.map_or(w, |m| (w * m(i, t) / 8).max(u32::from(m(i, t) > 0))));
             }
         }
         let k = rng.pick_weighted(&scratch.weights).unwrap_or(0);

@@ -30,8 +30,15 @@ pub fn l2_cell_web_edges(
     debug_assert_eq!(cell.level, Level::L2);
     let t = tissue_cell(seed, cache.tissue(), cell);
     let mut structures: Vec<Primitive> = Vec::new();
-    for s in &t.structures {
-        structures.extend(s.primitives(&t.lattice));
+    // The parts that L3 fills are hollow shells with their doors cut.
+    let masses = crate::l3_web::mass_specs(&t);
+    for (si, s) in t.structures.iter().enumerate() {
+        structures.extend(s.primitives_with(&t.lattice, &|part| {
+            masses
+                .iter()
+                .find(|m| m.structure == si && m.part == part)
+                .map(|m| m.entrances.clone())
+        }));
     }
     // The doorways and passages are cut out of the structures and the skin's cladding; the
     // pieces that line them stay.

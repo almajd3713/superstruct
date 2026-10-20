@@ -8,7 +8,24 @@ use crate::cell::{CellKey, Level, floor_mod_pow2};
 use crate::hash::hash;
 use crate::l2::{CELL, MassInfo};
 use crate::l2_mass::{Parent, overlaps};
-use crate::l3_plan::{COL, Cols, Doorway, entrance_column};
+use crate::l3_plan::{COL, Cols};
+
+/// A doorway in a mass face of the version 6 world (kept for `l2_build_stats`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Doorway {
+    pub side: u8,
+    pub u0: crate::prim::Q,
+    pub u1: crate::prim::Q,
+    pub floor: crate::prim::Q,
+}
+
+/// The column of `cols` behind a doorway.
+fn entrance_column(cols: &Cols, door: &Doorway) -> Option<(i32, i32)> {
+    cols.row(door.side).into_iter().find(|&(cx, cz)| {
+        let u = if door.side.is_multiple_of(2) { cx } else { cz };
+        u * COL <= door.u0 && door.u1 <= (u + 1) * COL
+    })
+}
 use crate::prim::{CellOutput, PrimFlags, Primitive, Q, QAabb, QVec3, Shape};
 use crate::rng::Rng;
 use crate::salt;

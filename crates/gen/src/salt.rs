@@ -134,6 +134,12 @@ salts! {
     /// Keyed by the parent L2 cell: mass plans.
     L3_MASS = 0x0403;
     L3_PIPE = 0x0404;
+    /// Keyed by the L2 cell with the mass index added: the archetype of a mass (`levels.md` §6W.4).
+    L3_ARCH = 0x0410;
+    /// Keyed by the L3 block: corridor kinds along its skeleton edges (§6W.5).
+    L3_CORR = 0x0411;
+    /// Keyed by the L3 block: payoff rooms and interiors (§6W.5, §6W.6).
+    L3_PAYOFF = 0x0412;
 
     // L4 modules: 0x05xx
     MODULE = 0x0501;

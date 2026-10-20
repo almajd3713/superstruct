@@ -33,8 +33,6 @@ const THICKNESS: Q = 2;
 /// The fall threshold, 15 m (`traversal.md` §3), and the metres between two probes down.
 const FALL: i32 = 15;
 const GUARDED: u64 = 85;
-/// Steps of a flight that one rail piece covers.
-const FLIGHT_PIECE: u32 = 12;
 
 /// The grid of buckets, 16 m on a side, from 64 m before the cell to 64 m past it.
 const BUCKET: Q = 16 * M;
@@ -593,72 +591,81 @@ fn flight_edges(
     out: &mut Vec<Primitive>,
     stats: &mut EdgeStats,
 ) {
-    let steps = u32::from(steps);
     let along_x = matches!(rise, Dir4::PosX | Dir4::NegX);
-    let forward = matches!(rise, Dir4::PosX | Dir4::PosZ);
     let (along, across) = if along_x { (0usize, 2usize) } else { (2, 0) };
     let lo = [l.min.x, l.min.y, l.min.z];
     let hi = [l.max.x, l.max.y, l.max.z];
-    let (run, height) = (
-        f64::from(hi[along] - lo[along]) / f64::from(steps),
-        f64::from(hi[1] - lo[1]) / f64::from(steps),
-    );
     let up = at.axes[1];
-    let mut j = 0;
-    while j < steps {
-        let k = (steps - j).min(FLIGHT_PIECE);
-        // Steps j..j+k, counted from the foot; the tread of step i has its top at (i + 1) rises.
-        let (u0, u1) = if forward {
-            (
-                f64::from(lo[along]) + f64::from(j) * run,
-                f64::from(lo[along]) + f64::from(j + k) * run,
-            )
-        } else {
-            (
-                f64::from(hi[along]) - f64::from(j + k) * run,
-                f64::from(hi[along]) - f64::from(j) * run,
-            )
-        };
-        let mid = f64::from(j) + f64::from(k) / 2.0;
-        let y_mid = f64::from(lo[1]) + (mid + 0.5) * height;
-        let y_low = f64::from(lo[1]) + f64::from(j) * height;
-        let y_top = f64::from(lo[1]) + f64::from(j + k) * height;
-        for (e, sign) in [-1i64, 1].into_iter().enumerate() {
-            let edge = if sign < 0 { lo[across] } else { hi[across] };
+    let forward = matches!(rise, Dir4::PosX | Dir4::PosZ);
+    let steps = f64::from(steps);
+    for (e, sign) in [-1i64, 1].into_iter().enumerate() {
+        let edge = if sign < 0 { lo[across] } else { hi[across] };
+        let outward = at.axes[across] * sign as f64;
+        // Three places along the flight, a tread's height above the foot at each.
+        let mut open = false;
+        let mut guarded = false;
+        for f in [0.1, 0.5, 0.9] {
+            let u = f64::from(lo[along]) + f64::from(hi[along] - lo[along]) * f;
+            let n = if forward { f } else { 1.0 - f };
             let mut c = [0.0; 3];
-            c[along] = f64::midpoint(u0, u1);
+            c[along] = u;
             c[across] = f64::from(edge);
-            c[1] = y_mid;
-            let outward = at.axes[across] * sign as f64;
-            let state = match open_drop(w, at.at(c), outward, up) {
-                Some(false) => {
-                    stats.already += 1;
-                    None
-                }
-                other => other,
-            };
-            if state == Some(true) {
-                stats.runs += 1;
-                stats.flight_runs += 1;
-                if draw(idx, e as i64 + 4, i64::from(j)) {
-                    stats.guarded += 1;
-                    let (mut a, mut b) = ([0; 3], [0; 3]);
-                    a[along] = u0.floor() as Q;
-                    b[along] = u1.ceil() as Q;
-                    a[1] = y_low.floor() as Q;
-                    b[1] = y_top.ceil() as Q + HEIGHT;
-                    if sign < 0 {
-                        a[across] = edge;
-                        b[across] = edge + THICKNESS;
-                    } else {
-                        a[across] = edge - THICKNESS;
-                        b[across] = edge;
-                    }
-                    out.push(rail(at.frame, at.origin, a, b));
-                }
+            c[1] = f64::from(lo[1])
+                + f64::from(hi[1] - lo[1]) * n
+                + f64::from(hi[1] - lo[1]) / steps / 2.0;
+            match open_drop(w, at.at(c), outward, up) {
+                Some(true) => open = true,
+                Some(false) => guarded = true,
+                None => {}
             }
         }
-        j += k;
+        if guarded && !open {
+            stats.already += 1;
+        }
+        if !open {
+            continue;
+        }
+        stats.runs += 1;
+        stats.flight_runs += 1;
+        if !draw(idx, e as i64 + 4, 0) {
+            continue;
+        }
+        stats.guarded += 1;
+        // A wall 0.125 m thick that follows the flight: a box up to the height of the rail at
+        // the foot, and a ramp on it that rises with the flight, so its top is the rail's
+        // height above the line of the nosings all the way up.
+        let band = |a: &mut [Q; 3], b: &mut [Q; 3]| {
+            a[along] = lo[along];
+            b[along] = hi[along];
+            if sign < 0 {
+                a[across] = edge;
+                b[across] = edge + THICKNESS;
+            } else {
+                a[across] = edge - THICKNESS;
+                b[across] = edge;
+            }
+        };
+        let (mut a, mut b) = ([0; 3], [0; 3]);
+        band(&mut a, &mut b);
+        a[1] = lo[1];
+        b[1] = lo[1] + HEIGHT;
+        out.push(rail(at.frame, at.origin, a, b));
+        a[1] = lo[1] + HEIGHT;
+        b[1] = hi[1] + HEIGHT;
+        out.push(Primitive {
+            shape: Shape::oriented(
+                at.frame,
+                at.origin,
+                LocalShape::Ramp {
+                    aabb: QAabb::new(QVec3::new(a[0], a[1], a[2]), QVec3::new(b[0], b[1], b[2])),
+                    rise,
+                },
+                QAabb::new(QVec3::new(0, 0, 0), QVec3::new(CELL, CELL, CELL)),
+            ),
+            material: MaterialId::METAL,
+            kind: FeatureKind::RAILING,
+            flags: PrimFlags::NONE,
+        });
     }
 }
 

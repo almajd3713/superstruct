@@ -253,6 +253,8 @@ impl PrimFlags {
     pub const NO_COLLIDE: Self = Self(1 << 1);
     /// Part of the far-band reduction and the SDF horizon.
     pub const FAR_VISIBLE: Self = Self(1 << 2);
+    /// A box part of a structure that L3 fills (§6W): drawn and collided as a hollow shell.
+    pub const INTERIOR: Self = Self(1 << 3);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

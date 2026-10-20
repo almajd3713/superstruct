@@ -458,9 +458,33 @@ fn wall_open(out: &mut Out, side: usize, opening: (Q, Q), y: (Q, Q), material: M
     threshold(out, side, opening);
 }
 
-/// The entrance hall: a room with an opening 4 m wide on `door_side` (towards the doorway in the
-/// envelope), a door on every side in `inner_doors`, and walls elsewhere.
-pub fn vestibule_pieces(door_side: usize, inner_doors: [bool; 4], style: StyleId) -> Vec<Piece> {
+/// A door of a vestibule on the outside of the mass: the wall side and the opening's range along
+/// it, in slot-local quanta (a doorway that straddles two columns is half in each).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VDoor {
+    pub side: usize,
+    pub open: (Q, Q),
+}
+
+/// How a vestibule is entered from above or below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hatch {
+    None,
+    /// A 4 m square opening in the floor.
+    Floor,
+    /// A 4 m square opening in the roof, over a ladder well.
+    Roof,
+}
+
+/// The entrance hall: a room with the openings of `doors` (4 m wide in all, towards the
+/// doorway in the mass's face), a door on every side in `inner_doors`, walls elsewhere, and a
+/// hatch in the floor or roof where there is one.
+pub fn vestibule_pieces(
+    doors: &[VDoor],
+    hatch: Hatch,
+    inner_doors: [bool; 4],
+    style: StyleId,
+) -> Vec<Piece> {
     let mut out = Out {
         pieces: Vec::new(),
         kind: FeatureKind::MASS,
@@ -470,10 +494,55 @@ pub fn vestibule_pieces(door_side: usize, inner_doors: [bool; 4], style: StyleId
     } else {
         MaterialId::CONCRETE
     };
-    out.add(b((0, SLOT), (0, SLOT), (0, FLOOR)), MaterialId::CONCRETE);
+    let hole = (32, 96);
+    if hatch == Hatch::Floor {
+        // The floor round a 4 m square hole.
+        for bx in [
+            b((0, SLOT), (0, hole.0), (0, FLOOR)),
+            b((0, SLOT), (hole.1, SLOT), (0, FLOOR)),
+            b((0, hole.0), hole, (0, FLOOR)),
+            b((hole.1, SLOT), hole, (0, FLOOR)),
+        ] {
+            out.add(bx, MaterialId::CONCRETE);
+        }
+    } else {
+        out.add(b((0, SLOT), (0, SLOT), (0, FLOOR)), MaterialId::CONCRETE);
+    }
+    if hatch == Hatch::Roof {
+        let y = (STOREY - FLOOR, STOREY);
+        for bx in [
+            b((0, SLOT), (0, hole.0), y),
+            b((0, SLOT), (hole.1, SLOT), y),
+            b((0, hole.0), hole, y),
+            b((hole.1, SLOT), hole, y),
+        ] {
+            out.add(bx, MaterialId::CONCRETE);
+        }
+        // The ladder well: two rails and rungs on the +x wall of the opening, not collidable.
+        out.kind = FeatureKind::MISC;
+        for z in [hole.0 + 8, hole.1 - 8 - 2] {
+            out.add(
+                b((hole.1 - 4, hole.1 - 2), (z, z + 2), (FLOOR, STOREY)),
+                MaterialId::METAL,
+            );
+        }
+        for k in 1..8 {
+            let y0 = FLOOR + k * 8;
+            out.add(
+                b(
+                    (hole.1 - 4, hole.1 - 2),
+                    (hole.0 + 8, hole.1 - 8),
+                    (y0, y0 + 1),
+                ),
+                MaterialId::METAL,
+            );
+        }
+        out.kind = FeatureKind::MASS;
+    }
     for (side, &inner) in inner_doors.iter().enumerate() {
-        if side == door_side {
-            wall_open(&mut out, side, (32, 96), (0, STOREY), material);
+        let here: Vec<&VDoor> = doors.iter().filter(|d| d.side == side).collect();
+        if let Some(d) = here.first() {
+            wall_open(&mut out, side, d.open, (0, STOREY), material);
         } else if inner {
             wall(&mut out, side, D, (0, STOREY), material);
         } else {

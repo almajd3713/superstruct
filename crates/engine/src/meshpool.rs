@@ -19,8 +19,8 @@ use worldgen::coord::{CoordError, WorldPos};
 use worldgen::l1::l1_far_primitives;
 use worldgen::l2::l2_build;
 use worldgen::l2_port::L1Cache;
-use worldgen::l3::{Parent, block_is_active, l3_block_with, l3_parent};
-use worldgen::l4::{block_modules, railing_modules};
+use worldgen::l3_web::{WebL3, web_context};
+use worldgen::l4::railing_modules;
 use worldgen::port::{Port, PortKind};
 use worldgen::prim::{FeatureKind, PrimFlags, Primitive, QAabb, QVec3, Shape};
 use worldgen::seed::WorldSeed;
@@ -227,7 +227,7 @@ impl Drop for MeshPool {
 
 fn worker(shared: &Shared, tx: &Sender<JobResult>) {
     let mut cache = L1Cache::default();
-    let mut parents: HashMap<CellKey, Parent> = HashMap::new();
+    let mut parents: HashMap<CellKey, WebL3> = HashMap::new();
     let mut ran = 0u32;
     loop {
         let (id, stale) = {
@@ -287,9 +287,9 @@ fn far_digest(id: ChunkId, prims: &[Primitive]) -> Option<u64> {
     Some(h.finish())
 }
 
-/// Whether L3 blocks refine the envelopes of L2 structures. The v6 L3 does not fit the Web L2;
-/// the Web L3 is PW.4, and until then structures are solid blocks.
-pub const L3_ENABLED: bool = false;
+/// Whether L3 fills the interior parts of L2 structures (the Web L3, PW.4). Those parts are
+/// hollow shells at L2, drawn and collided as they are.
+pub const L3_ENABLED: bool = true;
 
 /// The mid band draws an L2 cell's exterior masses only: the `ENVELOPE` primitives, which are
 /// exactly what the finer levels refine, so the silhouette matches the full chunk's.
@@ -472,7 +472,7 @@ fn local_boxes(prims: &[Primitive]) -> Vec<(Vec3, Vec3)> {
 fn build(
     seed: WorldSeed,
     cache: &L1Cache,
-    parents: &mut HashMap<CellKey, Parent>,
+    parents: &mut HashMap<CellKey, WebL3>,
     id: ChunkId,
     stale: &AtomicBool,
 ) -> Option<JobResult> {
@@ -502,31 +502,23 @@ fn build(
                 modules = Some(expand(&rails));
             }
             let draw = mesh_prims_l2(&out.primitives, &out.ports, true);
-            // Interiors collide through their L3 blocks, not through the envelope. Until the Web
-            // L3 exists (PW.4) a structure is solid and collides as it is drawn.
-            let mut solid = out.primitives;
-            if L3_ENABLED {
-                solid.retain(|p| !p.flags.contains(PrimFlags::ENVELOPE));
-            }
-            (solid, Some(draw))
+            // The shells of the interior parts collide, and L3 collides inside them.
+            (out.primitives, Some(draw))
         }
         (Level::L3, _) if !L3_ENABLED => (Vec::new(), None),
         (Level::L3, _) => {
             let parent_key = CellKey::new(Level::L2, id.key.coords.map(|v| floor_div_pow2(v, 3)));
-            if parents.len() > 48 {
+            // Each context holds the blocks solved so far, so few are kept.
+            if parents.len() > 12 {
                 parents.clear();
             }
-            let parent = parents
+            let ctx = parents
                 .entry(parent_key)
-                .or_insert_with(|| l3_parent(seed, cache, parent_key));
-            if block_is_active(parent, id.key) {
-                let block = l3_block_with(seed, parent, id.key);
-                let mods = block_modules(seed, id.key, &block);
-                if !mods.is_empty() {
-                    modules = Some(expand(&mods));
-                }
-                ao_boxes = local_boxes(&block.out.primitives);
-                (block.out.primitives, None)
+                .or_insert_with(|| web_context(seed, cache, parent_key));
+            if ctx.is_active(id.key) {
+                let prims = ctx.cell_primitives(seed, id.key);
+                ao_boxes = local_boxes(&prims);
+                (prims, None)
             } else {
                 (Vec::new(), None)
             }
@@ -902,20 +894,30 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
-    fn an_l3_chunk_carries_its_interior_modules_and_ao_boxes() {
-        let seed = WorldSeed(0);
-        let (key, _) = cell_with_entrance(seed);
+    fn an_l3_chunk_carries_the_interior_of_its_masses() {
+        let seed = WorldSeed(0x5eed);
         let cache = L1Cache::default();
-        let parent = l3_parent(seed, &cache, key);
-        let active: Vec<CellKey> = (0..512i64)
+        let (key, ctx) = (0..40i64)
             .map(|k| {
                 CellKey::new(
-                    Level::L3,
-                    key.coords * 8 + I64Vec3::new(k % 8, k / 64, k / 8 % 8),
+                    Level::L2,
+                    I64Vec3::new(k % 7 - 3, k / 7 % 3, k / 21 % 9 - 4) * 8
+                        + I64Vec3::new(k % 8, k / 8 % 8, (k * 7 + k / 5) % 8),
                 )
             })
-            .filter(|b| block_is_active(&parent, *b))
+            .map(|key| (key, web_context(seed, &cache, key)))
+            .find(|(_, ctx)| !ctx.parent().plans().is_empty())
+            .expect("a cell with a mass");
+        let mut ctx = ctx;
+        let world = |k: i64| {
+            CellKey::new(
+                Level::L3,
+                key.coords * 8 + I64Vec3::new(k % 8, k / 64, k / 8 % 8),
+            )
+        };
+        let active: Vec<CellKey> = (0..512i64)
+            .map(world)
+            .filter(|w| !ctx.cell_primitives(seed, *w).is_empty())
             .collect();
         assert!(!active.is_empty());
         let pool = MeshPool::new(seed, 2);
@@ -923,22 +925,12 @@ mod tests {
         let got = pool.recv().unwrap().unwrap();
         assert_eq!(got.id, ChunkId::l3(active[0].coords));
         assert!(!got.mesh.indices.is_empty() && !got.prims.is_empty());
-        assert!(got.modules.as_ref().is_some_and(|m| !m.is_empty()));
-        assert!(!got.ao_boxes.is_empty());
         assert!(got.upload_bytes() > 0);
-        // A block no mass meets builds nothing.
-        let empty = (0..512i64)
-            .map(|k| {
-                CellKey::new(
-                    Level::L3,
-                    key.coords * 8 + I64Vec3::new(k % 8, k / 64, k / 8 % 8),
-                )
-            })
-            .find(|b| !block_is_active(&parent, *b));
-        if let Some(b) = empty {
+        // A cell no mass meets builds nothing.
+        if let Some(b) = (0..512i64).map(world).find(|w| !ctx.is_active(*w)) {
             pool.submit(ChunkId::l3(b.coords), 1.0);
             let got = pool.recv().unwrap().unwrap();
-            assert!(got.mesh.indices.is_empty() && got.prims.is_empty() && got.modules.is_none());
+            assert!(got.mesh.indices.is_empty() && got.prims.is_empty());
         }
     }
 

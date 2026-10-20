@@ -14,7 +14,7 @@ win_root=$(wslpath -w .)
 profile=debug
 for a in "$@"; do [[ $a == --release ]] && profile=release; done
 win_home=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')
-target_win="$win_home\\ss-target"
+target_win="$win_home\\${SS_TARGET:-ss-target}"
 target_wsl=$(wslpath "$target_win")
 toolchain=+stable-x86_64-pc-windows-gnu
 
