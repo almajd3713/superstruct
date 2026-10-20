@@ -23,6 +23,11 @@ pub trait ChunkSink {
     fn upload(&mut self, chunk: &ChunkMesh) -> (ChunkHandle, u64);
     fn remove(&mut self, handle: ChunkHandle);
     fn set_visible(&mut self, handle: ChunkHandle, visible: bool);
+    /// Video memory the sink holds for chunks, used or not (pages left part empty by
+    /// evictions count): 0 when it does not know.
+    fn allocated_bytes(&self) -> u64 {
+        0
+    }
 }
 
 /// [`ChunkSink`] backed by the renderer.
@@ -64,6 +69,10 @@ impl ChunkSink for RendererSink<'_> {
 
     fn set_visible(&mut self, handle: ChunkHandle, visible: bool) {
         self.renderer.set_chunk_visible(handle, visible);
+    }
+
+    fn allocated_bytes(&self) -> u64 {
+        self.renderer.page_bytes()
     }
 }
 
@@ -454,7 +463,13 @@ impl Streamer {
     }
 
     fn evict(&mut self, sink: &mut dyn ChunkSink) {
-        if self.resident_bytes <= self.cfg.memory_budget_bytes {
+        // Pages are bigger than what is in them (a chunk is a few in a page and evictions leave
+        // holes), so the memory held is also held to half as much again as the budget.
+        let (budget, held_limit) = (
+            self.cfg.memory_budget_bytes,
+            self.cfg.memory_budget_bytes + self.cfg.memory_budget_bytes / 2,
+        );
+        if self.resident_bytes <= budget && sink.allocated_bytes() <= held_limit {
             return;
         }
         let mut victims: Vec<(u64, ChunkId)> = self
@@ -465,7 +480,7 @@ impl Streamer {
             .collect();
         victims.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
         for (_, id) in victims {
-            if self.resident_bytes <= self.cfg.memory_budget_bytes {
+            if self.resident_bytes <= budget && sink.allocated_bytes() <= held_limit {
                 break;
             }
             if let Some(r) = self.resident.remove(&id) {
@@ -477,7 +492,7 @@ impl Streamer {
                 self.visibility_dirty = true;
             }
         }
-        if self.resident_bytes > self.cfg.memory_budget_bytes {
+        if self.resident_bytes > budget || sink.allocated_bytes() > held_limit {
             self.stats.over_budget_frames += 1;
         }
     }

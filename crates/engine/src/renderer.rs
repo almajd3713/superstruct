@@ -407,7 +407,9 @@ pub struct Renderer {
     /// Draw depth first, then shade only the front-most fragment of each pixel.
     prepass: bool,
     chunks: Vec<GpuChunk>,
-    pages: Vec<MeshPage>,
+    /// Shared buffer pages; a page that holds nothing is dropped (its slot is reused), or the
+    /// video memory of every area ever visited would stay allocated.
+    pages: Vec<Option<MeshPage>>,
     next_handle: u32,
     gpu_bytes: u64,
     page_bytes: u64,
@@ -689,7 +691,9 @@ impl Renderer {
             self.next_slot - 1
         });
         self.cull.clear_slot(queue, slot.min(MAX_DRAWS as u32 - 1));
-        let p = &self.pages[page];
+        let Some(p) = self.pages[page].as_ref() else {
+            return (handle, 0);
+        };
         queue.write_buffer(
             &p.vertex_buf,
             u64::from(vertices.offset) * std::mem::size_of::<Vertex>() as u64,
@@ -727,19 +731,24 @@ impl Renderer {
         nv: u32,
         ni: u32,
     ) -> Option<(usize, Range, Range)> {
-        if let Some(found) = self
-            .pages
-            .iter_mut()
-            .enumerate()
-            .find_map(|(i, p)| p.alloc(nv, ni).map(|(v, x)| (i, v, x)))
-        {
+        if let Some(found) = self.pages.iter_mut().enumerate().find_map(|(i, p)| {
+            p.as_mut()
+                .and_then(|p| p.alloc(nv, ni))
+                .map(|(v, x)| (i, v, x))
+        }) {
             return Some(found);
         }
         let mut page = MeshPage::new(device, PAGE_VERTICES.max(nv), PAGE_INDICES.max(ni));
         let (v, x) = page.alloc(nv, ni)?;
         self.page_bytes += page.bytes();
-        self.pages.push(page);
-        Some((self.pages.len() - 1, v, x))
+        let at = if let Some(i) = self.pages.iter().position(Option::is_none) {
+            self.pages[i] = Some(page);
+            i
+        } else {
+            self.pages.push(Some(page));
+            self.pages.len() - 1
+        };
+        Some((at, v, x))
     }
 
     pub fn remove_chunk(&mut self, handle: ChunkHandle) {
@@ -751,9 +760,14 @@ impl Renderer {
         if let Some(i) = self.chunks.iter().position(|c| c.handle == handle) {
             let c = self.chunks.swap_remove(i);
             self.gpu_bytes -= c.bytes;
-            let p = &mut self.pages[c.page];
-            p.vertices.free(c.vertices);
-            p.indices.free(c.indices);
+            if let Some(p) = self.pages[c.page].as_mut() {
+                p.vertices.free(c.vertices);
+                p.indices.free(c.indices);
+                if p.vertices.used() == 0 {
+                    self.page_bytes -= p.bytes();
+                    self.pages[c.page] = None;
+                }
+            }
             self.free_slots.push(c.slot);
         } else if let Some(bytes) = self.modules.remove(handle) {
             self.gpu_bytes -= bytes;
@@ -1219,7 +1233,9 @@ impl Renderer {
         pass.set_bind_group(3, self.volfog.frag_bg(), &[]);
         let stride = std::mem::size_of::<IndirectArgs>() as u64;
         for run in &self.runs {
-            let page = &self.pages[run.page];
+            let Some(page) = self.pages[run.page].as_ref() else {
+                continue;
+            };
             pass.set_vertex_buffer(0, page.vertex_buf.slice(..));
             pass.set_index_buffer(page.index_buf.slice(..), wgpu::IndexFormat::Uint32);
             if indirect {
