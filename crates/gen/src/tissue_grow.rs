@@ -1654,7 +1654,8 @@ impl Structure {
             e.slot_box(b, MaterialId::METAL, FeatureKind::MASS, PrimFlags::NONE);
         }
         if self.lit {
-            for b in self.parts.iter().chain(self.shaped.iter().map(|(_, b)| b)) {
+            // Only boxes have walls to put windows on (a cylinder fills its box's corners with air).
+            for b in &self.parts {
                 e.lit_faces(b);
             }
         }
@@ -2032,7 +2033,7 @@ impl<'a> Emitter<'a> {
 
     /// Windows on the four sides of the box, one grid per slot of wall (at most 16 slots).
     fn lit_faces(&mut self, b: &SlotBox) {
-        let mut budget = 16;
+        let mut budget = 8;
         for (axis, positive) in [(0usize, true), (0, false), (2, true), (2, false)] {
             let other = 2 - axis;
             for y in b.lo[1]..b.hi[1] {
@@ -2040,11 +2041,21 @@ impl<'a> Emitter<'a> {
                     if budget == 0 {
                         return;
                     }
-                    budget -= 1;
                     let mut lo = [0; 3];
                     lo[1] = y;
                     lo[other] = o;
                     lo[axis] = if positive { b.hi[axis] } else { b.lo[axis] - 1 };
+                    // A face against another solid slot has no outside to look out of.
+                    let n = self.lat.n as i32;
+                    if lo.iter().all(|&v| (0..n).contains(&v))
+                        && matches!(
+                            self.lat.state[self.lat.index(lo.map(|v| v as usize))],
+                            SlotState::Built | SlotState::Solid | SlotState::Engulfed
+                        )
+                    {
+                        continue;
+                    }
+                    budget -= 1;
                     let slab = SlotBox {
                         lo,
                         hi: [lo[0] + 1, lo[1] + 1, lo[2] + 1],
@@ -2097,7 +2108,8 @@ impl<'a> Emitter<'a> {
         );
     }
 
-    /// A grid of lit windows on the face of the host that `facing` looks away from.
+    /// Lit windows on the face of the host that `facing` looks away from: 1.4 m by 1.6 m panels
+    /// on a 4 m grid (one storey high), about a third of them lit, standing 12 cm off the wall.
     fn windows(&mut self, b: &SlotBox, facing: Dir6) {
         let (lo, hi) = (self.corner(b.lo), self.corner(b.hi));
         let (axis, positive) = match facing {
@@ -2108,25 +2120,39 @@ impl<'a> Emitter<'a> {
         };
         let other = 2 - axis;
         let plane = if positive { lo[axis] } else { hi[axis] };
-        for &u in &[4.0, 18.0] {
-            for &v in &[6.0, 20.0] {
-                let mut l = lo;
-                let mut h = hi;
+        let (across, up) = (hi[other] - lo[other], hi[1] - lo[1]);
+        let key =
+            b.lo.iter()
+                .fold(u64::from(axis as u8) * 2 + u64::from(positive), |h, &v| {
+                    h.wrapping_mul(0x0100_0000_01b3) ^ u64::from(v.cast_unsigned())
+                });
+        for i in 0..((across - 2.0) / 4.0).floor() as i32 {
+            for j in 0..((up - 1.0) / 4.0).floor() as i32 {
+                let h = (key
+                    ^ (u64::from(i.cast_unsigned()) << 8)
+                    ^ (u64::from(j.cast_unsigned()) << 16))
+                    .wrapping_mul(0x9e37_79b9_7f4a_7c15);
+                if (h >> 40) % 100 >= 30 {
+                    continue;
+                }
+                let (mut l, mut hgh) = (lo, hi);
                 if positive {
                     l[axis] = plane;
-                    h[axis] = plane + 0.5;
+                    hgh[axis] = plane + 0.12;
                 } else {
-                    l[axis] = plane - 0.5;
-                    h[axis] = plane;
+                    l[axis] = plane - 0.12;
+                    hgh[axis] = plane;
                 }
-                l[other] = lo[other] + u;
-                h[other] = lo[other] + u + 8.0;
-                l[1] = lo[1] + v;
-                h[1] = lo[1] + v + 8.0;
+                let u = lo[other] + 2.0 + 4.0 * f64::from(i);
+                l[other] = u;
+                hgh[other] = u + 1.4;
+                let v = lo[1] + 1.2 + 4.0 * f64::from(j);
+                l[1] = v;
+                hgh[1] = v + 1.6;
                 self.frame_box(
                     l,
-                    h,
-                    MaterialId::EMISSIVE,
+                    hgh,
+                    MaterialId::LIT_WINDOW,
                     FeatureKind::WINDOW,
                     PrimFlags::FAR_VISIBLE,
                 );

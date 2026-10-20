@@ -54,7 +54,7 @@ pub struct CarveStats {
 }
 
 /// A box shape as its frame, origin and local box.
-fn as_box(shape: &Shape) -> Option<(Frame, QVec3, QAabb)> {
+pub(crate) fn as_box(shape: &Shape) -> Option<(Frame, QVec3, QAabb)> {
     match *shape {
         Shape::Box { aabb } => Some((Frame::Id, QVec3::default(), aabb)),
         Shape::Oriented(o) => match o.local {

@@ -2,8 +2,8 @@
 
 use glam::{Mat3, Vec3};
 use worldgen::cell::Axis;
-use worldgen::orient::Oriented;
-use worldgen::prim::{Dir4, Primitive, Q_PER_M, QAabb, QVec3, Shape};
+use worldgen::orient::{LocalShape, Oriented};
+use worldgen::prim::{Dir4, FeatureKind, Primitive, Q_PER_M, QAabb, QVec3, Shape};
 
 use crate::mesh::Mesh;
 use crate::vertex::{Vertex, oct_decode};
@@ -25,7 +25,35 @@ fn v3(q: QVec3) -> Vec3 {
 
 /// Appends `prim` to `mesh`, in cell-local metres. `LiftShaft` is not solid and adds nothing.
 pub fn add_primitive(mesh: &mut Mesh, prim: &Primitive) {
-    add_shape(mesh, prim.shape, prim.material.0);
+    if let Shape::Oriented(o) = prim.shape {
+        add_oriented(mesh, &o, prim.material.0, nudge(&o, prim.kind));
+    } else {
+        add_shape(mesh, prim.shape, prim.material.0);
+    }
+}
+
+/// How far a turned box is grown on every side, in metres. Turned pieces are not culled
+/// against each other, so two of them with a face in one plane would z-fight; each grows by
+/// 0.25 to 2 mm from a hash of its own geometry, which settles who is in front the same way
+/// every time and in every chunk. Skin and windows sit 4 mm further out than what they clad.
+fn nudge(o: &Oriented, kind: FeatureKind) -> f32 {
+    let LocalShape::Box { aabb } = o.local else {
+        return 0.0;
+    };
+    let mut h = 0xcbf2_9ce4_8422_2325_u64;
+    for v in [
+        o.origin.x, o.origin.y, o.origin.z, aabb.min.x, aabb.min.y, aabb.min.z, aabb.max.x,
+        aabb.max.y, aabb.max.z,
+    ] {
+        h = (h ^ u64::from(v.cast_unsigned())).wrapping_mul(0x0100_0000_01b3);
+    }
+    let level = (h >> 32) % 8 + 1;
+    let base = if kind == FeatureKind::SKIN || kind == FeatureKind::WINDOW {
+        0.004
+    } else {
+        0.0
+    };
+    base + level as f32 * 0.000_25
 }
 
 fn add_shape(mesh: &mut Mesh, shape: Shape, material: u16) {
@@ -39,7 +67,7 @@ fn add_shape(mesh: &mut Mesh, shape: Shape, material: u16) {
             radius,
         } => add_cylinder(mesh, axis, v3(base), m(length), m(radius), material),
         Shape::StairRun { aabb, rise, steps } => add_stairs(mesh, aabb, rise, steps, material),
-        Shape::Oriented(o) => add_oriented(mesh, &o, material),
+        Shape::Oriented(o) => add_oriented(mesh, &o, material, 0.0),
         Shape::LiftShaft { .. } => {}
     }
 }
@@ -47,9 +75,18 @@ fn add_shape(mesh: &mut Mesh, shape: Shape, material: u16) {
 /// An oriented shape: its mesh in the frame, turned into place and clipped to the cell box
 /// (`primitives.md` §9.4). Clipped faces get no cap: the neighbouring cell's piece of the same
 /// solid meets this one on the plane, so a cap would be an interior face.
-fn add_oriented(mesh: &mut Mesh, o: &Oriented, material: u16) {
+fn add_oriented(mesh: &mut Mesh, o: &Oriented, material: u16, grow: f32) {
     let mut local = Mesh::default();
-    add_shape(&mut local, o.local.to_shape(), material);
+    match o.local {
+        LocalShape::Box { aabb } if grow > 0.0 => {
+            local.add_box(
+                v3(aabb.min) - Vec3::splat(grow),
+                v3(aabb.max) + Vec3::splat(grow),
+                material,
+            );
+        }
+        _ => add_shape(&mut local, o.local.to_shape(), material),
+    }
     let [ex, ey, ez] = o.frame.axes();
     let rot = Mat3::from_cols(ex.as_vec3(), ey.as_vec3(), ez.as_vec3());
     let origin = v3(o.origin);
@@ -330,6 +367,41 @@ mod tests {
             }),
         );
         assert!(mesh.vertices.is_empty());
+    }
+
+    /// Two turned boxes with a face in one plane (a skin plate and the wall it clads) do not
+    /// meet in that plane, whichever way they are drawn.
+    #[test]
+    fn coplanar_turned_boxes_are_nudged_apart() {
+        use worldgen::orient::Frame;
+        let clip = aabb([0; 3], [64 * 16; 3]);
+        let mk = |size: i32, kind: FeatureKind| {
+            let o = Oriented {
+                frame: Frame::Table { yaw: 34, tilt: 3 },
+                origin: QVec3::new(32 * 16, 30 * 16, 32 * 16),
+                local: LocalShape::Box {
+                    aabb: aabb([0, 0, 0], [size, 16, 16]),
+                },
+                clip,
+            };
+            let mut m = Mesh::default();
+            let mut p = prim(Shape::Oriented(o));
+            p.kind = kind;
+            add_primitive(&mut m, &p);
+            m
+        };
+        let top = |m: &Mesh| {
+            m.vertices
+                .iter()
+                .map(|v| Vec3::from(v.position))
+                .map(|p| p.y)
+                .fold(f32::MIN, f32::max)
+        };
+        // The same plane in the frame (local y = 1 m) in both: the lengths differ so the
+        // hashes do, and the skin one stands further out in any case.
+        let wall = mk(160, FeatureKind::MASS);
+        let skin = mk(96, FeatureKind::SKIN);
+        assert!((top(&skin) - top(&wall)).abs() > 0.0002);
     }
 
     mod oriented {

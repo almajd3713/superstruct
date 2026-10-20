@@ -208,6 +208,8 @@ impl MaterialId {
     pub const BEACON: Self = Self(6);
     /// Far light trains: drawn by the engine, mostly through haze. Never emitted by the generator.
     pub const TRAIN_LIGHT: Self = Self(7);
+    /// A lit window pane: dim and warm, not a lamp.
+    pub const LIT_WINDOW: Self = Self(8);
 }
 
 /// What a primitive belongs to. Append-only.

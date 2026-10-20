@@ -39,6 +39,10 @@ pub fn l2_cell_web(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutpu
     primitives.extend(t.thresholds.prims.iter().copied());
     primitives.extend(t.payoffs.prims.iter().copied());
     drop_in_tram_volumes(seed, cell, &mut primitives);
+    // Two identical pieces (the shared edge of two frames) would z-fight, and no offset can
+    // separate them.
+    let mut seen = std::collections::HashSet::new();
+    primitives.retain(|p| seen.insert((p.shape, p.material, p.kind, p.flags)));
     let child_constraints = t
         .paths
         .bores

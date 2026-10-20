@@ -207,7 +207,7 @@ impl Build<'_, '_> {
             s,
             t,
             y,
-            MaterialId::EMISSIVE,
+            MaterialId::LIT_WINDOW,
             FeatureKind::WINDOW,
             PrimFlags::NO_COLLIDE,
         );

@@ -660,7 +660,7 @@ impl Gen {
                     SURF_CLIFF,
                     lo,
                     hi,
-                    MaterialId::EMISSIVE,
+                    MaterialId::LIT_WINDOW,
                     PrimFlags::NO_COLLIDE,
                 );
             }

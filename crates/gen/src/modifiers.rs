@@ -344,7 +344,7 @@ pub(crate) fn apply(e: &mut Emitter<'_>, leg: Leg, p: &Params, m: &Mods, first: 
                     (s - w / 2.0, s + w / 2.0),
                     (t - 0.03, t + 0.03),
                     (2.0, 2.0 + g),
-                    MaterialId::EMISSIVE,
+                    MaterialId::LIT_WINDOW,
                     FeatureKind::WINDOW,
                     PrimFlags::NO_COLLIDE,
                 );
@@ -410,7 +410,7 @@ pub(crate) fn apply(e: &mut Emitter<'_>, leg: Leg, p: &Params, m: &Mods, first: 
                     (s - 0.6, s + 0.6),
                     (t - 0.03, t + 0.03),
                     (1.2, 2.4),
-                    MaterialId::EMISSIVE,
+                    MaterialId::LIT_WINDOW,
                     FeatureKind::WINDOW,
                     PrimFlags::NO_COLLIDE,
                 );

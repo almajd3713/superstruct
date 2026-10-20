@@ -70,7 +70,9 @@ pub mod tram;
 pub mod validate;
 pub mod walk;
 pub mod walk_oriented;
+#[cfg(test)]
+mod zfight;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 12;
+pub const GEN_VERSION: u32 = 13;
