@@ -293,7 +293,8 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
     }
     // Quads of different materials in one plane that overlap would z-fight: the first material
     // (lowest id) keeps the overlap, the others lose it.
-    let mut planes: BTreeMap<(u8, bool, Q), Vec<(u16, Vec<Rect>)>> = BTreeMap::new();
+    type Layers = Vec<(u16, Vec<Rect>)>;
+    let mut planes: BTreeMap<(u8, bool, Q), Layers> = BTreeMap::new();
     for ((axis, positive, plane, material), rects) in quads {
         planes
             .entry((axis, positive, plane))
