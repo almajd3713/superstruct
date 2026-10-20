@@ -210,6 +210,9 @@ pub struct ChunkMeshStats {
 
 /// Meshes `prims` (cell-local metres). Boxes and stair steps are culled against each other;
 /// ramps and cylinders are emitted whole and occlude nothing.
+/// A plane's quads by material.
+type Layers = Vec<(u16, Vec<Rect>)>;
+
 #[allow(clippy::too_many_lines)] // cull, de-overlap and merge in one pass
 pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
     let mut mesh = Mesh::default();
@@ -293,7 +296,6 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
     }
     // Quads of different materials in one plane that overlap would z-fight: the first material
     // (lowest id) keeps the overlap, the others lose it.
-    type Layers = Vec<(u16, Vec<Rect>)>;
     let mut planes: BTreeMap<(u8, bool, Q), Layers> = BTreeMap::new();
     for ((axis, positive, plane, material), rects) in quads {
         planes
