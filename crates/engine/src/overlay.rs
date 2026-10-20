@@ -23,6 +23,8 @@ pub struct OverlayInfo<'a> {
     pub mode: &'a str,
     pub stream: StreamStats,
     pub gpu_bytes: u64,
+    /// Shared buffer pages held, used or not (compare with `gpu_bytes`).
+    pub page_bytes: u64,
     pub shader_error: Option<&'a str>,
     pub timer: &'a GpuTimer,
     /// Band radii in force.
@@ -257,7 +259,7 @@ fn draw(
             ui.monospace(format!("seed {}", info.seed));
             ui.monospace(info.mode);
             debug_commands(ui, text, requests, status);
-            stream_lines(ui, &info.stream, info.gpu_bytes);
+            stream_lines(ui, &info.stream, info.gpu_bytes, info.page_bytes);
             band_sliders(ui, info.bands, bands);
             ui.monospace(format!(
                 "sector {} {} {}",
@@ -317,7 +319,7 @@ fn frame_graph(ui: &mut egui::Ui, frame_ms: &VecDeque<f32>) {
     }
 }
 
-fn stream_lines(ui: &mut egui::Ui, s: &StreamStats, gpu_bytes: u64) {
+fn stream_lines(ui: &mut egui::Ui, s: &StreamStats, gpu_bytes: u64, page_bytes: u64) {
     let mib = |b: u64| b as f64 / f64::from(1u32 << 20);
     ui.monospace(format!(
         "chunks {} resident ({} drawn) / {} wanted",
@@ -328,8 +330,9 @@ fn stream_lines(ui: &mut egui::Ui, s: &StreamStats, gpu_bytes: u64) {
         s.pool.queued, s.pool.running, s.ready, s.pool.cancelled
     ));
     ui.monospace(format!(
-        "gpu mem {:.1} MiB | uploads {} ({:.2} MiB) this frame",
+        "gpu mem {:.1} MiB in {:.1} MiB of pages | uploads {} ({:.2} MiB) this frame",
         mib(gpu_bytes),
+        mib(page_bytes),
         s.uploads_this_frame,
         mib(s.upload_bytes_this_frame)
     ));

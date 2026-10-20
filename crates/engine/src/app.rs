@@ -723,6 +723,7 @@ impl App {
                 mode: &mode,
                 stream: self.streamer.stats(),
                 gpu_bytes: running.renderer.gpu_bytes(),
+                page_bytes: running.renderer.page_bytes(),
                 shader_error: running.renderer.shader_error(),
                 timer: &running.timer,
                 bands: self.streamer.config().stream,
