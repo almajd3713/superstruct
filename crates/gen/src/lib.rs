@@ -8,6 +8,7 @@ pub mod cavity;
 pub mod cell;
 pub mod character;
 pub mod coord;
+pub mod edges;
 pub mod forms;
 pub mod hash;
 pub mod hubs;
@@ -75,4 +76,4 @@ mod zfight;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 14;
+pub const GEN_VERSION: u32 = 15;
