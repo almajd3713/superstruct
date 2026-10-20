@@ -26,7 +26,8 @@ fn v3(q: QVec3) -> Vec3 {
 /// Appends `prim` to `mesh`, in cell-local metres. `LiftShaft` is not solid and adds nothing.
 pub fn add_primitive(mesh: &mut Mesh, prim: &Primitive) {
     let first = mesh.vertices.len();
-    if let Shape::Oriented(o) = prim.shape {
+    if prim.kind == FeatureKind::RAILING && add_rail(mesh, prim) {
+    } else if let Shape::Oriented(o) = prim.shape {
         add_oriented(mesh, &o, prim.material.0, nudge(&o, prim.kind));
     } else {
         add_shape(mesh, prim.shape, prim.material.0);
@@ -92,6 +93,11 @@ fn add_oriented(mesh: &mut Mesh, o: &Oriented, material: u16, grow: f32) {
         }
         _ => add_shape(&mut local, o.local.to_shape(), material),
     }
+    turn_into(mesh, &local, o, material);
+}
+
+/// A mesh in the frame of `o`, turned into place and clipped to the cell box.
+fn turn_into(mesh: &mut Mesh, local: &Mesh, o: &Oriented, material: u16) {
     let [ex, ey, ez] = o.frame.axes();
     let rot = Mat3::from_cols(ex.as_vec3(), ey.as_vec3(), ez.as_vec3());
     let origin = v3(o.origin);
@@ -112,6 +118,161 @@ fn add_oriented(mesh: &mut Mesh, o: &Oriented, material: u16, grow: f32) {
             .extend(poly.iter().map(|&p| Vertex::new(p, n, material)));
         for i in 1..poly.len() as u32 - 1 {
             mesh.indices.extend([base, base + i, base + i + 1]);
+        }
+    }
+}
+
+/// Post spacing, metres, and the sizes of a railing's parts.
+/// The height of a rail above its walking surface: `edges::HEIGHT`, 18 quanta.
+pub const RAIL_HEIGHT: f32 = 1.125;
+const POST_SPACING: f32 = 2.5;
+const POST: f32 = 0.1;
+const BAR: f32 = 0.07;
+const TOE: f32 = 0.12;
+
+/// A post centred on `at`, kept inside `[l0, l1]` (a sliver of a rail gets a thin post).
+fn post_span(at: f32, l0: f32, l1: f32) -> (f32, f32) {
+    let w = POST.min(l1 - l0);
+    let a = (at - w * 0.5).clamp(l0, l1 - w);
+    (a, a + w)
+}
+
+/// Spans of a rail of `len` metres between posts.
+#[allow(clippy::cast_sign_loss)] // len is positive
+fn posts_in(len: f32) -> usize {
+    ((len / POST_SPACING).ceil() as usize).max(1)
+}
+
+/// A railing in the frame of its piece (`primitives.md` §9): posts stand plumb, the top and
+/// middle bars and the toe plate follow the line of the piece. A box rail is level; the wedge a
+/// flight's rail is is raked with the flight. Returns false for a shape that is neither.
+fn add_rail(mesh: &mut Mesh, prim: &Primitive) -> bool {
+    let material = prim.material.0;
+    let (o, local) = match prim.shape {
+        Shape::Oriented(o) => (o, o.local),
+        Shape::Box { aabb } => (plain_frame(aabb), LocalShape::Box { aabb }),
+        Shape::Ramp { aabb, rise } => (plain_frame(aabb), LocalShape::Ramp { aabb, rise }),
+        _ => return false,
+    };
+    let mut l = Mesh::default();
+    match local {
+        LocalShape::Box { aabb } => rail_level(&mut l, v3(aabb.min), v3(aabb.max), material),
+        LocalShape::Ramp { aabb, rise } => {
+            rail_raked(&mut l, v3(aabb.min), v3(aabb.max), rise, material);
+        }
+        _ => return false,
+    }
+    turn_into(mesh, &l, &o, material);
+    true
+}
+
+/// A plain shape as an identity-framed `Oriented` that clips nothing.
+fn plain_frame(aabb: QAabb) -> Oriented {
+    let far = 1 << 24;
+    Oriented {
+        frame: worldgen::orient::Frame::Id,
+        origin: QVec3::new(0, 0, 0),
+        local: LocalShape::Box { aabb },
+        clip: QAabb::new(QVec3::new(-far, -far, -far), QVec3::new(far, far, far)),
+    }
+}
+
+/// `(along, across)` of a box: along its longer horizontal side.
+fn rail_axes(lo: Vec3, hi: Vec3) -> (usize, usize) {
+    if hi.x - lo.x >= hi.z - lo.z {
+        (0, 2)
+    } else {
+        (2, 0)
+    }
+}
+
+fn rail_level(m: &mut Mesh, lo: Vec3, hi: Vec3, material: u16) {
+    let (al, ac) = rail_axes(lo, hi);
+    let (l0, l1) = (lo[al], hi[al]);
+    let c = (lo[ac] + hi[ac]) * 0.5;
+    let put = |m: &mut Mesh, a0: f32, a1: f32, y0: f32, y1: f32, w: f32| {
+        let mut p = Vec3::ZERO;
+        let mut q = Vec3::ZERO;
+        p[al] = a0;
+        q[al] = a1;
+        p[ac] = c - w * 0.5;
+        q[ac] = c + w * 0.5;
+        p.y = y0;
+        q.y = y1;
+        m.add_box(p, q, material);
+    };
+    let n = posts_in(l1 - l0);
+    for i in 0..=n {
+        let at = l0 + (l1 - l0) * i as f32 / n as f32;
+        let (a, b) = post_span(at, l0, l1);
+        put(m, a, b, lo.y, hi.y, POST);
+    }
+    put(m, l0, l1, hi.y - BAR, hi.y, POST);
+    let mid = lo.y + (hi.y - lo.y) * 0.5;
+    put(m, l0, l1, mid - BAR * 0.5, mid + BAR * 0.5, BAR);
+    put(m, l0, l1, lo.y, lo.y + TOE, hi[ac] - lo[ac]);
+}
+
+/// The rail of a flight: the wedge `[lo, hi]` rising along `rise`, its sloped top the rail's top.
+fn rail_raked(m: &mut Mesh, lo: Vec3, hi: Vec3, rise: Dir4, material: u16) {
+    let (al, ac) = match rise {
+        Dir4::PosX | Dir4::NegX => (0, 2),
+        Dir4::PosZ | Dir4::NegZ => (2, 0),
+    };
+    let up = matches!(rise, Dir4::PosX | Dir4::PosZ);
+    let (l0, l1) = (lo[al], hi[al]);
+    let c = (lo[ac] + hi[ac]) * 0.5;
+    // Top line height at run position `t` in 0..1 along the length.
+    let top = |t: f32| {
+        let k = if up { t } else { 1.0 - t };
+        lo.y + (hi.y - lo.y) * k
+    };
+    let pt = |t: f32, y: f32, w: f32| {
+        let mut p = Vec3::ZERO;
+        p[al] = l0 + (l1 - l0) * t;
+        p[ac] = c + w;
+        p.y = y;
+        p
+    };
+    let n = posts_in(l1 - l0);
+    let rail_h = RAIL_HEIGHT;
+    for i in 0..=n {
+        let t = i as f32 / n as f32;
+        let (x, x1) = post_span(l0 + (l1 - l0) * t, l0, l1);
+        let tt = ((x + x1) * 0.5 - l0) / (l1 - l0).max(1e-4);
+        let y1 = top(tt);
+        let mut a = Vec3::ZERO;
+        let mut b = Vec3::ZERO;
+        a[al] = x;
+        b[al] = x1;
+        a[ac] = c - POST * 0.5;
+        b[ac] = c + POST * 0.5;
+        a.y = y1 - rail_h;
+        b.y = y1;
+        m.add_box(a, b, material);
+    }
+    for (drop, th) in [(BAR, POST), (rail_h * 0.5 + BAR * 0.5, BAR)] {
+        let w = th * 0.5;
+        let corners = [
+            pt(0.0, top(0.0) - drop, -w),
+            pt(1.0, top(1.0) - drop, -w),
+            pt(1.0, top(1.0) - drop + BAR, -w),
+            pt(0.0, top(0.0) - drop + BAR, -w),
+            pt(0.0, top(0.0) - drop, w),
+            pt(1.0, top(1.0) - drop, w),
+            pt(1.0, top(1.0) - drop + BAR, w),
+            pt(0.0, top(0.0) - drop + BAR, w),
+        ];
+        let inside = corners.iter().sum::<Vec3>() / 8.0;
+        for f in [
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [0, 1, 5, 4],
+            [3, 2, 6, 7],
+            [0, 3, 7, 4],
+            [1, 2, 6, 5],
+        ] {
+            m.add_polygon_outward(&f.map(|i| corners[i]), inside, material);
         }
     }
 }
@@ -531,5 +692,69 @@ mod tests {
                 "no vertex within a radius of the far cap centre: {near}"
             );
         }
+    }
+
+    fn rail(shape: Shape) -> Primitive {
+        Primitive {
+            kind: FeatureKind::RAILING,
+            ..prim(shape)
+        }
+    }
+
+    /// PW.4.9: a rail is drawn inside the shape it collides as, in its own frame: posts plumb,
+    /// bars along it, and a flight's rail rakes with the flight.
+    #[test]
+    fn rails_are_drawn_where_they_collide() {
+        let level = aabb([0, 0, 0], [16 * 10, 18, 2]);
+        let mut m = Mesh::default();
+        add_primitive(&mut m, &rail(Shape::Box { aabb: level }));
+        assert!(m.indices.len() / 3 > 12 * 4, "posts and bars, not one box");
+        for v in &m.vertices {
+            let p = Vec3::from(v.position);
+            assert!(
+                p.cmpge(Vec3::splat(-1e-4)).all()
+                    && p.cmple(Vec3::new(10.0, 1.125, 0.125) + Vec3::splat(1e-4))
+                        .all(),
+                "{p}"
+            );
+        }
+        // The wedge of a flight rising 2 m over 10 m: every vertex under the top line, and the
+        // top of the last post as high as the wedge's top.
+        let wedge = aabb([0, 18, 0], [16 * 10, 18 + 32, 2]);
+        let mut m = Mesh::default();
+        add_primitive(
+            &mut m,
+            &rail(Shape::Ramp {
+                aabb: wedge,
+                rise: Dir4::PosX,
+            }),
+        );
+        let top = m.vertices.iter().map(|v| v.position[1]).fold(0.0, f32::max);
+        assert!((top - (1.125 + 2.0)).abs() < 0.2, "{top}");
+        for v in &m.vertices {
+            let (x, y) = (v.position[0], v.position[1]);
+            assert!(
+                y <= 1.125 + 2.0 * x / 10.0 + 0.02,
+                "above the top line at {x}: {y}"
+            );
+        }
+        // A turned rail stays inside its piece's turned bounds: a 45-degree turn about +Y.
+        let clip = aabb([-4000, -4000, -4000], [4000, 4000, 4000]);
+        let turned = Shape::oriented(
+            worldgen::orient::Frame::table(16, 0),
+            QVec3::new(0, 0, 0),
+            LocalShape::Box { aabb: level },
+            clip,
+        );
+        let mut m = Mesh::default();
+        add_primitive(&mut m, &rail(turned));
+        let heights = m.vertices.iter().map(|v| v.position[1]);
+        assert!(heights.clone().fold(f32::MAX, f32::min) >= -1e-4);
+        assert!(heights.fold(0.0, f32::max) <= 1.125 + 1e-4);
+        let reach = |v: &Vertex| v.position[0].hypot(v.position[2]);
+        assert!(
+            m.vertices.iter().map(reach).fold(0.0, f32::max) > 9.9,
+            "still ten metres long"
+        );
     }
 }

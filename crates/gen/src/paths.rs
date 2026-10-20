@@ -52,6 +52,21 @@ pub struct PathPieces {
     /// Clearances of bored passages (PH-11, PH-12, PH-20 and any path in solid): air to cut
     /// out of the parent's solid where a route passes. Not drawn and not collidable.
     pub bores: Vec<Primitive>,
+    /// Where each leg and rise is walked, for the defect census (PW.4.8). Not an output.
+    pub walks: Vec<Walk>,
+}
+
+/// The walking line of a leg (its two ends) or a rise (its samples), in cell-local metres on
+/// the walking surface.
+#[derive(Debug, Clone)]
+pub struct Walk {
+    /// The path type (PH-nn or PV-nn as numbered in the registry ids of `chosen`).
+    pub id: u8,
+    pub rise: bool,
+    pub width: f64,
+    pub points: Vec<glam::DVec3>,
+    /// The frame's up, in cell-local space.
+    pub up: glam::DVec3,
 }
 
 /// A clear box in lattice-frame metres: `(lo, hi)`.
@@ -1334,7 +1349,7 @@ fn place_rise(
     forced: bool,
     words: &[u64; 7],
     e: &mut Emitter<'_>,
-) -> (u8, Option<Clear>) {
+) -> (u8, Option<Clear>, Vec<[f64; 3]>, f64) {
     let weights = t.character.map_or([1, 0, 0, 1, 0, 0], |c| c.paths);
     let cands = if forced {
         vec![36]
@@ -1419,7 +1434,7 @@ fn place_rise(
         side: if words[6] & 1 == 1 { 1.0 } else { -1.0 },
     };
     let rise = build_rise(e, id, col, &p);
-    (id, rise.bounds)
+    (id, rise.bounds, rise.walk, p.w)
 }
 
 /// Chooses a type for every level, span, bored and rising segment and builds it.
@@ -1461,7 +1476,7 @@ fn paths_impl(seed: WorldSeed, t: &Tissue, only_bored: bool) -> PathPieces {
             .collect();
         if let Some(col) = vertical_column(t, &cs) {
             let first = e.out.len();
-            let (id, cut) = place_rise(
+            let (id, cut, walk, width) = place_rise(
                 t,
                 &cs,
                 col,
@@ -1491,6 +1506,13 @@ fn paths_impl(seed: WorldSeed, t: &Tissue, only_bored: bool) -> PathPieces {
                     PrimFlags::NO_COLLIDE,
                 );
             }
+            out.walks.push(Walk {
+                id,
+                rise: true,
+                width,
+                points: walk.iter().map(|&f| e.at(f)).collect(),
+                up: t.lattice.frame.axes()[1],
+            });
             out.chosen.push((si as u16, id));
             continue;
         }
@@ -1521,6 +1543,16 @@ fn paths_impl(seed: WorldSeed, t: &Tissue, only_bored: bool) -> PathPieces {
                 continue;
             };
             let first = e.out.len();
+            out.walks.push(Walk {
+                id,
+                rise: false,
+                width: p.width,
+                points: vec![
+                    e.at(leg.map(0.0, 0.0, 0.0)),
+                    e.at(leg.map(leg.len, 0.0, 0.0)),
+                ],
+                up: t.lattice.frame.axes()[1],
+            });
             let mut clear = build_leg(&mut e, leg, id, &p);
             modifiers::apply(&mut e, leg, &p, &mods, first);
             let h = p.width / 2.0 + 1.0;

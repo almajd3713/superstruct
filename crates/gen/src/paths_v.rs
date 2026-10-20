@@ -311,10 +311,19 @@ impl M<'_, '_> {
             kind: FeatureKind::RAMP,
             flags: PrimFlags::NONE,
         });
-        // A footing under the thin foot of the wedge.
+        // A footing under the thin foot of the wedge only: the first metre of the run, not a
+        // plate under all of it.
+        let foot = run.min(1.0);
+        let (fu, fv) = if axis_u {
+            let e = from.0 + dir * foot;
+            ((from.0.min(e), from.0.max(e)), v)
+        } else {
+            let e = from.1 + dir * foot;
+            (u, (from.1.min(e), from.1.max(e)))
+        };
         self.slab(
-            u,
-            v,
+            fu,
+            fv,
             (y - 0.5, y + 0.02),
             MaterialId::CONCRETE,
             FeatureKind::RAMP,
@@ -327,36 +336,49 @@ impl M<'_, '_> {
         (end, y + rise)
     }
 
-    /// A thin rail of a flight, lying 15 cm above its surface along the lane edge `v`.
+    /// A thin rail of a flight along the lane edge `v`: a box 15 cm high and 30 cm wide on each
+    /// tread, so that it follows the nosings and never crosses a step (a wedge laid on the
+    /// slope cut every step in a sawtooth).
     fn track(&mut self, u0: f64, dir: f64, n: u32, v: f64, y: f64) {
         let st = self.style;
-        let keep = (self.walk.len(), self.p.w);
-        self.p.w = 0.3;
-        let run = f64::from(n) * st.run;
-        let ramp_style = self.style;
-        self.style = Style {
-            ramp: true,
-            ..ramp_style
-        };
-        self.ramp((u0, v), true, dir, run, y + 0.15, st.rise / st.run);
-        self.style = ramp_style;
-        self.p.w = keep.1;
-        self.walk.truncate(keep.0);
+        for i in 0..n {
+            let a = u0 + dir * f64::from(i) * st.run;
+            let b = u0 + dir * f64::from(i + 1) * st.run;
+            let top = y + f64::from(i + 1) * st.rise;
+            self.slab(
+                (a.min(b), a.max(b)),
+                (v - 0.15, v + 0.15),
+                (top - 0.02, top + 0.15),
+                MaterialId::CONCRETE,
+                FeatureKind::STAIR_TOWER,
+            );
+        }
     }
 
-    /// A stepped handrail 1 m above a flight, on lane edge `v`, in pieces of ten units.
+    /// A stepped handrail 1 m above a flight, on lane edge `v`, in pieces of two units, each
+    /// on a post that stands on its tread: the rail climbs with the flight in steps of one or
+    /// two risers, and no piece floats.
     fn handrail(&mut self, u0: f64, dir: f64, n: u32, v: f64, y: f64) {
         let st = self.style;
         let mut j = 0;
         while j < n {
-            let k = (n - j).min(10);
+            let k = (n - j).min(2);
             let a = u0 + dir * f64::from(j) * st.run;
             let b = u0 + dir * f64::from(j + k) * st.run;
             let top = y + f64::from(j + k) * st.rise + 1.0;
             self.slab(
-                (a, b),
+                (a.min(b), a.max(b)),
                 (v - 0.05, v + 0.05),
                 (top, top + 0.12),
+                MaterialId::METAL,
+                FeatureKind::RAILING,
+            );
+            let mid = f64::midpoint(a, b);
+            let tread = y + f64::from(j + 1) * st.rise;
+            self.slab(
+                (mid - 0.04, mid + 0.04),
+                (v - 0.04, v + 0.04),
+                (tread - 0.02, top),
                 MaterialId::METAL,
                 FeatureKind::RAILING,
             );

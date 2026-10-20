@@ -20,9 +20,8 @@ use worldgen::l1::l1_far_primitives;
 use worldgen::l2::l2_build;
 use worldgen::l2_port::L1Cache;
 use worldgen::l3_web::{WebL3, web_context};
-use worldgen::l4::railing_modules;
 use worldgen::port::{Port, PortKind};
-use worldgen::prim::{FeatureKind, PrimFlags, Primitive, QAabb, QVec3, Shape};
+use worldgen::prim::{PrimFlags, Primitive, QAabb, QVec3, Shape};
 use worldgen::seed::WorldSeed;
 
 use crate::chunkmesh::mesh_primitives;
@@ -433,12 +432,9 @@ fn hollow_envelope(env: &Primitive, door: (u8, i32, i32)) -> Vec<Primitive> {
 
 /// The primitives to mesh for an L2 chunk: envelopes with an entrance become hollow shells and
 /// railing boxes are left to their instanced modules.
-fn mesh_prims_l2(prims: &[Primitive], ports: &[Port], railings_as_modules: bool) -> Vec<Primitive> {
+fn mesh_prims_l2(prims: &[Primitive], ports: &[Port]) -> Vec<Primitive> {
     let mut out = Vec::with_capacity(prims.len());
     for p in prims {
-        if railings_as_modules && p.kind == FeatureKind::RAILING {
-            continue;
-        }
         match (p.flags.contains(PrimFlags::ENVELOPE), p.shape) {
             (true, Shape::Box { aabb }) => match doorway_of(&aabb, ports) {
                 Some(door) => out.extend(hollow_envelope(p, door)),
@@ -489,19 +485,19 @@ fn build(
         (Level::L2, Detail::Mid) => {
             let (out, _) = l2_build(seed, cache, id.key);
             let env = mid_primitives(out.primitives);
-            let draw = mesh_prims_l2(&env, &out.ports, false);
+            let draw = mesh_prims_l2(&env, &out.ports);
             (env, Some(draw))
         }
         (Level::L2, _) => {
             let (out, _) = l2_build(seed, cache, id.key);
-            let mut rails = railing_modules(&out.primitives);
+            let mut rails = Vec::new();
             if let Some(room) = worldgen::sanctuary_room::room_of(seed, &out) {
                 rails.extend(worldgen::l4::sanctuary_modules(&room));
             }
             if !rails.is_empty() {
                 modules = Some(expand(&rails));
             }
-            let draw = mesh_prims_l2(&out.primitives, &out.ports, true);
+            let draw = mesh_prims_l2(&out.primitives, &out.ports);
             // The shells of the interior parts collide, and L3 collides inside them.
             (out.primitives, Some(draw))
         }
@@ -580,7 +576,7 @@ mod tests {
         pool.submit(id, 1.0);
         let got = pool.recv().unwrap().unwrap();
         let (out, _) = l2_build(WorldSeed(5), &L1Cache::default(), id.key);
-        let direct = mesh_primitives(&mesh_prims_l2(&out.primitives, &out.ports, true)).0;
+        let direct = mesh_primitives(&mesh_prims_l2(&out.primitives, &out.ports)).0;
         assert_eq!(got.id, id);
         assert_eq!(got.mesh.vertices, direct.vertices);
         assert_eq!(got.mesh.indices, direct.indices);

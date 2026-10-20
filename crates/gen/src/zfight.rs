@@ -4,6 +4,7 @@
 //! offset can separate, identical pieces, must not occur, and the test says so.
 
 #![allow(
+    dead_code,
     clippy::cast_possible_truncation,
     clippy::default_trait_access,
     clippy::too_many_lines
@@ -15,7 +16,7 @@ use crate::carve::as_box;
 use crate::prim::{FeatureKind, PrimFlags, Primitive, Shape};
 
 /// A box piece's six faces: a corner, the two edge vectors and the outward normal (metres).
-fn faces(p: &Primitive) -> Vec<(DVec3, DVec3, DVec3, DVec3)> {
+pub(crate) fn faces(p: &Primitive) -> Vec<(DVec3, DVec3, DVec3, DVec3)> {
     let Some((frame, origin, l)) = as_box(&p.shape) else {
         return Vec::new();
     };
@@ -66,6 +67,8 @@ pub fn census_with(
             !p.flags.contains(PrimFlags::ENVELOPE)
                 && !matches!(p.shape, Shape::LiftShaft { .. })
                 && p.kind != FeatureKind::VOID
+                // Rails are drawn as railings of their own (PW.4.9), not as boxes.
+                && p.kind != FeatureKind::RAILING
         })
         .collect();
     let mut found = std::collections::BTreeMap::new();

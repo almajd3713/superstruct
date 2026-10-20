@@ -1838,6 +1838,10 @@ impl<'a> Emitter<'a> {
         kind: FeatureKind,
         flags: PrimFlags,
     ) {
+        if kind == FeatureKind::RAILING && !crate::plumb::is_upright(self.lat.frame) {
+            self.plumb_rail(lo, hi, material, flags);
+            return;
+        }
         let origin = self.at(lo);
         let size = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
         if size.iter().any(|&s| quanta(s) <= 0) {
@@ -1858,6 +1862,34 @@ impl<'a> Emitter<'a> {
             kind,
             flags,
         });
+    }
+
+    /// A rail of a tilted lattice, rebuilt to stand plumb (`plumb.rs`); none in a lattice whose
+    /// floors are not walkable.
+    fn plumb_rail(&mut self, lo: [f64; 3], hi: [f64; 3], material: MaterialId, flags: PrimFlags) {
+        let Some((upright, _, _)) = crate::plumb::upright(self.lat.frame) else {
+            return;
+        };
+        let origin = self.at([0.0; 3]);
+        let v = |a: [f64; 3]| DVec3::new(a[0], a[1], a[2]);
+        for b in crate::plumb::plumb_box(self.lat.frame, origin, v(lo), v(hi), 0.5) {
+            let size = b.hi - b.lo;
+            if [size.x, size.y, size.z].iter().any(|&s| quanta(s) <= 0) {
+                continue;
+            }
+            let local = LocalShape::Box {
+                aabb: QAabb::new(
+                    QVec3::new(0, 0, 0),
+                    QVec3::new(quanta(size.x), quanta(size.y), quanta(size.z)),
+                ),
+            };
+            self.out.push(Primitive {
+                shape: Shape::oriented(upright, Self::qv(b.corner), local, self.cell),
+                material,
+                kind: FeatureKind::RAILING,
+                flags,
+            });
+        }
     }
 
     /// A part as a hollow shell 0.5 m thick (six slabs) with `cuts` (lattice-frame boxes in

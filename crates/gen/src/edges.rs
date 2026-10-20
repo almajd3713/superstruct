@@ -9,7 +9,9 @@
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::manual_midpoint,
+    clippy::collapsible_if
 )]
 
 use std::collections::BTreeMap;
@@ -20,6 +22,7 @@ use crate::carve::as_box;
 use crate::cell::{CellKey, Level};
 use crate::hash::hash;
 use crate::orient::{Frame, LocalShape};
+use crate::plumb;
 use crate::prim::{Dir4, FeatureKind, MaterialId, PrimFlags, Primitive, Q, QAabb, QVec3, Shape};
 use crate::rng::Rng;
 use crate::salt;
@@ -30,6 +33,8 @@ const CELL: Q = 512 * M;
 /// Railing height (1.1 m rounded up to quanta) and thickness.
 const HEIGHT: Q = 18;
 const THICKNESS: Q = 2;
+/// How far a flight's rail stands inside the side of the flight.
+const INSET: Q = 1;
 /// The fall threshold, 15 m (`traversal.md` §3), and the metres between two probes down.
 const FALL: i32 = 15;
 const GUARDED: u64 = 85;
@@ -261,6 +266,20 @@ pub struct EdgeStats {
     pub added: usize,
 }
 
+/// A way on: a line a walker follows (cell-local metres, on the walking surface) and half the
+/// width of the walkway, as the edge pass sees it (PW.4.11): no rail crosses it.
+#[derive(Debug, Clone, Copy)]
+pub struct Way {
+    pub a: DVec3,
+    pub b: DVec3,
+    pub half: f64,
+}
+
+/// Rails stop this far short of a way on.
+const WAY_MARGIN: f64 = 0.3;
+/// How far above or below a way's walking surface a rail base still counts as on it.
+const WAY_REACH: f64 = 2.0;
+
 /// A piece's frame, origin and the unit axes in cell-local metres.
 struct Placed {
     frame: Frame,
@@ -287,6 +306,7 @@ impl Placed {
 
 /// A rail along a deck edge in the canonical coordinates of its frame (metres from the
 /// cell's origin, along the frame's axes), so that rails of neighbouring pieces can join.
+#[derive(Clone)]
 struct Strip {
     frame: Frame,
     along: usize,
@@ -295,17 +315,216 @@ struct Strip {
 }
 
 impl Placed {
-    fn strip(&self, lo: [Q; 3], hi: [Q; 3], along: usize) -> Strip {
-        let o = self.origin.to_metres();
-        let o = DVec3::new(f64::from(o.x), f64::from(o.y), f64::from(o.z));
-        let t: [f64; 3] = std::array::from_fn(|k| self.axes[k].dot(o));
-        Strip {
-            frame: self.frame,
+    /// The rail box `lo..hi` (local quanta) as plumb strips in the upright frame (`plumb.rs`):
+    /// none when the piece is not a walking surface.
+    fn strips(&self, lo: [Q; 3], hi: [Q; 3], along: usize) -> Vec<Strip> {
+        let Some((upright, _, _)) = plumb::upright(self.frame) else {
+            return Vec::new();
+        };
+        plumb::plumb_box(
+            self.frame,
+            self.world_origin(),
+            Self::local(lo),
+            Self::local(hi),
+            0.5,
+        )
+        .into_iter()
+        .map(|b| Strip {
+            frame: upright,
             along,
-            lo: std::array::from_fn(|k| t[k] + f64::from(lo[k]) / f64::from(M)),
-            hi: std::array::from_fn(|k| t[k] + f64::from(hi[k]) / f64::from(M)),
+            lo: b.lo.to_array(),
+            hi: b.hi.to_array(),
+        })
+        .collect()
+    }
+
+    fn world_origin(&self) -> DVec3 {
+        let o = self.origin.to_metres();
+        DVec3::new(f64::from(o.x), f64::from(o.y), f64::from(o.z))
+    }
+
+    fn local(q: [Q; 3]) -> DVec3 {
+        DVec3::new(f64::from(q[0]), f64::from(q[1]), f64::from(q[2])) / f64::from(M)
+    }
+}
+
+/// A way in the upright frame of some heading, ready for `cut_ways`.
+struct Prepared {
+    a: DVec3,
+    b: DVec3,
+    half: f64,
+    flat: DVec3,
+    /// Bounds grown by the half width and the margin.
+    lo: DVec3,
+    hi: DVec3,
+}
+
+fn prepare(ways: &[Way], frame: Frame) -> Vec<Prepared> {
+    let Some((_, hx, hz)) = plumb::upright(frame) else {
+        return Vec::new();
+    };
+    let to_f0 = |p: DVec3| DVec3::new(p.dot(hx), p.y, p.dot(hz));
+    ways.iter()
+        .map(|w| {
+            let (a, b) = (to_f0(w.a), to_f0(w.b));
+            let g = DVec3::splat(w.half + WAY_MARGIN);
+            Prepared {
+                a,
+                b,
+                half: w.half,
+                flat: DVec3::new(b.x - a.x, 0.0, b.z - a.z).normalize_or_zero(),
+                lo: a.min(b) - g,
+                hi: a.max(b) + g,
+            }
+        })
+        .collect()
+}
+
+/// `s` without the stretches that a way on crosses or comes within a margin of (PW.4.11);
+/// stretches left shorter than 0.5 m are dropped.
+fn cut_ways(s: &Strip, ways: &[Prepared]) -> Vec<Strip> {
+    let (a0, a1) = (s.lo[s.along], s.hi[s.along]);
+    let across = 2 - s.along;
+    let centre = (s.lo[across] + s.hi[across]) / 2.0;
+    let base = s.lo[1];
+    let (mn, mx) = (
+        DVec3::new(s.lo[0], s.lo[1] - WAY_REACH, s.lo[2]),
+        DVec3::new(s.hi[0], s.hi[1] + WAY_REACH, s.hi[2]),
+    );
+    let mut rail = DVec3::ZERO;
+    rail[s.along] = 1.0;
+    let near: Vec<(DVec3, DVec3, f64)> = ways
+        .iter()
+        .filter_map(|w| {
+            // A rail alongside its own walkway stands at its edge, inside the half width plus
+            // the margin; only a rail that crosses a way is kept off it by the margin.
+            let parallel = w.flat.dot(rail).abs() > 0.97;
+            let r = if parallel {
+                w.half - 0.15
+            } else {
+                w.half + WAY_MARGIN
+            };
+            let (lo, hi) = (w.lo, w.hi);
+            (mx.cmpge(lo).all() && mn.cmple(hi).all()).then_some((w.a, w.b, r))
+        })
+        .collect();
+    if near.is_empty() {
+        return vec![s.clone()];
+    }
+    let blocked = |t: f64| {
+        let mut p = DVec3::new(0.0, base, 0.0);
+        p[s.along] = t;
+        p[across] = centre;
+        near.iter().any(|(a, b, r)| {
+            let ab = *b - *a;
+            let flat = DVec3::new(ab.x, 0.0, ab.z);
+            let len2 = flat.length_squared().max(1e-9);
+            let u = (DVec3::new(p.x - a.x, 0.0, p.z - a.z).dot(flat) / len2).clamp(0.0, 1.0);
+            let q = *a + ab * u;
+            DVec3::new(p.x - q.x, 0.0, p.z - q.z).length() <= *r && (p.y - q.y).abs() <= WAY_REACH
+        })
+    };
+    if a1 - a0 < 0.5 {
+        // A post or a stub: kept whole if its middle is clear.
+        return if blocked((a0 + a1) / 2.0) {
+            Vec::new()
+        } else {
+            vec![s.clone()]
+        };
+    }
+    let n = (((a1 - a0) / 0.25).ceil() as usize).max(1);
+    let mut out = Vec::new();
+    let mut start: Option<f64> = None;
+    for i in 0..=n {
+        let t = a0 + (a1 - a0) * i as f64 / n as f64;
+        let open = !blocked(t);
+        match (open, start) {
+            (true, None) => start = Some(t),
+            (false, Some(b)) => {
+                start = None;
+                if t - b >= 0.5 {
+                    out.push(piece_of(s, b, t - 0.25));
+                }
+            }
+            _ => {}
         }
     }
+    if let Some(b) = start {
+        if a1 - b >= 0.5 {
+            out.push(piece_of(s, b, a1));
+        }
+    }
+    out
+}
+
+fn piece_of(s: &Strip, from: f64, to: f64) -> Strip {
+    let mut p = s.clone();
+    p.lo[s.along] = from;
+    p.hi[s.along] = to;
+    p
+}
+
+/// The rails of `prims` kept off the ways on (PW.4.11): every RAILING box in an upright frame is
+/// cut where a way crosses it, stops 0.3 m short of the way, and the stretches under 0.5 m
+/// go. Wedge rails and rails in no upright frame are left as they are.
+pub fn cut_rails(prims: Vec<Primitive>, ways: &[Way]) -> Vec<Primitive> {
+    let mut out = Vec::with_capacity(prims.len());
+    let mut prepared: BTreeMap<[i32; 4], Vec<Prepared>> = BTreeMap::new();
+    for p in prims {
+        let box_of = (p.kind == FeatureKind::RAILING)
+            .then(|| as_box(&p.shape))
+            .flatten()
+            .filter(|(f, _, _)| plumb::is_upright(*f));
+        let Some((frame, origin, l)) = box_of else {
+            out.push(p);
+            continue;
+        };
+        // Canonical coordinates: metres from the cell's origin along the frame's axes.
+        let o = origin.to_metres();
+        let o = DVec3::new(f64::from(o.x), f64::from(o.y), f64::from(o.z));
+        let t: [f64; 3] = std::array::from_fn(|k| frame.axes()[k].dot(o));
+        let m = |q: Q| f64::from(q) / f64::from(M);
+        let lo = [m(l.min.x) + t[0], m(l.min.y) + t[1], m(l.min.z) + t[2]];
+        let hi = [m(l.max.x) + t[0], m(l.max.y) + t[1], m(l.max.z) + t[2]];
+        let along = if hi[0] - lo[0] >= hi[2] - lo[2] { 0 } else { 2 };
+        let strip = Strip {
+            frame,
+            along,
+            lo,
+            hi,
+        };
+        let key = match frame {
+            Frame::Id => [0, 0, 0, 0],
+            Frame::Table { yaw, tilt } => [1, i32::from(yaw), i32::from(tilt), 0],
+            Frame::Dir { d } => [2, i32::from(d[0]), i32::from(d[1]), i32::from(d[2])],
+        };
+        let set = prepared.entry(key).or_insert_with(|| prepare(ways, frame));
+        let pieces = cut_ways(&strip, set);
+        if pieces.len() == 1
+            && pieces[0]
+                .lo
+                .iter()
+                .zip(&lo)
+                .all(|(a, b)| (a - b).abs() < 1e-9)
+            && pieces[0]
+                .hi
+                .iter()
+                .zip(&hi)
+                .all(|(a, b)| (a - b).abs() < 1e-9)
+        {
+            out.push(p);
+            continue;
+        }
+        for q in pieces {
+            out.push(rail(
+                q.frame,
+                QVec3::new(0, 0, 0),
+                quanta_out(q.lo, false),
+                quanta_out(q.hi, true),
+            ));
+        }
+    }
+    out
 }
 
 /// Joins strips of one frame that lie on one line and touch (a gap of up to 0.1 m), and makes
@@ -371,6 +590,15 @@ fn v3(p: DVec3) -> Vec3 {
 /// with nothing guarding it: `Some(false)` if a rail or wall stands there already, `Some(true)`
 /// if it is open above a drop, `None` if it is closed or the drop is under 15 m.
 fn open_drop(w: &World<'_>, top: DVec3, out: DVec3, up: DVec3) -> Option<bool> {
+    // An edge on the cell's side goes on into the neighbour, which decides (PW.4.11): a deck
+    // that ends on the face is not an open edge.
+    let beyond = top + out * 0.45;
+    if [beyond.x, beyond.y, beyond.z]
+        .iter()
+        .any(|&c| !(0.0..=512.0).contains(&c))
+    {
+        return None;
+    }
     // Closed by a wall above, or continued by a floor within a step down (0.75 m) or the foot
     // of a stair (a step up).
     if w.contains(v3(top + out * 0.45 + up * 0.9))
@@ -411,6 +639,37 @@ fn rail(frame: Frame, origin: QVec3, lo: [Q; 3], hi: [Q; 3]) -> Primitive {
         material: MaterialId::METAL,
         kind: FeatureKind::RAILING,
         flags: PrimFlags::NONE,
+    }
+}
+
+/// Quanta of canonical metres, rounded outwards.
+fn quanta_out(v: [f64; 3], up: bool) -> [Q; 3] {
+    v.map(|m| {
+        let x = m * f64::from(M);
+        (if up { x.ceil() } else { x.floor() }) as Q
+    })
+}
+
+/// Plumb steps of a rail along the line from `foot` to `head` (upright-frame coordinates of the
+/// wedge's top line: the rail's top is `HEIGHT` above the line of the nosings).
+fn stepped_rail(foot: DVec3, head: DVec3, upright: Frame, out: &mut Vec<Primitive>) {
+    let h = f64::from(HEIGHT) / f64::from(M);
+    let run = DVec3::new(head.x - foot.x, 0.0, head.z - foot.z).length();
+    let n = ((run / 1.0).ceil() as usize).max(1);
+    let t = f64::from(THICKNESS) / f64::from(M) / 2.0;
+    for i in 0..n {
+        let (p0, p1) = (
+            foot + (head - foot) * (i as f64 / n as f64),
+            foot + (head - foot) * ((i + 1) as f64 / n as f64),
+        );
+        let mn = DVec3::new(p0.x.min(p1.x) - t, p0.y.min(p1.y) - h, p0.z.min(p1.z) - t);
+        let mx = DVec3::new(p0.x.max(p1.x) + t, p0.y.max(p1.y), p0.z.max(p1.z) + t);
+        out.push(rail(
+            upright,
+            QVec3::new(0, 0, 0),
+            quanta_out(mn.to_array(), false),
+            quanta_out(mx.to_array(), true),
+        ));
     }
 }
 
@@ -495,7 +754,12 @@ fn deck_edges(
     strips: &mut Vec<Strip>,
     stats: &mut EdgeStats,
 ) {
-    let up = at.axes[1];
+    // Only a floor that can be walked on (within the slope limit of level) gets rails, and
+    // gravity, not the piece, says which way is up.
+    if !plumb::walkable(at.frame) {
+        return;
+    }
+    let up = DVec3::Y;
     // Something to walk on: standing room over the middle of the top face. (A rib under a deck
     // or a plate under a wall has none.)
     let mid = at.at([
@@ -573,7 +837,7 @@ fn deck_edges(
                             lo[across] = edge - THICKNESS;
                             hi[across] = edge;
                         }
-                        strips.push(at.strip(lo, hi, along));
+                        strips.extend(at.strips(lo, hi, along));
                     }
                 }
             }
@@ -582,6 +846,7 @@ fn deck_edges(
 }
 
 /// The two sides of a flight, in pieces of a few steps each, stepped up the slope.
+#[allow(clippy::too_many_lines)] // the sides of a flight, foot box and wedge
 fn flight_edges(
     w: &World<'_>,
     at: &Placed,
@@ -595,7 +860,10 @@ fn flight_edges(
     let (along, across) = if along_x { (0usize, 2usize) } else { (2, 0) };
     let lo = [l.min.x, l.min.y, l.min.z];
     let hi = [l.max.x, l.max.y, l.max.z];
-    let up = at.axes[1];
+    let Some((upright, hx, hz)) = plumb::upright(at.frame) else {
+        return;
+    };
+    let up = DVec3::Y;
     let forward = matches!(rise, Dir4::PosX | Dir4::PosZ);
     let steps = f64::from(steps);
     for (e, sign) in [-1i64, 1].into_iter().enumerate() {
@@ -633,39 +901,103 @@ fn flight_edges(
         stats.guarded += 1;
         // A wall 0.125 m thick that follows the flight: a box up to the height of the rail at
         // the foot, and a ramp on it that rises with the flight, so its top is the rail's
-        // height above the line of the nosings all the way up.
+        // height above the line of the nosings all the way up. Both stand plumb: they are built
+        // in the upright frame of the flight's heading.
         let band = |a: &mut [Q; 3], b: &mut [Q; 3]| {
             a[along] = lo[along];
             b[along] = hi[along];
+            // A quantum inside the side of the flight, so that no face of the rail lies in the
+            // plane of the flight's own side.
             if sign < 0 {
-                a[across] = edge;
-                b[across] = edge + THICKNESS;
+                a[across] = edge + INSET;
+                b[across] = edge + INSET + THICKNESS;
             } else {
-                a[across] = edge - THICKNESS;
-                b[across] = edge;
+                a[across] = edge - INSET - THICKNESS;
+                b[across] = edge - INSET;
             }
         };
         let (mut a, mut b) = ([0; 3], [0; 3]);
         band(&mut a, &mut b);
-        a[1] = lo[1];
-        b[1] = lo[1] + HEIGHT;
-        out.push(rail(at.frame, at.origin, a, b));
         a[1] = lo[1] + HEIGHT;
         b[1] = hi[1] + HEIGHT;
-        out.push(Primitive {
-            shape: Shape::oriented(
-                at.frame,
-                at.origin,
-                LocalShape::Ramp {
-                    aabb: QAabb::new(QVec3::new(a[0], a[1], a[2]), QVec3::new(b[0], b[1], b[2])),
-                    rise,
-                },
-                QAabb::new(QVec3::new(0, 0, 0), QVec3::new(CELL, CELL, CELL)),
-            ),
-            material: MaterialId::METAL,
-            kind: FeatureKind::RAILING,
-            flags: PrimFlags::NONE,
-        });
+        // The ends of the wedge's top line, in the upright frame: the foot and the head.
+        let corner = |along_hi: bool, across_hi: bool, y: Q| {
+            let mut c = [0; 3];
+            c[along] = if along_hi { b[along] } else { a[along] };
+            c[across] = if across_hi { b[across] } else { a[across] };
+            c[1] = y;
+            let w = at.at(c.map(f64::from));
+            DVec3::new(w.dot(hx), w.y, w.dot(hz))
+        };
+        let (foot_hi, head_hi) = (!forward, forward);
+        let pts = [
+            (corner(foot_hi, false, a[1]), corner(foot_hi, true, a[1])),
+            (corner(head_hi, false, b[1]), corner(head_hi, true, b[1])),
+        ];
+        let run = if along == 0 { 0 } else { 2 };
+        let (foot, head) = ((pts[0].0 + pts[0].1) / 2.0, (pts[1].0 + pts[1].1) / 2.0);
+        let all = [pts[0].0, pts[0].1, pts[1].0, pts[1].1];
+        let (mut mn, mut mx) = (DVec3::splat(f64::MAX), DVec3::splat(f64::MIN));
+        for p in all {
+            mn = mn.min(p);
+            mx = mx.max(p);
+        }
+        let other = 2 - run;
+        if (head[other] - foot[other]).abs() > 0.2 {
+            // A flight in a tilted frame climbs along the frame's up, which is slanted: its
+            // line is not in a plane of the upright frame, so the rail is a row of plumb steps
+            // along the line of the nosings.
+            stepped_rail(foot, head, upright, out);
+            continue;
+        }
+        // The foot box: level at the foot, under the wedge. It stands inside the flight, whose
+        // body is solid under the nosings (`StairRun`).
+        let (mut fa, mut fb) = (a, b);
+        fa[1] = lo[1];
+        fb[1] = lo[1] + HEIGHT;
+        for piece in at.strips(fa, fb, along) {
+            out.push(rail(
+                piece.frame,
+                QVec3::new(0, 0, 0),
+                quanta_out(piece.lo, false),
+                quanta_out(piece.hi, true),
+            ));
+        }
+        let rising_with_run = head[run] > foot[run];
+        let rise_dir = if (head.y >= foot.y) == rising_with_run {
+            1
+        } else {
+            -1
+        };
+        let rise = match (run, rise_dir) {
+            (0, 1) => Dir4::PosX,
+            (0, _) => Dir4::NegX,
+            (_, 1) => Dir4::PosZ,
+            _ => Dir4::NegZ,
+        };
+        let (qlo, qhi) = (
+            quanta_out(mn.to_array(), false),
+            quanta_out(mx.to_array(), true),
+        );
+        if (0..3).all(|k| qhi[k] > qlo[k]) {
+            out.push(Primitive {
+                shape: Shape::oriented(
+                    upright,
+                    QVec3::new(0, 0, 0),
+                    LocalShape::Ramp {
+                        aabb: QAabb::new(
+                            QVec3::new(qlo[0], qlo[1], qlo[2]),
+                            QVec3::new(qhi[0], qhi[1], qhi[2]),
+                        ),
+                        rise,
+                    },
+                    QAabb::new(QVec3::new(0, 0, 0), QVec3::new(CELL, CELL, CELL)),
+                ),
+                material: MaterialId::METAL,
+                kind: FeatureKind::RAILING,
+                flags: PrimFlags::NONE,
+            });
+        }
     }
 }
 
@@ -721,5 +1053,47 @@ mod tests {
             "{} rails in {n} cells",
             total.added
         );
+    }
+
+    /// PW.4.10: gravity, not the piece, says which way up is. Every rail of the cells stands
+    /// plumb (its frame is upright), whatever the frame of the deck or flight it guards.
+    #[test]
+    fn rails_stand_plumb() {
+        let seed = WorldSeed(0x5eed);
+        let cache = L1Cache::default();
+        let (mut rails, mut tilted_cells) = (0usize, 0usize);
+        for key in cells(120) {
+            let (out, _) = l2_cell_web_edges(seed, &cache, key);
+            let tissue = crate::tissue::tissue_cell(seed, cache.tissue(), key);
+            tilted_cells += usize::from(!crate::plumb::is_upright(tissue.lattice.frame));
+            for p in out
+                .primitives
+                .iter()
+                .filter(|p| p.kind == FeatureKind::RAILING)
+            {
+                rails += 1;
+                let Shape::Oriented(o) = p.shape else {
+                    continue;
+                };
+                assert!(
+                    crate::plumb::is_upright(o.frame),
+                    "cell {key:?}: a rail leans, frame {:?}",
+                    o.frame
+                );
+            }
+        }
+        eprintln!("{rails} rails in 120 cells, {tilted_cells} with a tilted lattice");
+        assert!(rails > 1000 && tilted_cells > 0);
+    }
+
+    #[test]
+    #[ignore = "timing"]
+    fn timing() {
+        let cache = L1Cache::default();
+        let t0 = std::time::Instant::now();
+        for key in cells(20) {
+            let _ = l2_cell_web_edges(WorldSeed(0x5eed), &cache, key);
+        }
+        eprintln!("20 cells {:?}", t0.elapsed());
     }
 }

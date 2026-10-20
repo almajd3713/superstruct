@@ -225,6 +225,10 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
         } else {
             0
         };
+        if p.kind == worldgen::prim::FeatureKind::RAILING {
+            primmesh::add_primitive(&mut mesh, p);
+            continue;
+        }
         match p.shape {
             Shape::Box { aabb } => boxes.push(SolidBox {
                 aabb,

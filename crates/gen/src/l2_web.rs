@@ -95,6 +95,7 @@ pub fn l2_cell_web_edges(
         crate::edges::guard_edges(seed, cell, &primitives, &world)
     };
     primitives.extend(rails);
+    let mut primitives = crate::edges::cut_rails(primitives, &ways_of(&t));
     let mut seen = std::collections::HashSet::new();
     primitives.retain(|p| seen.insert((p.shape, p.material, p.kind, p.flags)));
     let child_constraints = t
@@ -141,6 +142,34 @@ fn drop_in_tram_volumes(seed: WorldSeed, cell: CellKey, prims: &mut Vec<Primitiv
                 && b.max.z + o[2] > e.min.z
         })
     });
+}
+
+/// The ways on of a cell for the edge pass (PW.4.11): every leg and rise, and every doorway.
+fn ways_of(t: &crate::tissue::Tissue) -> Vec<crate::edges::Way> {
+    let mut ways = Vec::new();
+    for w in &t.paths.walks {
+        // A rise is sampled every half metre; a way every 1.5 m is enough (a helix bends little
+        // over that) and keeps the edge pass fast.
+        let mut points: Vec<glam::DVec3> = w.points.iter().step_by(3).copied().collect();
+        if let (Some(last), Some(&end)) = (points.last(), w.points.last())
+            && *last != end
+        {
+            points.push(end);
+        }
+        for pair in points.windows(2) {
+            ways.push(crate::edges::Way {
+                a: pair[0],
+                b: pair[1],
+                half: w.width / 2.0,
+            });
+        }
+    }
+    ways.extend(
+        crate::l3_web::doors_of(t)
+            .into_iter()
+            .map(|(a, b)| crate::edges::Way { a, b, half: 2.0 }),
+    );
+    ways
 }
 
 const L2_Q: Q = 512 * 16;
@@ -347,8 +376,9 @@ mod tests {
             let l2_prims = l2_cell_web(seed, cache, key).primitives;
             let l2 = Probe::new(&l2_prims);
             let up = routes.lattice.frame.axes()[1];
+            // Headroom is measured plumb (PW.4.10): a walker stands upright on a tilted floor.
             let at_l2 = |c: glam::DVec3, dy: f64| {
-                let p = c + up * dy;
+                let p = c + glam::DVec3::Y * dy;
                 glam::Vec3::new(p.x as f32, p.y as f32, p.z as f32)
             };
             let o = local.map(|v| v as f32 * 512.0);

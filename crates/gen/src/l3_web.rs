@@ -254,6 +254,37 @@ fn overlap(a: &QAabb, b: &QAabb) -> bool {
         && b.min.z < a.max.z
 }
 
+/// The doorways of an L2 cell's masses as `(outside, inside)`: points 2 m either side of the
+/// wall, on the floor of the doorway, in cell-local metres (the census and the edge pass read
+/// them as ways on).
+pub fn doors_of(t: &crate::tissue::Tissue) -> Vec<(DVec3, DVec3)> {
+    let em = crate::tissue_grow::Emitter::new(&t.lattice);
+    let mut doors = Vec::new();
+    for m in mass_specs(t) {
+        let part = &t.structures[m.structure].parts[m.part];
+        for e in &m.entrances {
+            if e.kind != EntranceKind::Door {
+                continue;
+            }
+            let (lo, hi) = entrance_cut(e, part);
+            let c = [
+                f64::midpoint(lo[0], hi[0]),
+                lo[1],
+                f64::midpoint(lo[2], hi[2]),
+            ];
+            let d = match e.side {
+                0 => [0.0, 0.0, -1.0],
+                1 => [1.0, 0.0, 0.0],
+                2 => [0.0, 0.0, 1.0],
+                _ => [-1.0, 0.0, 0.0],
+            };
+            let at = |k: f64| [c[0] + d[0] * k, c[1] + 0.1, c[2] + d[2] * k];
+            doors.push((em.at(at(2.0)), em.at(at(-2.0))));
+        }
+    }
+    doors
+}
+
 /// Every mass of an L2 cell's tissue, in structure and part order. A part that shares volume
 /// with an earlier mass (a fused neighbour, MUT-14) is not a mass: it stays solid, so that every
 /// slot of the lattice belongs to at most one plan.

@@ -8,6 +8,7 @@ pub mod cavity;
 pub mod cell;
 pub mod character;
 pub mod coord;
+pub mod defects;
 pub mod edges;
 pub mod forms;
 pub mod hash;
@@ -53,6 +54,7 @@ pub mod orient;
 pub mod paths;
 pub mod paths_v;
 pub mod payoffs;
+pub mod plumb;
 pub mod port;
 pub mod prim;
 pub mod regime;
@@ -74,9 +76,8 @@ pub mod tram;
 pub mod validate;
 pub mod walk;
 pub mod walk_oriented;
-#[cfg(test)]
-mod zfight;
+pub(crate) mod zfight;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 17;
+pub const GEN_VERSION: u32 = 18;
