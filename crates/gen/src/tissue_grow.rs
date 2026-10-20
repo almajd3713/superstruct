@@ -159,6 +159,9 @@ fn pick(word: u64, weights: &[u32]) -> Option<usize> {
     })
 }
 
+/// Tries of the knot's hub after its first.
+const HUB_RETRIES: usize = 3;
+
 /// A rejected attempt. The code names the reason (1..=8 in `fit` and the entrances, 19 for
 /// no support, 20 + the support when a place cannot be found); it is kept for debugging.
 fn rej(_code: usize) -> Option<Structure> {
@@ -675,8 +678,11 @@ pub(crate) fn place(
         } else {
             sz
         };
+        // A form that cannot be made at this size is a slab tower instead, unless it is a hub,
+        // a set piece or a local place: those are landmarks and are not placed as a plain slab.
         let (out, used) = match (form.build)(build_size, &mut rng) {
             Some(o) => (o, None),
+            None if !form.tag.starts_with("FORM") => return None,
             None => (
                 (crate::forms::FORMS[0].build)(build_size, &mut rng)?,
                 Some(0u16),
@@ -1021,41 +1027,65 @@ pub fn grow(t: &mut Tissue, rng: &mut Rng, _weave: u8) {
     // Hubs first (the draws are always made): the knot's, and a contextual one with chance 1/4.
     let hub_words: [[u64; 16]; 2] =
         std::array::from_fn(|_| std::array::from_fn(|_| rng.next_u64()));
+    // Fresh words for the knot's hub when it did not fit (PW.3.15c).
+    let retry_words: [[u64; 16]; HUB_RETRIES] =
+        std::array::from_fn(|_| std::array::from_fn(|_| rng.next_u64()));
     let (pick_word, chance_word) = (rng.next_u64(), rng.next_u64());
-    let mut wanted: Vec<usize> = Vec::new();
+    // The kinds each wanted hub may take, in the order they are tried: the drawn one first.
+    let mut wanted: Vec<Vec<usize>> = Vec::new();
     if let Some(f) = t.knot_hub {
         let kinds = crate::hubs::knot_kinds(f);
         let ws: Vec<u32> = kinds.iter().map(|k| k.1).collect();
-        wanted.push(kinds[pick(pick_word, &ws).unwrap_or(0)].0);
+        let first = pick(pick_word, &ws).unwrap_or(0);
+        wanted.push(
+            (0..kinds.len())
+                .map(|k| kinds[(first + k) % kinds.len()].0)
+                .collect(),
+        );
     }
     if let Some(kind) = crate::hubs::contextual(t)
         && chance_word % 4 == 0
     {
-        wanted.push(kind);
+        wanted.push(vec![kind]);
     }
-    for (i, h) in wanted.into_iter().enumerate() {
-        if dirty {
-            world = World::new(t);
-            cands = candidates(&world);
-            dirty = false;
-        }
-        if let Some(s) = attempt(
-            t,
-            &hub_words[i],
-            0,
-            &mut in_route,
-            &seg_map,
-            &world,
-            &cands,
-            Some(crate::hubs::HUB_BASE + h),
-        ) {
-            built += s.slots.len();
-            // A hub that did not fit as itself fell back to a slab: a plain structure.
-            if (crate::hubs::HUB_BASE..crate::sets::SET_BASE).contains(&usize::from(s.form)) {
-                t.hubs.push((h as u8 + 1, t.structures.len() as u16));
+    for (i, kinds) in wanted.into_iter().enumerate() {
+        // The knot's hub is tried again with fresh words, and with the next kind of its family
+        // where it has one; a contextual hub is tried once.
+        let tries = if i == 0 && t.knot_hub.is_some() {
+            1 + HUB_RETRIES
+        } else {
+            1
+        };
+        for r in 0..tries {
+            if dirty {
+                world = World::new(t);
+                cands = candidates(&world);
+                dirty = false;
             }
-            t.structures.push(s);
-            dirty = true;
+            let words = if r == 0 {
+                &hub_words[i]
+            } else {
+                &retry_words[r - 1]
+            };
+            let h = kinds[r % kinds.len()];
+            if let Some(s) = attempt(
+                t,
+                words,
+                0,
+                &mut in_route,
+                &seg_map,
+                &world,
+                &cands,
+                Some(crate::hubs::HUB_BASE + h),
+            ) {
+                built += s.slots.len();
+                if (crate::hubs::HUB_BASE..crate::sets::SET_BASE).contains(&usize::from(s.form)) {
+                    t.hubs.push((h as u8 + 1, t.structures.len() as u16));
+                }
+                t.structures.push(s);
+                dirty = true;
+                break;
+            }
         }
     }
     // Set pieces: none (1/2), one (1/4) or two (1/4), of the kinds the cell's context allows.
@@ -1175,6 +1205,7 @@ fn fit(
     variant: u8,
     cands: &Candidates,
     mut size: [i32; 3],
+    min: [i32; 3],
     form: &crate::forms::FormDef,
     words: &[u64; 16],
     seg_map: &[Vec<u16>],
@@ -1185,11 +1216,14 @@ fn fit(
             Ok(r) => return Ok(r),
             Err(code) => last = code,
         }
-        let k = (0..3).max_by_key(|&k| size[k]).unwrap_or(0);
-        if size.iter().all(|&s| s <= 1) {
+        // Shrinks the axis with the most to give; a hub stops at the least its builder needs.
+        let Some(k) = (0..3)
+            .filter(|&k| size[k] > min[k].max(1))
+            .max_by_key(|&k| size[k] - min[k])
+        else {
             break;
-        }
-        size[k] = (size[k] - 1).max(1);
+        };
+        size[k] -= 1;
     }
     Err(last)
 }
@@ -1401,6 +1435,16 @@ fn attempt(
         }
         size[k] -= 1;
     }
+    // A hub keeps at least the size its builder needs (the low end of its range).
+    let min = if hub.is_some_and(|id| id < crate::sets::SET_BASE) {
+        let lo = |k: usize| {
+            let m = form.size_m.0[k] * i32::from(num) / i32::from(den);
+            ((m + pitch - 1) / pitch).max(1)
+        };
+        [lo(0), lo(2), lo(1)]
+    } else {
+        [1; 3]
+    };
     let variants = crate::tissue_variants::variants_of(support);
     // Three in four structures are plain; the rest share the variants equally.
     let want = if hub.is_some() || words[10] & 3 != 0 || variants.len() < 2 {
@@ -1409,7 +1453,7 @@ fn attempt(
         variants[1 + below(words[10] >> 8, variants.len() - 1)]
     };
     let (placed, slots, swallowed) =
-        match fit(t, w, support, want, cands, size, form, words, seg_map) {
+        match fit(t, w, support, want, cands, size, min, form, words, seg_map) {
             Ok(r) => r,
             Err(code) => return rej(code),
         };

@@ -381,7 +381,7 @@ mod tests {
         let seed = WorldSeed(0x5eed);
         let cache = TissueCache::default();
         let mut seen = [0usize; 12];
-        let (mut knots, mut with_hub) = (0, 0);
+        let (mut knots, mut with_hub, mut with_knot_hub) = (0, 0, 0);
         for k in 0..600i64 {
             let l1 = I64Vec3::new(k % 9 - 4, k / 9 % 3, k / 27 % 20 - 10);
             let Some(sk) = crate::l1_artery::skeleton(seed, l1) else {
@@ -393,6 +393,12 @@ mod tests {
             assert_eq!(t.knot_hub, Some(sk.knot_hub));
             knots += 1;
             with_hub += usize::from(!t.hubs.is_empty());
+            let kinds = knot_kinds(sk.knot_hub);
+            with_knot_hub += usize::from(
+                t.hubs
+                    .iter()
+                    .any(|&(id, _)| kinds.iter().any(|k| k.0 + 1 == usize::from(id))),
+            );
             for &(id, _) in &t.hubs {
                 seen[usize::from(id)] += 1;
             }
@@ -411,8 +417,12 @@ mod tests {
             }
         }
         eprintln!(
-            "knots {knots}, with a hub {with_hub}, per hub {:?}",
+            "knots {knots}, with a hub {with_hub}, with the knot's own hub {with_knot_hub}, per hub {:?}",
             &seen[1..]
+        );
+        assert!(
+            with_knot_hub * 10 >= knots * 9,
+            "{with_knot_hub} of {knots} knot cells have their hub"
         );
         for id in 1..=11 {
             assert!(seen[id] > 0, "HUB-{id:02} never occurs: {seen:?}");

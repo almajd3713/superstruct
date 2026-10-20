@@ -430,7 +430,11 @@ mod tests {
         let seed = WorldSeed(0x5eed);
         let cache = TissueCache::default();
         let mut seen = [0usize; 17];
-        for k in 0..3000i64 {
+        // The rare ones need void edges and ports: scan until every kind has been seen.
+        for k in 0..9000i64 {
+            if k >= 3000 && seen[1..].iter().all(|&n| n > 0) {
+                break;
+            }
             let l1 = I64Vec3::new(k % 9 - 4, k / 9 % 3, k / 27 % 40 - 20);
             let key = CellKey::new(
                 Level::L2,
