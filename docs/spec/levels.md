@@ -993,6 +993,7 @@ A rise segment is a straight run of `k` slots, so it climbs `32 k` m inside one 
 - **Deviations (decide):** PV-10 is 18–20 m wide in total (two 9–10 m lanes), not 60–150 m, because a column is 32 m; wider needs lateral slots. PV-03's second stair is not connected to the route.
 - **Bores.** Bored and swallowed runs add the box the stair fills (plus 0.5 m) to `PathPieces::bores`.
 - **Tests.** `every_type_climbs_the_column`: all ten, at 1, 2 and 4 slots, four plan orientations; the route starts at the centre of the foot and ends at the centre of the top, has a floor under every sample and 1.85 m of headroom above, and the pieces stay inside the 32 m column. In the 2 000-cell run all ten occur (PV-08: 255, PV-04: 5 275). Only the identity frame is probed; tilted frames use the same lattice-frame code (PV-05 excepted).
+- **Plan against the legs at the foot (PW.3.12b, version 12).** The first lane stands solid from the floor up on plan −v, so a leg that meets the foot from that side runs into it, and a leg across the middle runs into the lanes. `place_rise` therefore draws the plan (swap and flips) as before and, if a horizontal segment leaves the foot slot on the solid side, takes the first of the eight plans that has none; PV-03 is solid on both sides and falls back to PV-01 when no plan is free. Measured on the walk test (52 000 samples on open level segments): samples blocked by stairs and ramps 423 to 16.
 - Not in `l2_cell` yet (PW.3.21). Screenshots waived.
 
 

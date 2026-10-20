@@ -371,6 +371,7 @@ mod tests {
     /// The same for the open level segments (catwalks, bridges, avenues): what blocks them.
     #[test]
     fn an_open_segment_can_be_walked() {
+        use crate::prim::FeatureKind;
         let seed = WorldSeed(0x5eed);
         let cache = L1Cache::default();
         let w = walk_l1(
@@ -381,6 +382,18 @@ mod tests {
         );
         eprintln!("open: {w:?}");
         assert!(w.samples > 10_000);
-        assert!(w.blocked() * 100 <= w.samples, "{w:?}");
+        assert!(w.blocked() * 500 <= w.samples, "{w:?}");
+        // Where a leg meets a stair the stair is turned so that the leg comes in along its
+        // corridor or from its free side (PW.3.12b).
+        let stairs: usize = w
+            .kinds
+            .iter()
+            .filter(|((_, k), _)| *k == FeatureKind::STAIR_TOWER.0 || *k == FeatureKind::RAMP.0)
+            .map(|(_, n)| n)
+            .sum();
+        assert!(
+            stairs * 2000 <= w.samples,
+            "{stairs} samples blocked by stairs: {w:?}"
+        );
     }
 }

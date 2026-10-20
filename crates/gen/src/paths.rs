@@ -1352,18 +1352,18 @@ fn place_rise(
             u32::from(weights[fam]).max(u32::from(id == 21))
         })
         .collect();
-    let id = Rng::new(words[0])
+    let mut id = Rng::new(words[0])
         .pick_weighted(&ws)
         .map_or(21, |i| cands[i]);
-    let (lo, hi) = paths_v::width_range(id);
-    // The stair's long axis lies along the legs that meet it at its foot: at the foot a leg
-    // crossing the flights would run into them (they stand solid from the floor up).
+    // At its foot a stair stands solid from the floor up on one side of its middle corridor
+    // (the first lane, on plan -v), so a leg must come in along the corridor (plan u) or from
+    // the other side. Segments are fixed by routing; `t.route` also grows later, which the
+    // bored cut must not see.
     let foot = cs
         .iter()
         .min_by_key(|c| c[1])
         .map_or([0; 3], |c| [c[0], c[1], c[2]]);
-    // Segments are fixed by routing; `t.route` also grows later, which the bored cut must not see.
-    let on_route = |d: [i64; 2]| {
+    let leg_at = |d: [i64; 2]| {
         let c = [foot[0] + d[0], foot[1], foot[2] + d[1]];
         state_at(t, c).is_some() && {
             let i = t
@@ -1372,17 +1372,49 @@ fn place_rise(
             t.segments.iter().any(|s| s.slots.contains(&i))
         }
     };
-    let along_x = on_route([1, 0]) || on_route([-1, 0]);
-    let along_z = on_route([0, 1]) || on_route([0, -1]);
+    let (fx, fz) = (
+        if words[3] & 1 == 1 { 1.0 } else { -1.0 },
+        if words[4] & 1 == 1 { 1.0 } else { -1.0 },
+    );
+    // The drawn plan stands unless a leg comes in on its solid side and another plan is free.
+    let drawn = (words[2] & 1 == 1, fx, fz);
+    // The scissor stair (PV-03) is solid on both sides of the corridor.
+    let solid_side = |id: u8, (swap, fx, fz): (bool, f64, f64)| {
+        let across = |sign: i64| {
+            if swap {
+                [sign * fx as i64, 0]
+            } else {
+                [0, sign * fz as i64]
+            }
+        };
+        leg_at(across(-1)) || (id == 23 && leg_at(across(1)))
+    };
+    let find_plan = |id: u8| {
+        [
+            drawn,
+            (drawn.0, -fx, fz),
+            (drawn.0, fx, -fz),
+            (drawn.0, -fx, -fz),
+            (!drawn.0, fx, fz),
+            (!drawn.0, -fx, fz),
+            (!drawn.0, fx, -fz),
+            (!drawn.0, -fx, -fz),
+        ]
+        .into_iter()
+        .find(|&plan| !solid_side(id, plan))
+    };
+    let mut plan = find_plan(id);
+    if plan.is_none() && id == 23 {
+        id = 21;
+        plan = find_plan(id);
+    }
+    let best = plan.unwrap_or(drawn);
+    let (lo, hi) = paths_v::width_range(id);
     let p = VParams {
         w: lo + (hi - lo) * frac(words[1]),
-        swap: match (along_x, along_z) {
-            (true, false) => false,
-            (false, true) => true,
-            _ => words[2] & 1 == 1,
-        },
-        fx: if words[3] & 1 == 1 { 1.0 } else { -1.0 },
-        fz: if words[4] & 1 == 1 { 1.0 } else { -1.0 },
+        swap: best.0,
+        fx: best.1,
+        fz: best.2,
         k: frac(words[5]),
         side: if words[6] & 1 == 1 { 1.0 } else { -1.0 },
     };
