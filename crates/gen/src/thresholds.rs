@@ -245,7 +245,14 @@ fn faces(t: &Tissue) -> Vec<(Face, bool, bool)> {
     let mut out = Vec::new();
     for s in &t.structures {
         // Only the first two entrances of a structure get a frame: the rest are plain doors.
-        for e in s.entrances.iter().take(2) {
+        for e in s
+            .entrances
+            .iter()
+            .filter(|e| {
+                matches!(e.into, Dir6::PosY | Dir6::NegY) || crate::l3_web::way_in(t, e.slot)
+            })
+            .take(2)
+        {
             out.push((
                 Face {
                     slot: e.slot,

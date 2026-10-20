@@ -541,9 +541,9 @@ fn build(
         (Mesh::default(), Some(far_instances(&prims)))
     } else {
         let mut mesh = mesh_primitives(draw.as_deref().unwrap_or(&prims)).0;
-        if crate::debugview::enabled() {
-            crate::debugview::tag_level(&mut mesh.vertices, id.key.level);
-        }
+        // The level goes into every vertex: the shader draws L2 and L3 a hair nearer than L1
+        // so that surfaces of different levels in one plane do not fight (PW.4.18).
+        crate::debugview::tag_level(&mut mesh.vertices, id.key.level);
         (mesh, None)
     };
     let t2 = Instant::now();
@@ -569,6 +569,24 @@ mod tests {
     use super::*;
     use glam::I64Vec3;
 
+    /// PW.4.17: `doorway_of` and `hollow_envelope` are v6 code. They fire on `Entrance` ports,
+    /// which only the v6 L2 (`l2::l2_cell_in`) emits; the Web L2 has none, so they never act on
+    /// a Web chunk. Kept for the ignored v6 tests until those are deleted.
+    #[test]
+    fn web_l2_cells_have_no_entrance_ports() {
+        let cache = L1Cache::default();
+        for k in 0..30i64 {
+            let key = CellKey::new(Level::L2, I64Vec3::new(k % 8, 6 + k / 8 % 2, 2 + k / 3 % 6));
+            let (out, _) = l2_build(WorldSeed(0), &cache, key);
+            assert!(
+                out.ports
+                    .iter()
+                    .all(|p| !matches!(p.kind, worldgen::port::PortKind::Entrance { .. })),
+                "cell {key:?} has an entrance port"
+            );
+        }
+    }
+
     #[test]
     fn jobs_run_off_thread_and_match_the_direct_result() {
         let id = ChunkId::l2(I64Vec3::new(1, 0, -2));
@@ -576,7 +594,8 @@ mod tests {
         pool.submit(id, 1.0);
         let got = pool.recv().unwrap().unwrap();
         let (out, _) = l2_build(WorldSeed(5), &L1Cache::default(), id.key);
-        let direct = mesh_primitives(&mesh_prims_l2(&out.primitives, &out.ports)).0;
+        let mut direct = mesh_primitives(&mesh_prims_l2(&out.primitives, &out.ports)).0;
+        crate::debugview::tag_level(&mut direct.vertices, id.key.level);
         assert_eq!(got.id, id);
         assert_eq!(got.mesh.vertices, direct.vertices);
         assert_eq!(got.mesh.indices, direct.indices);

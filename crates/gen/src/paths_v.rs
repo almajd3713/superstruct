@@ -756,6 +756,7 @@ pub fn flat_yaw(frame: Frame) -> Option<u8> {
 /// PV-05: a true helical stair on the column's axis, built in the lattice frame turned by each
 /// heading (so it needs a lattice frame without tilt). Steps are 4 Q high, so the climb is
 /// exact.
+#[allow(clippy::too_many_lines)] // the treads, the decks, the rails and the walk
 fn helix(m: &mut M<'_, '_>, total_q: i32, yaw0: u8) {
     let w = m.p.w;
     let rise_q = 4;
@@ -783,6 +784,36 @@ fn helix(m: &mut M<'_, '_>, total_q: i32, yaw0: u8) {
     let clip = m.e.cell;
     m.e.out.extend(helix_stair(&h, clip));
     let yaw_of = |j: u32| (i32::from(start) + i32::from(sense) * j as i32 * 2).rem_euclid(64) as u8;
+    // A rail on the inner edge (over the well) and one on the outer edge, a box to each tread
+    // in the tread's own heading (PW.4.13). The treads next to the decks at the foot and the top
+    // are left open; `edges::cut_rails` also opens the way in.
+    let chord = |r: i32| (r * 13 + 127) / 128 + 1;
+    let outer_q = quanta(inner) + quanta(w);
+    for j in 0..steps {
+        if j < 2 || j + 2 >= steps {
+            continue;
+        }
+        let top = (j as i32 + 1) * rise_q;
+        for (x0, x1) in [(quanta(inner), quanta(inner) + 2), (outer_q - 2, outer_q)] {
+            let half = chord(x1);
+            m.e.out.push(Primitive {
+                shape: Shape::oriented(
+                    Frame::table(yaw_of(j), 0),
+                    Emitter::qv(centre),
+                    LocalShape::Box {
+                        aabb: QAabb::new(
+                            QVec3::new(x0, top, -half),
+                            QVec3::new(x1, top + 18, half),
+                        ),
+                    },
+                    clip,
+                ),
+                material: MaterialId::METAL,
+                kind: FeatureKind::RAILING,
+                flags: PrimFlags::NONE,
+            });
+        }
+    }
     let last = yaw_of(steps - 1);
     // A deck from the axis to the first tread, and from the last tread back to the axis.
     for (yaw, y) in [(start, ay), (last, top)] {

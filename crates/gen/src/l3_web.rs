@@ -121,6 +121,7 @@ fn structure_masses(
     si: usize,
     s: &Structure,
     lat_coords: &dyn Fn(u32) -> [i32; 3],
+    way_in: &dyn Fn(u32) -> bool,
 ) -> Vec<MassSpec> {
     let mut specs: Vec<MassSpec> = s
         .parts
@@ -140,6 +141,11 @@ fn structure_masses(
         }
     };
     for e in &s.entrances {
+        // A door needs a way to it (PW.4.17): a floor where the route passes outside.
+        let horizontal = !matches!(e.into, Dir6::PosY | Dir6::NegY);
+        if horizontal && !way_in(e.slot) {
+            continue;
+        }
         let r = lat_coords(e.slot);
         let d = e.into.offset();
         let inside = [r[0] + d.x as i32, r[1] + d.y as i32, r[2] + d.z as i32];
@@ -254,6 +260,120 @@ fn overlap(a: &QAabb, b: &QAabb) -> bool {
         && b.min.z < a.max.z
 }
 
+/// Whether a walker can reach the face of a structure from route slot `slot`: a floor under
+/// the route where it passes the slot's centre (`floored_slots`).
+pub fn way_in(t: &crate::tissue::Tissue, slot: u32) -> bool {
+    t.floored_slots.contains(&slot)
+}
+
+/// The entrance slots of a tissue that have a floor under the route where it passes the slot's
+/// centre, 2 m round it (a leg, a landing, a payoff): a route that only runs along the
+/// structure (the mid-flight levels of a stair that passes it) has none. The thresholds are not
+/// read, because they are placed after this is asked. Computed once, after the paths.
+pub fn floored_slots(t: &crate::tissue::Tissue) -> Vec<u32> {
+    let em = crate::tissue_grow::Emitter::new(&t.lattice);
+    let pitch = t.lattice.pitch as f64;
+    let pieces: Vec<&Primitive> = t
+        .paths
+        .prims
+        .iter()
+        .chain(&t.payoffs.prims)
+        .filter(|p| !p.flags.contains(crate::prim::PrimFlags::NO_COLLIDE))
+        .collect();
+    let mut slots: Vec<u32> = t
+        .structures
+        .iter()
+        .flat_map(|s| s.entrances.iter().map(|e| e.slot))
+        .collect();
+    slots.sort_unstable();
+    slots.dedup();
+    slots.retain(|&slot| {
+        let c = t.lattice.coords(slot as usize);
+        let centre = em.at([
+            (c[0] as f64 + 0.5) * pitch,
+            c[1] as f64 * pitch - 0.1,
+            (c[2] as f64 + 0.5) * pitch,
+        ]);
+        let probes =
+            [(0.0, 0.0), (2.0, 0.0), (-2.0, 0.0), (0.0, 2.0), (0.0, -2.0)].map(|(x, z)| {
+                glam::Vec3::new(
+                    (centre.x + x) as f32,
+                    centre.y as f32,
+                    (centre.z + z) as f32,
+                )
+            });
+        let reach = glam::Vec3::splat(2.5);
+        pieces.iter().any(|p| {
+            let b = p.aabb();
+            let (lo, hi) = (b.min_m(), b.max_m());
+            probes.iter().any(|&q| {
+                q.cmpge(lo - reach).all() && q.cmple(hi + reach).all() && p.shape.contains(q)
+            })
+        })
+    });
+    slots
+}
+
+/// The doorways of the masses as clear boxes (cell-local primitives): cut through whatever
+/// else stands in them, the cladding and skin plates and neighbouring structures (PW.4.17).
+pub fn door_cuts(t: &crate::tissue::Tissue) -> Vec<Primitive> {
+    let mut em = crate::tissue_grow::Emitter::new(&t.lattice);
+    for m in mass_specs(t) {
+        let part = &t.structures[m.structure].parts[m.part];
+        for e in &m.entrances {
+            if e.kind == EntranceKind::Door {
+                let (lo, hi) = entrance_cut(e, part);
+                em.frame_box(
+                    lo,
+                    hi,
+                    crate::prim::MaterialId::CONCRETE,
+                    crate::prim::FeatureKind::MISC,
+                    crate::prim::PrimFlags::NO_COLLIDE,
+                );
+            }
+        }
+    }
+    em.out
+}
+
+/// The approach to every door of a route entrance (PW.4.17): a deck at the sill, as wide as the
+/// doorway, from the middle of the route slot to the face, in lattice-frame metres `(lo, hi)`.
+pub fn approach_decks(t: &crate::tissue::Tissue) -> Vec<([f64; 3], [f64; 3])> {
+    let pitch = t.lattice.pitch as f64;
+    let mut out = Vec::new();
+    for s in &t.structures {
+        for e in &s.entrances {
+            let (axis, sign) = match e.into {
+                Dir6::PosX => (0, 1.0),
+                Dir6::NegX => (0, -1.0),
+                Dir6::PosZ => (2, 1.0),
+                Dir6::NegZ => (2, -1.0),
+                _ => continue,
+            };
+            if !way_in(t, e.slot) {
+                continue;
+            }
+            let c = t.lattice.coords(e.slot as usize);
+            let centre = [
+                (c[0] as f64 + 0.5) * pitch,
+                c[1] as f64 * pitch,
+                (c[2] as f64 + 0.5) * pitch,
+            ];
+            let (mut lo, mut hi) = (centre, centre);
+            let far = centre[axis] + sign * (pitch / 2.0 + 0.3);
+            lo[axis] = centre[axis].min(far);
+            hi[axis] = centre[axis].max(far);
+            let across = 2 - axis;
+            lo[across] = centre[across] - 2.0;
+            hi[across] = centre[across] + 2.0;
+            lo[1] = centre[1] - 0.5;
+            hi[1] = centre[1];
+            out.push((lo, hi));
+        }
+    }
+    out
+}
+
 /// The doorways of an L2 cell's masses as `(outside, inside)`: points 2 m either side of the
 /// wall, on the floor of the doorway, in cell-local metres (the census and the edge pass read
 /// them as ways on).
@@ -292,8 +412,22 @@ pub fn mass_specs(t: &crate::tissue::Tissue) -> Vec<MassSpec> {
     let coords = |slot: u32| t.lattice.coords(slot as usize).map(|v| v as i32);
     let mut kept: Vec<MassSpec> = Vec::new();
     for (si, s) in t.structures.iter().enumerate() {
-        for m in structure_masses(si, s, &coords) {
+        for m in structure_masses(si, s, &coords, &|slot| way_in(t, slot)) {
             if m.entrances.is_empty() {
+                continue;
+            }
+            // A stair's column through a part stays solid (cut for the stair), not a house
+            // with a stair through its rooms (PW.4.13).
+            let q = |v: Q| f64::from(v) / 16.0;
+            let (lo, hi) = (
+                [q(m.aabb.min.x), q(m.aabb.min.y), q(m.aabb.min.z)],
+                [q(m.aabb.max.x), q(m.aabb.max.y), q(m.aabb.max.z)],
+            );
+            if t.paths
+                .rise_clear
+                .iter()
+                .any(|(a, b)| (0..3).all(|k| a[k] < hi[k] && lo[k] < b[k]))
+            {
                 continue;
             }
             if !kept.iter().any(|k| overlap(&k.aabb, &m.aabb)) {

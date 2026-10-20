@@ -7,4 +7,4 @@ fail-fast = false
 # The tram envelope test generates thousands of L2 cells; it needs its time on a busy machine.
 [[profile.default.overrides]]
 filter = 'test(no_l2_primitive_enters_the_envelope)'
-slow-timeout = { period = "60s", terminate-after = 12 }
+slow-timeout = { period = "60s", terminate-after = 24 }

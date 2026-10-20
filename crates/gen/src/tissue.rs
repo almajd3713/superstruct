@@ -320,6 +320,8 @@ pub struct Tissue {
     pub payoffs: crate::payoffs::Payoffs,
     /// Segments added by the dead-end pass that must be built as a lift (PV-16).
     pub lift_segments: Vec<u16>,
+    /// The entrance slots with a floor under the route (PW.4.17), from `l3_web::floored_slots`.
+    pub floored_slots: Vec<u32>,
 }
 
 /// Local Dir6 order of the skeleton's faces: −x, +x, −y, +y, −z, +z.
@@ -514,6 +516,7 @@ fn build(seed: WorldSeed, cache: &TissueCache, cell: CellKey, grown: bool) -> Ti
         locals: Vec::new(),
         payoffs: crate::payoffs::Payoffs::default(),
         lift_segments: Vec::new(),
+        floored_slots: Vec::new(),
     };
     let probe = SolidProbe::new(&parent, local);
     route(&mut t, &mut rng, web.weave, &probe);
@@ -527,6 +530,20 @@ fn build(seed: WorldSeed, cache: &TissueCache, cell: CellKey, grown: bool) -> Ti
             .collect();
         t.skin = crate::skin::skin_pass(seed, &t, &parent.pieces, local, &prims);
         t.paths = crate::paths::paths_pass(seed, &t);
+        t.floored_slots = crate::l3_web::floored_slots(&t);
+        // The approach to each door: a deck from the route slot to the face (PW.4.17), part of
+        // the paths so that the rest of the pipeline treats it as one.
+        let mut approach = crate::tissue_grow::Emitter::new(&t.lattice);
+        for (lo, hi) in crate::l3_web::approach_decks(&t) {
+            approach.frame_box(
+                lo,
+                hi,
+                crate::prim::MaterialId::CONCRETE,
+                crate::prim::FeatureKind::WALKWAY,
+                crate::prim::PrimFlags::NONE,
+            );
+        }
+        t.paths.prims.extend(approach.out);
         t.thresholds = crate::thresholds::thresholds_pass(seed, &t);
     }
     t

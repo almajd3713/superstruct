@@ -1797,6 +1797,9 @@ pub(crate) fn quanta(v: f64) -> Q {
     (v * f64::from(Q_PER_M)).round() as Q
 }
 
+/// How far the shell of an interior part stands inside the part's box: one quantum.
+pub(crate) const SHELL_INSET: f64 = 0.0625;
+
 impl<'a> Emitter<'a> {
     pub(crate) fn new(lat: &'a Lattice) -> Self {
         Self {
@@ -1902,7 +1905,11 @@ impl<'a> Emitter<'a> {
         cuts: &[([f64; 3], [f64; 3])],
     ) {
         const T: f64 = 0.5;
+        // The shell stands one quantum (6 cm) inside the part's box, so that none of its faces
+        // lies in the plane of a face of the L3 block it hides (PW.4.18): the block's outer
+        // walls, floor and roof are flush with the box.
         let (lo, hi) = (self.corner(b.lo), self.corner(b.hi));
+        let (lo, hi) = (lo.map(|v| v + SHELL_INSET), hi.map(|v| v - SHELL_INSET));
         let slab = |l: [f64; 3], h: [f64; 3]| (l, h);
         let slabs = [
             slab(lo, [lo[0] + T, hi[1], hi[2]]),
@@ -2296,12 +2303,14 @@ impl<'a> Emitter<'a> {
                     continue;
                 }
                 let (mut l, mut hgh) = (lo, hi);
+                // The back of the panel is on the face of the shell, which stands `SHELL_INSET`
+                // inside the part's box.
                 if positive {
-                    l[axis] = plane;
-                    hgh[axis] = plane + 0.12;
+                    l[axis] = plane - SHELL_INSET;
+                    hgh[axis] = plane - SHELL_INSET + 0.12;
                 } else {
-                    l[axis] = plane - 0.12;
-                    hgh[axis] = plane;
+                    l[axis] = plane + SHELL_INSET - 0.12;
+                    hgh[axis] = plane + SHELL_INSET;
                 }
                 let u = lo[other] + 2.0 + 4.0 * f64::from(i);
                 l[other] = u;

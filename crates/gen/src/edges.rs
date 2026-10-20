@@ -673,6 +673,128 @@ fn stepped_rail(foot: DVec3, head: DVec3, upright: Frame, out: &mut Vec<Primitiv
     }
 }
 
+/// Which of `prims` to keep: false for the dressing that has no host (PW.4.14): a `NO_COLLIDE` window, lamp or glyph
+/// needs solid (a collidable piece of the cell or the parent's solid that no bore cuts) within
+/// 10 cm of its bounds, and a cable needs it at both ends unless the end is on the cell's side
+/// (the neighbour holds the other end). Called last, on the final geometry, so a host that was
+/// cut, dropped or carved away takes its dressing with it.
+pub fn orphan_mask(prims: &[Primitive], world: &World<'_>) -> Vec<bool> {
+    let q = |v: Q| v as f32 / M as f32;
+    prims
+        .iter()
+        .map(|p| {
+            let dressing = p.flags.contains(PrimFlags::NO_COLLIDE)
+                && !p.flags.contains(PrimFlags::ENVELOPE)
+                && matches!(p.kind, FeatureKind::WINDOW | FeatureKind::CABLE);
+            if !dressing {
+                return true;
+            }
+            let b = p.aabb();
+            let (lo, hi) = (
+                Vec3::new(q(b.min.x), q(b.min.y), q(b.min.z)) - Vec3::splat(0.1),
+                Vec3::new(q(b.max.x), q(b.max.y), q(b.max.z)) + Vec3::splat(0.1),
+            );
+            if p.kind == FeatureKind::CABLE {
+                let size = hi - lo;
+                let k = (0..3)
+                    .max_by(|&a, &b| size[a].total_cmp(&size[b]))
+                    .unwrap_or(1);
+                let centre = (lo + hi) * 0.5;
+                return [lo[k], hi[k]].into_iter().all(|e| {
+                    let mut at = centre;
+                    at[k] = e;
+                    at.cmplt(Vec3::splat(0.2)).any()
+                        || at.cmpgt(Vec3::splat(511.8)).any()
+                        || world.contains(at)
+                });
+            }
+            let corners = [
+                (lo + hi) * 0.5,
+                lo,
+                hi,
+                Vec3::new(lo.x, lo.y, hi.z),
+                Vec3::new(hi.x, lo.y, lo.z),
+                Vec3::new(lo.x, hi.y, lo.z),
+                Vec3::new(hi.x, hi.y, lo.z),
+                Vec3::new(lo.x, hi.y, hi.z),
+            ];
+            corners.iter().any(|&c| world.contains(c))
+        })
+        .collect()
+}
+
+/// The vertical members of `prims` (PW.4.16): a post, frame, pier or hanger (a plumb box at least
+/// 1 m high, at most 0.8 m across and three times as tall as wide) that touches nothing at
+/// either end is extended down or up, whichever meets solid first within 8 m, by that distance
+/// plus 5 cm; one that meets nothing within reach is dropped. Members on the cell's side are
+/// left alone (what they stand on is in the neighbour). Returns each piece, changed or not, or
+/// `None` for a dropped one.
+pub fn fix_members(prims: &[Primitive], world: &World<'_>) -> Vec<Option<Primitive>> {
+    let q = |v: Q| v as f32 / M as f32;
+    prims
+        .iter()
+        .map(|p| {
+            let member = p.kind != FeatureKind::RAILING
+                && !p.flags.contains(PrimFlags::NO_COLLIDE)
+                && !p.flags.contains(PrimFlags::INTERIOR)
+                && !p.flags.contains(PrimFlags::ENVELOPE);
+            let Some((frame, origin, l)) = member.then(|| as_box(&p.shape)).flatten() else {
+                return Some(*p);
+            };
+            if !plumb::is_upright(frame) {
+                return Some(*p);
+            }
+            let (h, wx, wz) = (
+                q(l.max.y - l.min.y),
+                q(l.max.x - l.min.x),
+                q(l.max.z - l.min.z),
+            );
+            if h < 1.0 || wx.max(wz) > 0.8 || h < 3.0 * wx.max(wz) {
+                return Some(*p);
+            }
+            let b = p.aabb();
+            let (lo, hi) = (
+                Vec3::new(q(b.min.x), q(b.min.y), q(b.min.z)),
+                Vec3::new(q(b.max.x), q(b.max.y), q(b.max.z)),
+            );
+            let c = (lo + hi) * 0.5;
+            if c.x < 1.0 || c.z < 1.0 || c.x > 511.0 || c.z > 511.0 || lo.y < 1.0 || hi.y > 511.0 {
+                return Some(*p);
+            }
+            let meets = |y: f32| world.contains(Vec3::new(c.x, y, c.z));
+            if meets(lo.y - 0.05) || meets(hi.y + 0.05) {
+                return Some(*p);
+            }
+            let reach = |from: f32, dir: f32| {
+                (1..=32)
+                    .map(|k| k as f32 * 0.25)
+                    .find(|d| meets(from + dir * d))
+            };
+            let (down, up) = (reach(lo.y, -1.0), reach(hi.y, 1.0));
+            let (extend_down, d) = match (down, up) {
+                (Some(d), Some(u)) if d <= u => (true, d),
+                (Some(d), None) => (true, d),
+                (_, Some(u)) => (false, u),
+                (None, None) => return None,
+            };
+            let dq = ((d + 0.05) * M as f32).ceil() as Q;
+            let mut l = l;
+            if extend_down {
+                l.min.y -= dq;
+            } else {
+                l.max.y += dq;
+            }
+            let shape = match p.shape {
+                Shape::Oriented(o) => {
+                    Shape::oriented(frame, origin, LocalShape::Box { aabb: l }, o.clip)
+                }
+                _ => Shape::Box { aabb: l },
+            };
+            Some(Primitive { shape, ..*p })
+        })
+        .collect()
+}
+
 /// The rails for the open edges of the walkable pieces among `pieces`, in cell-local quanta.
 pub fn guard_edges(
     seed: WorldSeed,

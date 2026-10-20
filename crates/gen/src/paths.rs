@@ -54,6 +54,13 @@ pub struct PathPieces {
     pub bores: Vec<Primitive>,
     /// Where each leg and rise is walked, for the defect census (PW.4.8). Not an output.
     pub walks: Vec<Walk>,
+    /// The clear volume of every rise and the range of `prims` it built, for the census
+    /// (PW.4.13). Not an output.
+    pub rises: Vec<(Primitive, std::ops::Range<usize>)>,
+    /// The clear box of every rise in lattice-frame metres, for the masses (PW.4.13).
+    pub rise_clear: Vec<Clear>,
+    /// The range of `prims` built for each walk, by index into `walks` (PW.4.15 census).
+    pub owners: Vec<(std::ops::Range<usize>, usize)>,
 }
 
 /// The walking line of a leg (its two ends) or a rise (its samples), in cell-local metres on
@@ -1488,7 +1495,11 @@ fn paths_impl(seed: WorldSeed, t: &Tissue, only_bored: bool) -> PathPieces {
             let mods = modifiers::draw(&mod_words, id, mat_weights);
             modifiers::retint(&mut e, &mods, first);
             out.mods.push((si as u16, mods));
+            if let Some(c) = cut {
+                out.rise_clear.push(c);
+            }
             if let Some((a, b)) = cut {
+                let before = corridors.out.len();
                 corridors.frame_box(
                     a,
                     b,
@@ -1496,6 +1507,9 @@ fn paths_impl(seed: WorldSeed, t: &Tissue, only_bored: bool) -> PathPieces {
                     FeatureKind::MISC,
                     PrimFlags::NO_COLLIDE,
                 );
+                if let Some(&volume) = corridors.out.get(before) {
+                    out.rises.push((volume, first..e.out.len()));
+                }
             }
             if let Some((a, b)) = cut.filter(|_| kind != Kind::Open) {
                 bores.frame_box(
@@ -1506,6 +1520,7 @@ fn paths_impl(seed: WorldSeed, t: &Tissue, only_bored: bool) -> PathPieces {
                     PrimFlags::NO_COLLIDE,
                 );
             }
+            out.owners.push((first..e.out.len(), out.walks.len()));
             out.walks.push(Walk {
                 id,
                 rise: true,
@@ -1555,6 +1570,7 @@ fn paths_impl(seed: WorldSeed, t: &Tissue, only_bored: bool) -> PathPieces {
             });
             let mut clear = build_leg(&mut e, leg, id, &p);
             modifiers::apply(&mut e, leg, &p, &mods, first);
+            out.owners.push((first..e.out.len(), out.walks.len() - 1));
             let h = p.width / 2.0 + 1.0;
             let (ca, cb) = (leg.map(0.0, -h, -0.5), leg.map(leg.len, h, 4.0));
             corridors.frame_box(

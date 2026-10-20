@@ -33,9 +33,34 @@ pub fn add_primitive(mesh: &mut Mesh, prim: &Primitive) {
         add_shape(mesh, prim.shape, prim.material.0);
     }
     let tag = crate::debugview::prim_tag(prim);
+    let orient = orient_bits(&prim.shape);
     for v in &mut mesh.vertices[first..] {
         v.tag = tag;
+        v.material |= orient;
     }
+}
+
+/// The heading and tilt of a piece's frame, in the bits above the material of its vertices
+/// (4 to 9 the heading in 64ths of a turn, 10 to 12 the tilt in steps of 5 degrees), so the
+/// shader can lay its grid along the piece's edges (PW.4.19). Zero for an axis-aligned piece.
+pub fn orient_bits(shape: &Shape) -> u16 {
+    let Shape::Oriented(o) = shape else {
+        return 0;
+    };
+    let mut ex = o.frame.axes()[0];
+    if ex.y < 0.0 {
+        ex = -ex;
+    }
+    let flat = ex.x.hypot(ex.z);
+    if flat < 1e-6 {
+        return 0;
+    }
+    let turn = ex.z.atan2(ex.x) / std::f64::consts::TAU * 64.0;
+    let yaw = (turn.round() as i32).rem_euclid(64) as u16;
+    let tilt = ((ex.y.atan2(flat).to_degrees() / 5.0).round() as i32)
+        .clamp(0, 7)
+        .cast_unsigned() as u16;
+    (yaw << 4) | (tilt << 10)
 }
 
 /// How far a turned box is grown on every side, in metres. Turned pieces are not culled

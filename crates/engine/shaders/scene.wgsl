@@ -68,6 +68,8 @@ struct VsOut {
     // Debug tag of `debugview.rs` and the draw index, for the debug colour modes.
     @location(5) @interpolate(flat) tag: u32,
     @location(6) @interpolate(flat) draw: u32,
+    // Heading (bits 0-5, 64ths of a turn) and tilt (bits 6-8, 5 degree steps) of the piece.
+    @location(7) @interpolate(flat) orient: u32,
 };
 
 fn oct_decode(e: vec2<f32>) -> vec3<f32> {
@@ -86,8 +88,14 @@ fn vs_main(in: VsIn) -> VsOut {
     let rel = instances[in.draw].origin.xyz + in.position;
     out.rel = rel;
     out.clip = globals.view_proj * vec4<f32>(rel, 1.0);
+    // Surfaces of different levels in one plane (an L3 wall on an L2 shell, a floor on a skin
+    // plate): the finer level is drawn nearer by a relative 2e-5 per level, so it wins the
+    // depth test the same way at every distance. The level is in bits 8-9 of the tag.
+    let level = (in.material.y >> 8u) & 3u;
+    out.clip.z = out.clip.z * (1.0 + 2e-5 * f32(max(level, 1u) - 1u));
     out.normal = oct_decode(in.normal_oct);
-    out.material = in.material.x;
+    out.material = in.material.x & 15u;
+    out.orient = in.material.x >> 4u;
     out.fade = bitcast<f32>(instances[in.draw].mesh.w);
     out.glow = vec3<f32>(1.0);
     out.tag = in.material.y;
@@ -134,6 +142,7 @@ fn vs_far(in: FarIn) -> VsOut {
     out.glow = vec3<f32>(1.0);
     out.tag = 0u;
     out.draw = in.draw;
+    out.orient = 0u;
     return out;
 }
 
@@ -169,6 +178,7 @@ fn vs_module(in: VsIn) -> VsOut {
     out.glow = glow.rgb * (glow.a * level);
     out.tag = 0u;
     out.draw = in.draw;
+    out.orient = 0u;
     return out;
 }
 
@@ -246,10 +256,28 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     if (globals.params.y > 0.5) {
         let wp = globals.cam_local.xyz + in.rel;
-        // Lines on the two axes spanning the surface.
+        // Lines along the piece's own edges: the two axes of its frame (heading and tilt come
+        // with the vertex) that lie most in the surface; a world-aligned piece has the world
+        // axes.
         let a = abs(n);
         var uv: vec2<f32>;
-        if (a.y >= a.x && a.y >= a.z) { uv = wp.xz; } else if (a.x >= a.z) { uv = wp.zy; } else { uv = wp.xy; }
+        if ((in.orient & 0x3fu) == 0u && ((in.orient >> 6u) & 7u) == 0u) {
+            if (a.y >= a.x && a.y >= a.z) { uv = wp.xz; } else if (a.x >= a.z) { uv = wp.zy; } else { uv = wp.xy; }
+        } else {
+            let th = f32(in.orient & 0x3fu) * (6.2831853 / 64.0);
+            let tl = f32((in.orient >> 6u) & 7u) * 0.0872665;
+            let c = cos(tl);
+            let sn = sin(tl);
+            let ex = vec3<f32>(c * cos(th), sn, c * sin(th));
+            let ey = vec3<f32>(-sn * cos(th), c, -sn * sin(th));
+            let ez = vec3<f32>(-sin(th), 0.0, cos(th));
+            let dx = abs(dot(n, ex));
+            let dy = abs(dot(n, ey));
+            let dz = abs(dot(n, ez));
+            if (dy >= dx && dy >= dz) { uv = vec2<f32>(dot(wp, ex), dot(wp, ez)); }
+            else if (dx >= dz) { uv = vec2<f32>(dot(wp, ez), dot(wp, ey)); }
+            else { uv = vec2<f32>(dot(wp, ex), dot(wp, ey)); }
+        }
         let g1 = max(grid_line(uv.x, 1.0, 0.5), grid_line(uv.y, 1.0, 0.5));
         let g8 = max(grid_line(uv.x, 8.0, 1.0), grid_line(uv.y, 8.0, 1.0));
         colour = mix(colour, colour * 0.55, g1 * 0.5);

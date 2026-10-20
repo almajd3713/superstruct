@@ -22,7 +22,8 @@
     clippy::manual_midpoint,
     clippy::cast_sign_loss,
     clippy::collapsible_if,
-    clippy::needless_pass_by_value
+    clippy::needless_pass_by_value,
+    clippy::items_after_statements
 )]
 
 use std::collections::{BTreeMap, HashMap};
@@ -208,6 +209,10 @@ struct Loaded {
     /// Path, threshold and payoff pieces.
     paths: Vec<Primitive>,
     walks: Vec<Walk>,
+    /// The clear volume of each rise and the pieces the rise built.
+    rises: Vec<(Primitive, std::collections::HashSet<Primitive>)>,
+    /// The walk each path piece was built for.
+    owner: HashMap<Primitive, usize>,
     /// `(outside point, inside point, up)` of every door, cell-local metres.
     doors: Vec<(DVec3, DVec3, DVec3)>,
 }
@@ -224,6 +229,18 @@ fn load(seed: WorldSeed, cache: &L1Cache, key: CellKey) -> Loaded {
         own,
         paths,
         walks: t.paths.walks.clone(),
+        owner: t
+            .paths
+            .owners
+            .iter()
+            .flat_map(|(r, w)| t.paths.prims[r.clone()].iter().map(move |p| (*p, *w)))
+            .collect(),
+        rises: t
+            .paths
+            .rises
+            .iter()
+            .map(|(v, r)| (*v, t.paths.prims[r.clone()].iter().copied().collect()))
+            .collect(),
         doors,
     }
 }
@@ -449,7 +466,7 @@ fn scan_cell(
             && !matches!(p.shape, Shape::LiftShaft { .. })
         {
             r.base("c dressing", 1);
-            let g = Vec3::splat(0.04);
+            let g = Vec3::splat(0.1);
             let hosts =
                 |q: Vec3| ix.host_at(q, n, |o| o.prim.kind == p.kind && o.prim.flags == p.flags);
             let hosted = if p.kind == FeatureKind::CABLE {
@@ -460,7 +477,7 @@ fn scan_cell(
                     .unwrap_or(1);
                 let end = |hi: bool| {
                     let mut q = centre;
-                    q[k] = if hi { it.hi[k] + 0.04 } else { it.lo[k] - 0.04 };
+                    q[k] = if hi { it.hi[k] + 0.1 } else { it.lo[k] - 0.1 };
                     q
                 };
                 // An end on the cell's side goes on into the neighbour.
@@ -483,7 +500,7 @@ fn scan_cell(
                 .any(|&q| hosts(q))
             };
             if !hosted {
-                r.hit("c", || describe(p, centre));
+                r.hit(&format!("c kind {}", p.kind.0), || describe(p, centre));
             }
             continue;
         }
@@ -500,6 +517,13 @@ fn scan_cell(
                     if h >= 1.0
                         && others.iter().all(|&w| w <= 0.8)
                         && h >= 3.0 * others.iter().copied().fold(0.0, f32::max)
+                        // What it stands on or hangs from at the cell's side is the neighbour's.
+                        && c0.x > 1.0
+                        && c0.z > 1.0
+                        && c0.x < 511.0
+                        && c0.z < 511.0
+                        && it.lo.y > 1.0
+                        && it.hi.y < 511.0
                     {
                         r.base("d members", 1);
                         let (bot, top) = (
@@ -594,7 +618,12 @@ fn scan_cell(
         let it = &ix.items[i as usize];
         it.solid && (paths_own.contains(&it.prim) || nbr_set.contains(&it.prim))
     };
-    for w in &me.walks {
+    let own_rises: std::collections::HashSet<Primitive> = me
+        .rises
+        .iter()
+        .flat_map(|(_, o)| o.iter().copied())
+        .collect();
+    for (walk_index, w) in me.walks.iter().enumerate() {
         let up = v(w.up);
         let pts = &w.points;
         let samples: Vec<(Vec3, Vec3)> = if w.rise {
@@ -629,12 +658,16 @@ fn scan_cell(
         }
         for i in hit_by {
             let it = &ix.items[i as usize];
+            // A walk's own pieces (its steps, walls and roof) are its own business.
+            if me.owner.get(&it.prim) == Some(&walk_index) {
+                continue;
+            }
             let name = if it.prim.kind == FeatureKind::RAILING {
-                "b rail"
+                "b rail".to_string()
             } else {
-                "b other"
+                format!("b kind {}", it.prim.kind.0)
             };
-            r.hit(name, || {
+            r.hit(&name, || {
                 format!(
                     "PH/PV {} walk: {}",
                     w.id,
@@ -643,6 +676,42 @@ fn scan_cell(
             });
         }
         // f: the ends.
+        if w.rise {
+            // A rise's foot and top: a floor that is not the rise's own within 3 m, any way.
+            for e in [pts[0], pts[pts.len() - 1]] {
+                r.base("f rise ends", 1);
+                let e = v(e);
+                const H: f32 = std::f32::consts::FRAC_1_SQRT_2;
+                const HEADINGS: [(f32, f32); 8] = [
+                    (1.0, 0.0),
+                    (H, H),
+                    (0.0, 1.0),
+                    (-H, H),
+                    (-1.0, 0.0),
+                    (-H, -H),
+                    (0.0, -1.0),
+                    (H, -H),
+                ];
+                let found = HEADINGS.iter().any(|&(hx, hz)| {
+                    [1.5f32, 2.25, 3.0].iter().any(|&d| {
+                        let q = e + Vec3::new(hx * d, -0.1, hz * d);
+                        ix.near(q).iter().any(|&i| {
+                            let it = &ix.items[i as usize];
+                            it.solid
+                                && it.src != Src::L1
+                                && !it.prim.flags.contains(PrimFlags::INTERIOR)
+                                && !own_rises.contains(&it.prim)
+                                && it.shape_contains(q)
+                        })
+                    })
+                });
+                if !found {
+                    r.hit("f rise", || {
+                        format!("PV {} end at ({:.1}, {:.1}, {:.1})", w.id, e.x, e.y, e.z)
+                    });
+                }
+            }
+        }
         let ends: Vec<(Vec3, Vec3, Vec3)> = if w.rise {
             Vec::new()
         } else {
@@ -666,10 +735,53 @@ fn scan_cell(
             });
         }
     }
+    // r: pieces that stand in the clear volume of a rise.
+    for (volume, own) in &me.rises {
+        let (lo, hi) = (volume.shape.aabb().min_m(), volume.shape.aabb().max_m());
+        let mut seen: std::collections::BTreeSet<u32> = Default::default();
+        let mut z = lo.z;
+        while z < hi.z {
+            let mut y = lo.y;
+            while y < hi.y {
+                let mut x = lo.x;
+                while x < hi.x {
+                    let p = Vec3::new(x, y, z);
+                    if volume.shape.contains(p) {
+                        for &i in ix.near(p) {
+                            let it = &ix.items[i as usize];
+                            if it.solid
+                                && it.src != Src::Nbr
+                                && it.src != Src::L1
+                                && it.prim.kind != FeatureKind::RAILING
+                                && !own.contains(&it.prim)
+                                && !paths_own.contains(&it.prim)
+                                && it.shape_contains(p)
+                            {
+                                seen.insert(i);
+                            }
+                        }
+                    }
+                    x += 1.5;
+                }
+                y += 1.5;
+            }
+            z += 1.5;
+        }
+        r.base("r rises", 1);
+        for i in seen {
+            let it = &ix.items[i as usize];
+            let name = format!("r {:?}", it.src);
+            r.hit(&name, || describe(&it.prim, (it.lo + it.hi) * 0.5));
+        }
+    }
     // e: doors.
     for (out, inn, _) in &me.doors {
-        r.base("e doors", 1);
         let (out, inn) = (v(*out), v(*inn));
+        // The floor of a door at the cell's side is the neighbour's.
+        if out.cmplt(Vec3::splat(1.0)).any() || out.cmpgt(Vec3::splat(511.0)).any() {
+            continue;
+        }
+        r.base("e doors", 1);
         let floor = |p: Vec3| {
             ix.solid_at(p, None).is_some() || ix.solid_at(p - Vec3::Y * 0.2, None).is_some()
         };
@@ -808,6 +920,37 @@ mod tests {
                     w.id, sec.x, sec.y, sec.z, loc.x, loc.y, loc.z
                 );
             }
+        }
+    }
+
+    /// How far from each door the floor outside starts (a probe along the way out).
+    #[test]
+    #[ignore = "prints"]
+    fn door_floor_distance() {
+        let cache = L1Cache::default();
+        let key = CellKey::new(Level::L2, I64Vec3::new(0, 6, 2));
+        let t = tissue_cell(WorldSeed(0), cache.tissue(), key);
+        let prims = &t.paths.prims;
+        let solid = |p: Vec3| {
+            prims
+                .iter()
+                .chain(t.thresholds.prims.iter())
+                .any(|q| !q.flags.contains(PrimFlags::NO_COLLIDE) && q.shape.contains(p))
+        };
+        for (o, i) in doors_of(&t).into_iter().take(12) {
+            let d = (o - i).normalize();
+            let mut found = None;
+            for k in 0..40 {
+                let p = v(i + d * (2.0 + f64::from(k) * 0.5) - DVec3::Y * 0.2);
+                if solid(p) {
+                    found = Some(2.0 + f64::from(k) * 0.5 - 2.0);
+                    break;
+                }
+            }
+            eprintln!(
+                "door at ({:.0},{:.0},{:.0}): floor starts {:?} m outside the wall",
+                o.x, o.y, o.z, found
+            );
         }
     }
 }

@@ -49,6 +49,7 @@ pub fn l2_cell_web_edges(
         .chain(&t.thresholds.bores)
         .chain(&t.paths.corridors)
         .copied()
+        .chain(crate::l3_web::door_cuts(&t))
         .collect();
     structures.extend(t.skin.cladding.iter().copied());
     let (mut primitives, _) = carve(structures, &bores, [0; 3]);
@@ -90,10 +91,20 @@ pub fn l2_cell_web_edges(
         .chain(&t.thresholds.bores)
         .copied()
         .collect();
-    let (rails, stats) = {
+    let (rails, stats, keep, fixed) = {
         let world = crate::edges::World::new(&primitives, &parent, &clear);
-        crate::edges::guard_edges(seed, cell, &primitives, &world)
+        let (rails, stats) = crate::edges::guard_edges(seed, cell, &primitives, &world);
+        let keep = crate::edges::orphan_mask(&primitives, &world);
+        let fixed = crate::edges::fix_members(&primitives, &world);
+        (rails, stats, keep, fixed)
     };
+    // Dressing goes with its host (PW.4.14).
+    // Posts and frames end on something (PW.4.16).
+    let mut primitives: Vec<Primitive> = keep
+        .into_iter()
+        .zip(fixed)
+        .filter_map(|(k, f)| if k { f } else { None })
+        .collect();
     primitives.extend(rails);
     let mut primitives = crate::edges::cut_rails(primitives, &ways_of(&t));
     let mut seen = std::collections::HashSet::new();
