@@ -224,6 +224,7 @@ The "Idea" column is a phrase copied from the source doc, matched case-insensiti
 | FORM-21 | Starburst hub | web §6.3 |
 | FORM-22 | Wedge building | web §6.3 |
 | FORM-23 | Cone or funnel tower | web §6.3 |
+| FORM-24 | Roofed ring | web §6.3 |
 | MUT-01 | (any form): inverted | web §6.3 |
 | MUT-02 | inverted, tilted | web §6.3 |
 | MUT-03 | tilted, twisted | web §6.3 |

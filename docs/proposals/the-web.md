@@ -205,6 +205,7 @@ Any form can be inverted, turned sideways, tilted or rotated where it makes sens
 - **Leaning tower**
 - **Dome**, faceted
 - **Polygonal ring**
+- **Roofed ring**: a polygonal ring with a roof, flat or with an oculus; the plain ring stays open to the sky
 - **Starburst hub** with bridges radiating at 45°
 - **Wedge building** filling an angle between grains
 - **Cone or funnel tower**
