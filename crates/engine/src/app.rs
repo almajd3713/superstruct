@@ -108,6 +108,8 @@ struct App {
     /// Noclip speed in m/s, 1 to 1000.
     fly_speed: f32,
     debug_boxes: bool,
+    /// Index into `debugview::MODE_NAMES`.
+    debug_view: u32,
     box_scratch: Vec<DebugBox>,
     input: InputState,
     camera: Camera,
@@ -524,6 +526,35 @@ impl App {
             let frozen = running.renderer.culling_frozen();
             running.renderer.set_freeze_culling(!frozen);
         }
+        if self.input.pressed(Action::CycleDebugView) {
+            if crate::debugview::enabled() {
+                self.debug_view = (self.debug_view + 1) % crate::debugview::MODE_NAMES.len() as u32;
+                tracing::info!(
+                    "debug view: {}",
+                    crate::debugview::MODE_NAMES[self.debug_view as usize]
+                );
+            } else {
+                tracing::warn!("debug views need SUPERSTRUCT_DEBUG_VIEWS=1 at start");
+            }
+        }
+        if self.input.pressed(Action::PickPrimitive) {
+            let hit =
+                self.streamer
+                    .collision()
+                    .pick(&self.camera.pos, self.camera.forward(), 300.0);
+            if let Some(h) = hit {
+                tracing::info!(
+                    "pick: {:.2} m, chunk {:?} {:?}, prim #{}: {}",
+                    h.distance,
+                    h.chunk.key.level,
+                    h.chunk.key.coords,
+                    h.index,
+                    crate::debugview::describe(&h.prim)
+                );
+            } else {
+                tracing::info!("pick: nothing within 300 m");
+            }
+        }
         if self.input.pressed(Action::ToggleDebugLines) {
             self.debug_boxes = !self.debug_boxes;
         }
@@ -713,11 +744,14 @@ impl App {
                 &FrameInput {
                     camera: &render_camera,
                     size: running.gpu.size(),
-                    params: frame_params(
-                        WorldSeed(self.settings.seed),
-                        &render_camera.pos,
-                        self.survival.fade(),
-                    ),
+                    params: FrameParams {
+                        debug_view: self.debug_view,
+                        ..frame_params(
+                            WorldSeed(self.settings.seed),
+                            &render_camera.pos,
+                            self.survival.fade(),
+                        )
+                    },
                     boxes: &self.box_scratch,
                     timer: Some(&running.timer),
                     dt: frame_time as f32,
@@ -969,6 +1003,10 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         None => settings,
     };
     let settings_fov = settings.fov_deg;
+    crate::debugview::set_enabled(
+        std::env::var_os("SUPERSTRUCT_DEBUG_VIEWS").is_some()
+            || std::env::var_os("SUPERSTRUCT_DEBUG_VIEW").is_some(),
+    );
     let settings_seed = settings.seed;
     let settings_bands = settings.stream_config();
     let event_loop = EventLoop::new()?;
@@ -1023,6 +1061,10 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
             MeshPool::with_default_threads(WorldSeed(settings_seed)),
         ),
         debug_boxes: std::env::var_os("SUPERSTRUCT_DEBUG_BOXES").is_some(),
+        debug_view: std::env::var("SUPERSTRUCT_DEBUG_VIEW")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
         box_scratch: Vec::new(),
         input: InputState::new(Bindings::default()),
         camera: Camera {

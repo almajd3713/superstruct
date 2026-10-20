@@ -43,6 +43,9 @@ pub enum Action {
     FovNarrower,
     ExposureUp,
     ExposureDown,
+    /// Debug colour modes and the primitive pick (PW.4.7).
+    CycleDebugView,
+    PickPrimitive,
 }
 
 /// A physical key or mouse button.
@@ -93,6 +96,8 @@ impl Default for Bindings {
             (K::PageDown, A::FovNarrower),
             (K::Period, A::ExposureUp),
             (K::Comma, A::ExposureDown),
+            (K::KeyV, A::CycleDebugView),
+            (K::KeyX, A::PickPrimitive),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),

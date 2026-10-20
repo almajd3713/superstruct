@@ -82,6 +82,17 @@ pub struct CollisionChunk {
     origin: WorldPos,
     size_m: f32,
     items: Vec<Item>,
+    /// Every drawn primitive, kept for the pick key; empty unless debug views are on.
+    picks: Vec<Primitive>,
+}
+
+/// What the pick key found.
+#[derive(Debug, Clone, Copy)]
+pub struct PickHit {
+    pub chunk: ChunkId,
+    pub index: usize,
+    pub prim: Primitive,
+    pub distance: f32,
 }
 
 impl CollisionChunk {
@@ -101,10 +112,20 @@ impl CollisionChunk {
                 }
             })
             .collect();
+        let picks = if crate::debugview::enabled() {
+            prims
+                .iter()
+                .filter(|p| !matches!(p.shape, Shape::LiftShaft { .. }))
+                .copied()
+                .collect()
+        } else {
+            Vec::new()
+        };
         Self {
             origin,
             size_m,
             items,
+            picks,
         }
     }
 }
@@ -149,6 +170,54 @@ impl CollisionWorld {
 
     pub fn is_empty(&self) -> bool {
         self.chunks.is_empty()
+    }
+}
+
+impl CollisionWorld {
+    /// The first primitive (collidable or not) along a ray, by sphere tracing each chunk the
+    /// ray crosses. Needs `debugview::enabled()` when the chunks were inserted.
+    pub fn pick(&self, from: &WorldPos, dir: Vec3, max: f32) -> Option<PickHit> {
+        let mut best: Option<PickHit> = None;
+        for (id, chunk) in &self.chunks {
+            let start = from.delta(&chunk.origin).as_vec3();
+            let inv = dir.recip();
+            let t0 = (Vec3::ZERO - start) * inv;
+            let t1 = (Vec3::splat(chunk.size_m) - start) * inv;
+            let enter = t0.min(t1).max_element().max(0.0);
+            let exit = t0.max(t1).min_element().min(max);
+            if enter > exit {
+                continue;
+            }
+            let mut t = enter;
+            for _ in 0..160 {
+                if t > exit || best.is_some_and(|b| b.distance < t) {
+                    break;
+                }
+                let p = start + dir * t;
+                let mut d = f32::INFINITY;
+                let mut at = 0;
+                for (i, prim) in chunk.picks.iter().enumerate() {
+                    let di = prim.shape.sdf(p);
+                    if di < d {
+                        d = di;
+                        at = i;
+                    }
+                }
+                if d <= 0.01 {
+                    if best.is_none_or(|b| b.distance > t) {
+                        best = Some(PickHit {
+                            chunk: *id,
+                            index: at,
+                            prim: chunk.picks[at],
+                            distance: t,
+                        });
+                    }
+                    break;
+                }
+                t += d.max(0.005);
+            }
+        }
+        best
     }
 }
 

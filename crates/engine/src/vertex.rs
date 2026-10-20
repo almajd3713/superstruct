@@ -7,7 +7,7 @@
 //! | 0 | 12 | position, chunk-local metres | `Float32x3` |
 //! | 12 | 4 | normal, octahedral | `Snorm16x2` |
 //! | 16 | 2 | material id | `Uint16x2` (x) |
-//! | 18 | 2 | padding | |
+//! | 18 | 2 | debug tag (`debugview`), 0 unless enabled | |
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Vec2, Vec3};
@@ -18,7 +18,7 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [i16; 2],
     pub material: u16,
-    _pad: u16,
+    pub tag: u16,
 }
 
 impl Vertex {
@@ -37,7 +37,7 @@ impl Vertex {
             position: position.to_array(),
             normal: oct_encode(normal),
             material,
-            _pad: 0,
+            tag: 0,
         }
     }
 }

@@ -198,6 +198,8 @@ pub struct FrameParams {
     pub ambient: [f32; 3],
     pub light: f32,
     pub grid: bool,
+    /// Debug colour mode of `debugview::MODE_NAMES`; 0 is the normal look.
+    pub debug_view: u32,
     /// 0 clear to 1 black, for the death sequence.
     pub fade: f32,
 }
@@ -211,6 +213,7 @@ impl Default for FrameParams {
             ambient: [0.27, 0.27, 0.27],
             light: 0.25,
             grid: true,
+            debug_view: 0,
             fade: 0.0,
         }
     }
@@ -1375,7 +1378,12 @@ impl Renderer {
         let globals = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             cam_local: [local.x, local.y, local.z, 0.0],
-            params: [params.fog_density, f32::from(params.grid), params.fade, 0.0],
+            params: [
+                params.fog_density,
+                f32::from(params.grid),
+                params.fade,
+                params.debug_view as f32,
+            ],
             fog: [
                 params.fog_color[0],
                 params.fog_color[1],

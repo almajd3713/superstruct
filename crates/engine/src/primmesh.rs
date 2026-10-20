@@ -25,10 +25,15 @@ fn v3(q: QVec3) -> Vec3 {
 
 /// Appends `prim` to `mesh`, in cell-local metres. `LiftShaft` is not solid and adds nothing.
 pub fn add_primitive(mesh: &mut Mesh, prim: &Primitive) {
+    let first = mesh.vertices.len();
     if let Shape::Oriented(o) = prim.shape {
         add_oriented(mesh, &o, prim.material.0, nudge(&o, prim.kind));
     } else {
         add_shape(mesh, prim.shape, prim.material.0);
+    }
+    let tag = crate::debugview::prim_tag(prim);
+    for v in &mut mesh.vertices[first..] {
+        v.tag = tag;
     }
 }
 

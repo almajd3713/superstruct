@@ -19,6 +19,7 @@ const PLAIN: FrameParams = FrameParams {
     ambient: [0.27, 0.27, 0.27],
     light: 0.25,
     grid: false,
+    debug_view: 0,
     fade: 0.0,
 };
 
@@ -1206,6 +1207,7 @@ fn kit_gallery_renders() {
         ambient: [0.27, 0.27, 0.27],
         light: 0.35,
         grid: false,
+        debug_view: 0,
         fade: 0.0,
     };
     let size = (1600, 800);
@@ -1393,6 +1395,7 @@ fn emissive_modules_are_visible_in_the_dark() {
         ambient: [0.02, 0.02, 0.02],
         light: 0.0,
         grid: false,
+        debug_view: 0,
         fade: 0.0,
     };
     let size = (960, 360);

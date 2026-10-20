@@ -13,6 +13,7 @@ pub mod collision;
 pub mod controller;
 pub mod cull;
 pub mod debugcmd;
+pub mod debugview;
 pub mod demo;
 pub mod farinst;
 pub mod fartram;

@@ -65,6 +65,9 @@ struct VsOut {
     @location(3) @interpolate(flat) fade: f32,
     // Colour of emissive parts; white for everything that is not an L4 module.
     @location(4) @interpolate(flat) glow: vec3<f32>,
+    // Debug tag of `debugview.rs` and the draw index, for the debug colour modes.
+    @location(5) @interpolate(flat) tag: u32,
+    @location(6) @interpolate(flat) draw: u32,
 };
 
 fn oct_decode(e: vec2<f32>) -> vec3<f32> {
@@ -87,6 +90,8 @@ fn vs_main(in: VsIn) -> VsOut {
     out.material = in.material.x;
     out.fade = bitcast<f32>(instances[in.draw].mesh.w);
     out.glow = vec3<f32>(1.0);
+    out.tag = in.material.y;
+    out.draw = in.draw;
     return out;
 }
 
@@ -127,6 +132,8 @@ fn vs_far(in: FarIn) -> VsOut {
     out.material = inst.attrs & 0xffffu;
     out.fade = far_cells[inst.cell].w;
     out.glow = vec3<f32>(1.0);
+    out.tag = 0u;
+    out.draw = in.draw;
     return out;
 }
 
@@ -160,6 +167,8 @@ fn vs_module(in: VsIn) -> VsOut {
     out.material = in.material.x;
     out.fade = cell.w;
     out.glow = glow.rgb * (glow.a * level);
+    out.tag = 0u;
+    out.draw = in.draw;
     return out;
 }
 
@@ -193,10 +202,43 @@ fn fs_prepass(in: VsOut) {
     }
 }
 
+fn hue(i: u32) -> vec3<f32> {
+    let h = f32((i * 2654435761u) >> 8u & 0xffffu) / 65535.0;
+    return clamp(abs(fract(h + vec3<f32>(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// Debug colour modes (`debugview.rs`): 1 level, 2 kind, 3 frame, 4 chunk, 5 collides.
+fn debug_colour(mode: u32, tag: u32, draw: u32) -> vec3<f32> {
+    if (mode == 1u) {
+        let level = (tag >> 8u) & 3u;
+        if (level == 1u) { return vec3<f32>(0.9, 0.2, 0.2); }
+        if (level == 2u) { return vec3<f32>(0.2, 0.8, 0.3); }
+        if (level == 3u) { return vec3<f32>(0.25, 0.4, 1.0); }
+        return vec3<f32>(0.5);
+    }
+    if (mode == 2u) { return hue((tag & 31u) + 1u); }
+    if (mode == 3u) {
+        let f = (tag >> 5u) & 3u;
+        if (f == 0u) { return vec3<f32>(0.6); }
+        if (f == 1u) { return vec3<f32>(1.0, 0.8, 0.1); }
+        if (f == 2u) { return vec3<f32>(1.0, 0.2, 0.9); }
+        return vec3<f32>(0.1, 0.9, 1.0);
+    }
+    if (mode == 4u) { return hue(draw + 1u); }
+    if ((tag & 128u) != 0u) { return vec3<f32>(1.0, 0.5, 0.0); }
+    return vec3<f32>(0.3, 0.7, 0.9);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (fade_discard(in.fade, in.clip)) {
         discard;
+    }
+    let dbg = u32(globals.params.w + 0.5);
+    if (dbg != 0u) {
+        let nn = normalize(in.normal);
+        let l = 0.35 + 0.65 * max(dot(nn, normalize(vec3<f32>(0.4, 0.8, 0.3))), 0.0);
+        return vec4<f32>(debug_colour(dbg, in.tag, in.draw) * l, 1.0);
     }
     let n = normalize(in.normal);
     var colour = lit_glow(n, in.material, in.glow);

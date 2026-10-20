@@ -544,7 +544,11 @@ fn build(
     let (mesh, far) = if id.detail == Detail::Far {
         (Mesh::default(), Some(far_instances(&prims)))
     } else {
-        (mesh_primitives(draw.as_deref().unwrap_or(&prims)).0, None)
+        let mut mesh = mesh_primitives(draw.as_deref().unwrap_or(&prims)).0;
+        if crate::debugview::enabled() {
+            crate::debugview::tag_level(&mut mesh.vertices, id.key.level);
+        }
+        (mesh, None)
     };
     let t2 = Instant::now();
     if stale.load(Ordering::Relaxed) {

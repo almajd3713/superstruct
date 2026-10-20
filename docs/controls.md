@@ -34,6 +34,8 @@ The bindings below are the defaults in `crates/engine/src/input.rs` (`Bindings::
 | F3 | Toggle debug boxes |
 | F7 | Freeze culling (keeps the old frustum) |
 | F11 | Toggle fullscreen |
+| V | Cycle the debug colour view: off, level (L1 red, L2 green, L3 blue), feature kind, frame (axis grey, turned yellow, tilted magenta, sideways cyan), chunk, collides (orange = visual only). Needs `SUPERSTRUCT_DEBUG_VIEWS=1` |
+| X | Pick: logs the primitive under the crosshair within 300 m (distance, chunk, kind, material, frame, collides, shape, AABB). Needs `SUPERSTRUCT_DEBUG_VIEWS=1` |
 | F12 | Screenshot to `out/`, with a `.toml` sidecar (pose, seed, `GEN_VERSION`, bands, overlay readings) that `SUPERSTRUCT_SHOT` replays |
 | Tab | Toggle the altimeter and coordinates readout (absolute metres) |
 

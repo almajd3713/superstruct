@@ -17,6 +17,7 @@ use crate::vertex::Vertex;
 struct SolidBox {
     aabb: QAabb,
     material: u16,
+    tag: u16,
 }
 
 /// A face-plane rectangle in quanta, half-open.
@@ -211,7 +212,7 @@ pub struct ChunkMeshStats {
 /// Meshes `prims` (cell-local metres). Boxes and stair steps are culled against each other;
 /// ramps and cylinders are emitted whole and occlude nothing.
 /// A plane's quads by material.
-type Layers = Vec<(u16, Vec<Rect>)>;
+type Layers = Vec<(u32, Vec<Rect>)>;
 
 #[allow(clippy::too_many_lines)] // cull, de-overlap and merge in one pass
 pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
@@ -219,11 +220,24 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
     let mut boxes: Vec<SolidBox> = Vec::new();
     for p in prims {
         let material = p.material.0;
+        let tag = if crate::debugview::enabled() {
+            crate::debugview::prim_tag(p)
+        } else {
+            0
+        };
         match p.shape {
-            Shape::Box { aabb } => boxes.push(SolidBox { aabb, material }),
+            Shape::Box { aabb } => boxes.push(SolidBox {
+                aabb,
+                material,
+                tag,
+            }),
             Shape::StairRun { aabb, rise, steps } => {
                 stair_boxes(aabb, rise, steps, |aabb| {
-                    boxes.push(SolidBox { aabb, material });
+                    boxes.push(SolidBox {
+                        aabb,
+                        material,
+                        tag,
+                    });
                 });
             }
             Shape::Ramp { .. } | Shape::Cylinder { .. } | Shape::Oriented(_) => {
@@ -236,7 +250,7 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
         boxes: boxes.len(),
         tris_unculled: boxes.len() * 12,
     };
-    let mut quads: BTreeMap<(u8, bool, Q, u16), Vec<Rect>> = BTreeMap::new();
+    let mut quads: BTreeMap<(u8, bool, Q, u32), Vec<Rect>> = BTreeMap::new();
     let mut pieces = Vec::new();
     let mut next = Vec::new();
     let mut near = Vec::new();
@@ -287,7 +301,12 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
                         pieces.push(rect_of(&b.aabb, u, v));
                     }
                     quads
-                        .entry((axis as u8, positive, c, b.material))
+                        .entry((
+                            axis as u8,
+                            positive,
+                            c,
+                            u32::from(b.material) | u32::from(b.tag) << 16,
+                        ))
                         .or_default()
                         .extend(pieces.iter().copied());
                 }
@@ -303,7 +322,7 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
             .or_default()
             .push((material, rects));
     }
-    let mut quads: BTreeMap<(u8, bool, Q, u16), Vec<Rect>> = BTreeMap::new();
+    let mut quads: BTreeMap<(u8, bool, Q, u32), Vec<Rect>> = BTreeMap::new();
     for ((axis, positive, plane), layers) in planes {
         let mut covered: Vec<Rect> = Vec::new();
         for (material, rects) in layers {
@@ -327,7 +346,15 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
         merge(&mut rects);
         let axis = [Axis::X, Axis::Y, Axis::Z][usize::from(axis)];
         for r in rects {
-            emit_quad(&mut mesh, axis, positive, plane, r, material);
+            emit_quad(
+                &mut mesh,
+                axis,
+                positive,
+                plane,
+                r,
+                material as u16,
+                (material >> 16) as u16,
+            );
         }
     }
     (mesh, stats)
@@ -369,7 +396,15 @@ fn merge(rects: &mut Vec<Rect>) {
     }
 }
 
-fn emit_quad(mesh: &mut Mesh, axis: Axis, positive: bool, plane: Q, r: Rect, material: u16) {
+fn emit_quad(
+    mesh: &mut Mesh,
+    axis: Axis,
+    positive: bool,
+    plane: Q,
+    r: Rect,
+    material: u16,
+    tag: u16,
+) {
     let (ua, va) = cycle(axis);
     let (ev, eu, en) = (axis_vec(va), axis_vec(ua), axis_vec(axis));
     let at = |u: Q, v: Q| en * metres(plane) + eu * metres(u) + ev * metres(v);
@@ -386,7 +421,9 @@ fn emit_quad(mesh: &mut Mesh, axis: Axis, positive: bool, plane: Q, r: Rect, mat
     }
     let base = mesh.vertices.len() as u32;
     for p in corners {
-        mesh.vertices.push(Vertex::new(p, normal, material));
+        let mut v = Vertex::new(p, normal, material);
+        v.tag = tag;
+        mesh.vertices.push(v);
     }
     mesh.indices
         .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
