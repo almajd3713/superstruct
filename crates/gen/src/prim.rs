@@ -255,6 +255,9 @@ impl PrimFlags {
     pub const FAR_VISIBLE: Self = Self(1 << 2);
     /// A box part of a structure that L3 fills (§6W): drawn and collided as a hollow shell.
     pub const INTERIOR: Self = Self(1 << 3);
+    /// Drawn only in the mid band, where it stands for the hollow parts (their shells are not
+    /// drawn there); never in a full chunk, never collides (PW.4.23).
+    pub const MID_ONLY: Self = Self(1 << 4);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

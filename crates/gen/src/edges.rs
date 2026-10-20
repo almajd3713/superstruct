@@ -1072,54 +1072,9 @@ fn flight_edges(
             stepped_rail(foot, head, upright, out);
             continue;
         }
-        // The foot box: level at the foot, under the wedge. It stands inside the flight, whose
-        // body is solid under the nosings (`StairRun`).
-        let (mut fa, mut fb) = (a, b);
-        fa[1] = lo[1];
-        fb[1] = lo[1] + HEIGHT;
-        for piece in at.strips(fa, fb, along) {
-            out.push(rail(
-                piece.frame,
-                QVec3::new(0, 0, 0),
-                quanta_out(piece.lo, false),
-                quanta_out(piece.hi, true),
-            ));
-        }
-        let rising_with_run = head[run] > foot[run];
-        let rise_dir = if (head.y >= foot.y) == rising_with_run {
-            1
-        } else {
-            -1
-        };
-        let rise = match (run, rise_dir) {
-            (0, 1) => Dir4::PosX,
-            (0, _) => Dir4::NegX,
-            (_, 1) => Dir4::PosZ,
-            _ => Dir4::NegZ,
-        };
-        let (qlo, qhi) = (
-            quanta_out(mn.to_array(), false),
-            quanta_out(mx.to_array(), true),
-        );
-        if (0..3).all(|k| qhi[k] > qlo[k]) {
-            out.push(Primitive {
-                shape: Shape::oriented(
-                    upright,
-                    QVec3::new(0, 0, 0),
-                    LocalShape::Ramp {
-                        aabb: QAabb::new(
-                            QVec3::new(qlo[0], qlo[1], qlo[2]),
-                            QVec3::new(qhi[0], qhi[1], qhi[2]),
-                        ),
-                        rise,
-                    },
-                    QAabb::new(QVec3::new(0, 0, 0), QVec3::new(CELL, CELL, CELL)),
-                ),
-                material: MaterialId::METAL,
-                kind: FeatureKind::RAILING,
-                flags: PrimFlags::NONE,
-            });
-        }
+        // The slanted case above and this one are the same: one plumb box to every metre along
+        // the nosings, so no level wall hangs beside the flight at the foot's height.
+        stepped_rail(foot, head, upright, out);
     }
 }
 
@@ -1171,7 +1126,7 @@ mod tests {
         let share = total.guarded as f64 / total.runs as f64;
         assert!((0.75..=0.95).contains(&share), "guarded share {share}");
         assert!(
-            total.added <= 2000 * n as usize,
+            total.added <= 3500 * n as usize,
             "{} rails in {n} cells",
             total.added
         );

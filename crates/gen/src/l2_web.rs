@@ -209,16 +209,41 @@ pub fn l1_primitives_carved(
 ) -> (Vec<Primitive>, CarveStats) {
     debug_assert_eq!(cell.level, Level::L1);
     let prims = cache.get(seed, cell).primitives.clone();
-    let mut cuts: Vec<Primitive> = Vec::new();
-    for i in 0..512i64 {
+    // The bored cuts of the 512 L2 cells, built on a few threads (the cache is shared, and the
+    // result is gathered in cell order, so who builds what does not matter).
+    let cut_of = |i: i64| -> Vec<Primitive> {
         let local = [i % 8, i / 8 % 8, i / 64];
         let l2 = CellKey::new(
             Level::L2,
             cell.coords * 8 + glam::I64Vec3::new(local[0], local[1], local[2]),
         );
         let d = local.map(|v| Q::try_from(v).unwrap_or(0) * L2_Q);
-        cuts.extend(bored_cuts(seed, cache, l2).iter().map(|c| translated(c, d)));
-    }
+        bored_cuts(seed, cache, l2)
+            .iter()
+            .map(|c| translated(c, d))
+            .collect()
+    };
+    let per_thread = 64;
+    let mut parts: Vec<Vec<Primitive>> = Vec::new();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..512 / per_thread)
+            .map(|t| {
+                let cut_of = &cut_of;
+                scope.spawn(move || {
+                    (t * per_thread..(t + 1) * per_thread)
+                        .flat_map(cut_of)
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for h in handles {
+            match h.join() {
+                Ok(v) => parts.push(v),
+                Err(e) => std::panic::resume_unwind(e),
+            }
+        }
+    });
+    let cuts: Vec<Primitive> = parts.into_iter().flatten().collect();
     carve(prims, &cuts, [0; 3])
 }
 

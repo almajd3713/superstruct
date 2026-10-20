@@ -4,9 +4,8 @@
 //! the L1 walkable structure that crosses the face. **Own** ports are skywalks over a deck that
 //! both sides share. Geometry is in quanta in the face plane `(u, v)`, as `ports.md` §1 defines.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::cavity::CavityView;
 use crate::cell::{Axis, CellKey, Dir6, FaceKey, Level, floor_div_pow2, floor_mod_pow2};
@@ -35,10 +34,12 @@ const WIDTH_STEP: Q = 2 * M;
 const FLOORS: i32 = 8;
 const SLOTS: u32 = 2;
 
-/// L1 cell outputs for one batch of port queries. Lookups only; never iterated.
+/// L1 cell outputs for one batch of port queries. Lookups only; never iterated. Shared between
+/// threads (`Send + Sync`): a cell is built once, by the first thread to ask, and the others
+/// wait for it (the output is a pure function of the key, so who builds it does not matter).
 #[derive(Default)]
 pub struct L1Cache {
-    cells: RefCell<HashMap<CellKey, Rc<CellOutput>>>,
+    cells: Mutex<HashMap<CellKey, Arc<OnceLock<Arc<CellOutput>>>>>,
     /// The parents the Web tissue reads (`tissue::TissueCache`), for the same batch.
     tissue: crate::tissue::TissueCache,
 }
@@ -48,13 +49,15 @@ impl L1Cache {
         &self.tissue
     }
 
-    pub fn get(&self, seed: WorldSeed, cell: CellKey) -> Rc<CellOutput> {
-        Rc::clone(
-            self.cells
-                .borrow_mut()
-                .entry(cell)
-                .or_insert_with(|| Rc::new(l1_cell(seed, cell))),
-        )
+    pub fn get(&self, seed: WorldSeed, cell: CellKey) -> Arc<CellOutput> {
+        let slot = {
+            let mut cells = self
+                .cells
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Arc::clone(cells.entry(cell).or_default())
+        };
+        Arc::clone(slot.get_or_init(|| Arc::new(l1_cell(seed, cell))))
     }
 }
 

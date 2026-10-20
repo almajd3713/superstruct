@@ -17,10 +17,9 @@
     clippy::type_complexity
 )]
 
-use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use glam::{DVec3, I64Vec3, Vec3};
 
@@ -218,20 +217,23 @@ impl WebParent {
     }
 }
 
-/// Parents by L1 cell, for one batch of queries. Lookups only; never iterated.
+/// Parents by L1 cell, for one batch of queries. Lookups only; never iterated. Shared between
+/// threads like `L1Cache`.
 #[derive(Default)]
 pub struct TissueCache {
-    parents: RefCell<HashMap<I64Vec3, Rc<WebParent>>>,
+    parents: Mutex<HashMap<I64Vec3, Arc<OnceLock<Arc<WebParent>>>>>,
 }
 
 impl TissueCache {
-    pub fn get(&self, seed: WorldSeed, l1: I64Vec3) -> Rc<WebParent> {
-        Rc::clone(
-            self.parents
-                .borrow_mut()
-                .entry(l1)
-                .or_insert_with(|| Rc::new(WebParent::new(seed, l1))),
-        )
+    pub fn get(&self, seed: WorldSeed, l1: I64Vec3) -> Arc<WebParent> {
+        let slot = {
+            let mut parents = self
+                .parents
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            Arc::clone(parents.entry(l1).or_default())
+        };
+        Arc::clone(slot.get_or_init(|| Arc::new(WebParent::new(seed, l1))))
     }
 }
 

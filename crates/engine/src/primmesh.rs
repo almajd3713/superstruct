@@ -12,7 +12,26 @@ use crate::vertex::{Vertex, oct_decode};
 /// (the Web has thousands of cylinders in a cell, and every side is a quad of its own).
 #[allow(clippy::cast_sign_loss)] // clamped to 6..=24 above the cast
 fn cylinder_sides(radius_m: f32) -> usize {
-    (6.0 + radius_m * 2.0).round().clamp(6.0, 24.0) as usize
+    let top = if COARSE.with(std::cell::Cell::get) {
+        10.0
+    } else {
+        24.0
+    };
+    (6.0 + radius_m * 2.0).round().clamp(6.0, top) as usize
+}
+
+thread_local! {
+    /// Set while a mid-band chunk is meshed: cylinders get at most 10 sides (the mid band is
+    /// seen from half a kilometre or more).
+    static COARSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Meshes with `f` with cylinders at their coarse side count when `coarse` (PW.4.23).
+pub fn with_coarse<T>(coarse: bool, f: impl FnOnce() -> T) -> T {
+    COARSE.with(|c| c.set(coarse));
+    let out = f();
+    COARSE.with(|c| c.set(false));
+    out
 }
 
 fn m(q: i32) -> f32 {
@@ -167,7 +186,7 @@ fn turn_into(mesh: &mut Mesh, local: &Mesh, o: &Oriented, material: u16) {
 /// Post spacing, metres, and the sizes of a railing's parts.
 /// The height of a rail above its walking surface: `edges::HEIGHT`, 18 quanta.
 pub const RAIL_HEIGHT: f32 = 1.125;
-const POST_SPACING: f32 = 3.0;
+const POST_SPACING: f32 = 2.5;
 const POST: f32 = 0.1;
 const BAR: f32 = 0.07;
 
@@ -250,11 +269,16 @@ fn rail_level(m: &mut Mesh, lo: Vec3, hi: Vec3, material: u16) {
         q.y = y1;
         m.add_box(p, q, material);
     };
-    let n = posts_in(l1 - l0);
+    // A short piece (a step of a flight's rail) has one post, at its start: the next piece has
+    // the next one.
+    let n = if l1 - l0 <= 1.2 { 0 } else { posts_in(l1 - l0) };
     for i in 0..=n {
-        let at = l0 + (l1 - l0) * i as f32 / n as f32;
+        let at = l0 + (l1 - l0) * i as f32 / n.max(1) as f32;
         let (a, b) = post_span(at, l0, l1);
         put(m, a, b, lo.y, hi.y, POST);
+        if n == 0 {
+            break;
+        }
     }
     put(m, l0, l1, hi.y - BAR, hi.y, POST);
     let mid = lo.y + (hi.y - lo.y) * 0.5;

@@ -108,6 +108,9 @@ struct App {
     /// Noclip speed in m/s, 1 to 1000.
     fly_speed: f32,
     debug_boxes: bool,
+    /// Seconds from start until the chunks within 64 m were all resident (PW.4.24).
+    arrival_logged: Option<f64>,
+    started: Instant,
     /// Index into `debugview::MODE_NAMES`.
     debug_view: u32,
     box_scratch: Vec<DebugBox>,
@@ -676,6 +679,23 @@ impl App {
             },
         );
         self.parts_ms[1] = t_stream.elapsed().as_secs_f64() * 1000.0;
+        if self.arrival_logged.is_none() {
+            let (have, want) = self.streamer.near_arrived(&render_camera.pos, 64.0);
+            if want > 0 && self.started.elapsed().as_millis() % 1000 < 20 {
+                info!(
+                    "arriving: {have} of {want} chunks within 64 m, queue {}, missing {:?}",
+                    self.streamer.stats().pool.queued,
+                    self.streamer.near_missing(&render_camera.pos, 64.0)
+                );
+            }
+            if want > 0 && have == want {
+                self.arrival_logged = Some(self.started.elapsed().as_secs_f64());
+                info!(
+                    "everything within 64 m is resident after {:.2} s ({have} chunks)",
+                    self.started.elapsed().as_secs_f64()
+                );
+            }
+        }
         let t_draws = Instant::now();
         self.lift_draw.update(
             &mut running.renderer,
@@ -823,6 +843,12 @@ impl App {
                     ),
                 };
                 save_screenshot(&running.gpu, &frame.texture, &shot);
+                for (kind, (n, bytes)) in self.streamer.breakdown() {
+                    info!(
+                        "resident {kind}: {n} chunks, {:.1} MiB",
+                        bytes as f64 / 1_048_576.0
+                    );
+                }
             }
             running.window.pre_present_notify();
             crate::zone!("present");
@@ -1061,6 +1087,8 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
             MeshPool::with_default_threads(WorldSeed(settings_seed)),
         ),
         debug_boxes: std::env::var_os("SUPERSTRUCT_DEBUG_BOXES").is_some(),
+        arrival_logged: None,
+        started: Instant::now(),
         debug_view: std::env::var("SUPERSTRUCT_DEBUG_VIEW")
             .ok()
             .and_then(|v| v.parse().ok())

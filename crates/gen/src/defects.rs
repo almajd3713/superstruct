@@ -463,6 +463,7 @@ fn scan_cell(
             && it.src == Src::L2
             && !matches!(p.kind, FeatureKind::VOID | FeatureKind::MISC)
             && !p.flags.contains(PrimFlags::ENVELOPE)
+            && !p.flags.contains(PrimFlags::MID_ONLY)
             && !matches!(p.shape, Shape::LiftShaft { .. })
         {
             r.base("c dressing", 1);

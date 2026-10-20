@@ -94,9 +94,24 @@ struct Shared {
     wake: Condvar,
     cancelled: AtomicU64,
     completed: AtomicU64,
+    /// The L1 outputs and tissue parents, shared by every worker (one copy, built once), and
+    /// the jobs run since it was made; it starts afresh every `CACHE_JOBS` jobs to bound memory.
+    cache: Mutex<(Arc<L1Cache>, u32)>,
 }
 
 impl Shared {
+    fn cache(&self) -> Arc<L1Cache> {
+        let mut c = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if c.1 >= CACHE_JOBS {
+            *c = (Arc::new(L1Cache::default()), 0);
+        }
+        c.1 += 1;
+        Arc::clone(&c.0)
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         // A poisoned lock only means a worker panicked; the maps stay consistent.
         self.state
@@ -112,12 +127,13 @@ pub struct MeshPool {
 }
 
 /// Jobs a worker runs before dropping its L1 cache, which only grows.
-const CACHE_JOBS: u32 = 64;
+const CACHE_JOBS: u32 = 256;
 
 impl MeshPool {
     /// Spawns `threads` workers (at least one).
     pub fn new(seed: WorldSeed, threads: usize) -> Self {
         let shared = Arc::new(Shared {
+            cache: Mutex::new((Arc::new(L1Cache::default()), 0)),
             seed,
             state: Mutex::default(),
             wake: Condvar::new(),
@@ -225,7 +241,6 @@ impl Drop for MeshPool {
 }
 
 fn worker(shared: &Shared, tx: &Sender<JobResult>) {
-    let mut cache = L1Cache::default();
     let mut parents: HashMap<CellKey, WebL3> = HashMap::new();
     let mut ran = 0u32;
     loop {
@@ -253,11 +268,11 @@ fn worker(shared: &Shared, tx: &Sender<JobResult>) {
             }
         };
         if ran >= CACHE_JOBS {
-            cache = L1Cache::default();
             parents.clear();
             ran = 0;
         }
         ran += 1;
+        let cache = shared.cache();
         let result = build(shared.seed, &cache, &mut parents, id, &stale);
         shared.lock().running.remove(&id);
         if let Some(r) = result {
@@ -293,7 +308,11 @@ pub const L3_ENABLED: bool = true;
 /// The mid band draws an L2 cell's exterior masses only: the `ENVELOPE` primitives, which are
 /// exactly what the finer levels refine, so the silhouette matches the full chunk's.
 pub fn mid_primitives(mut prims: Vec<Primitive>) -> Vec<Primitive> {
-    prims.retain(|p| p.flags.contains(PrimFlags::ENVELOPE));
+    // The solid masses, and the whole box of each hollow part in place of its six slabs.
+    prims.retain(|p| {
+        p.flags.contains(PrimFlags::MID_ONLY)
+            || (p.flags.contains(PrimFlags::ENVELOPE) && !p.flags.contains(PrimFlags::INTERIOR))
+    });
     prims
 }
 
@@ -432,9 +451,13 @@ fn hollow_envelope(env: &Primitive, door: (u8, i32, i32)) -> Vec<Primitive> {
 
 /// The primitives to mesh for an L2 chunk: envelopes with an entrance become hollow shells and
 /// railing boxes are left to their instanced modules.
-fn mesh_prims_l2(prims: &[Primitive], ports: &[Port]) -> Vec<Primitive> {
+fn mesh_prims_l2(prims: &[Primitive], ports: &[Port], mid: bool) -> Vec<Primitive> {
     let mut out = Vec::with_capacity(prims.len());
     for p in prims {
+        // The whole box of a hollow part is for the mid band only.
+        if p.flags.contains(PrimFlags::MID_ONLY) && !mid {
+            continue;
+        }
         match (p.flags.contains(PrimFlags::ENVELOPE), p.shape) {
             (true, Shape::Box { aabb }) => match doorway_of(&aabb, ports) {
                 Some(door) => out.extend(hollow_envelope(p, door)),
@@ -485,7 +508,7 @@ fn build(
         (Level::L2, Detail::Mid) => {
             let (out, _) = l2_build(seed, cache, id.key);
             let env = mid_primitives(out.primitives);
-            let draw = mesh_prims_l2(&env, &out.ports);
+            let draw = mesh_prims_l2(&env, &out.ports, true);
             (env, Some(draw))
         }
         (Level::L2, _) => {
@@ -497,7 +520,7 @@ fn build(
             if !rails.is_empty() {
                 modules = Some(expand(&rails));
             }
-            let draw = mesh_prims_l2(&out.primitives, &out.ports);
+            let draw = mesh_prims_l2(&out.primitives, &out.ports, false);
             // The shells of the interior parts collide, and L3 collides inside them.
             (out.primitives, Some(draw))
         }
@@ -540,7 +563,10 @@ fn build(
     let (mesh, far) = if id.detail == Detail::Far {
         (Mesh::default(), Some(far_instances(&prims)))
     } else {
-        let mut mesh = mesh_primitives(draw.as_deref().unwrap_or(&prims)).0;
+        let coarse = id.detail == Detail::Mid;
+        let mut mesh = crate::primmesh::with_coarse(coarse, || {
+            mesh_primitives(draw.as_deref().unwrap_or(&prims)).0
+        });
         // The level goes into every vertex: the shader draws L2 and L3 a hair nearer than L1
         // so that surfaces of different levels in one plane do not fight (PW.4.18).
         crate::debugview::tag_level(&mut mesh.vertices, id.key.level);
@@ -616,36 +642,93 @@ mod tests {
         ] {
             let key = CellKey::new(Level::L2, c);
             let (out, _) = l2_build(seed, &cache, key);
-            let m = mesh_primitives(&mesh_prims_l2(&out.primitives, &out.ports)).0;
+            let m = mesh_primitives(&mesh_prims_l2(&out.primitives, &out.ports, false)).0;
             assert!(bytes(&m) <= BUDGET, "L2 chunk {c:?} is {} bytes", bytes(&m));
         }
     }
 
     #[test]
     #[ignore = "prints"]
-    fn l2_chunk_anatomy() {
+    fn l2_mid_anatomy() {
         let cache = L1Cache::default();
-        let key = CellKey::new(Level::L2, I64Vec3::new(0, 6, 2));
-        let (out, _) = l2_build(WorldSeed(0), &cache, key);
-        let draw = mesh_prims_l2(&out.primitives, &out.ports);
+        for c in [I64Vec3::new(0, 6, 2), I64Vec3::new(3, 5, 4)] {
+            let key = CellKey::new(Level::L2, c);
+            let (out, _) = l2_build(WorldSeed(0), &cache, key);
+            let env = mid_primitives(out.primitives);
+            let mut by: std::collections::BTreeMap<String, (usize, usize)> =
+                std::collections::BTreeMap::new();
+            for p in &env {
+                let mut m = Mesh::default();
+                crate::primmesh::add_primitive(&mut m, p);
+                let shape = match p.shape {
+                    worldgen::prim::Shape::Box { .. } => "box",
+                    worldgen::prim::Shape::Oriented(o) => match o.local {
+                        worldgen::orient::LocalShape::Box { .. } => "turned box",
+                        worldgen::orient::LocalShape::Cylinder { .. } => "turned cylinder",
+                        _ => "turned other",
+                    },
+                    worldgen::prim::Shape::Cylinder { .. } => "cylinder",
+                    _ => "other",
+                };
+                let e = by
+                    .entry(format!(
+                        "{shape} interior={}",
+                        p.flags.contains(PrimFlags::INTERIOR)
+                    ))
+                    .or_default();
+                e.0 += 1;
+                e.1 += m.vertices.len();
+            }
+            let mesh = mesh_primitives(&mesh_prims_l2(&env, &out.ports, true)).0;
+            eprintln!(
+                "cell {c:?}: {} envelopes, {} verts after culling = {:.2} MiB",
+                env.len(),
+                mesh.vertices.len(),
+                (mesh.vertices.len() * 20 + mesh.indices.len() * 4) as f64 / 1_048_576.0
+            );
+            for (k, (n, v)) in by {
+                eprintln!("  {k}: {n} pieces {v} verts");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "prints"]
+    fn l2_full_anatomy() {
+        let cache = L1Cache::default();
         let mut by: std::collections::BTreeMap<u8, (usize, usize)> =
             std::collections::BTreeMap::new();
-        for p in &draw {
-            let mut m = Mesh::default();
-            crate::primmesh::add_primitive(&mut m, p);
-            let e = by.entry(p.kind.0).or_default();
-            e.0 += 1;
-            e.1 += m.vertices.len();
+        let (mut total, mut cells) = (0usize, 0);
+        for dx in 0..3i64 {
+            for dy in 0..2i64 {
+                for dz in 0..3i64 {
+                    let key = CellKey::new(Level::L2, I64Vec3::new(-24 + dx, dy, -32 + dz));
+                    let (out, _) = l2_build(WorldSeed(0), &cache, key);
+                    let env = mid_primitives(out.primitives.clone());
+                    let draw = mesh_prims_l2(&env, &out.ports, true);
+                    for p in &draw {
+                        let mut m = Mesh::default();
+                        crate::primmesh::add_primitive(&mut m, p);
+                        let e = by.entry(p.kind.0).or_default();
+                        e.0 += 1;
+                        e.1 += m.vertices.len();
+                    }
+                    let mesh = mesh_primitives(&draw).0;
+                    total += mesh.vertices.len() * 20 + mesh.indices.len() * 4;
+                    cells += 1;
+                }
+            }
         }
-        let mesh = mesh_primitives(&draw).0;
         eprintln!(
-            "{} prims {} verts {} idx",
-            draw.len(),
-            mesh.vertices.len(),
-            mesh.indices.len()
+            "{cells} cells, {:.1} MiB mean",
+            total as f64 / cells as f64 / 1_048_576.0
         );
         for (k, (n, v)) in by {
-            eprintln!("  kind {k}: {n} pieces {v} unmerged verts");
+            eprintln!(
+                "  kind {k}: {} pieces, {} verts a cell",
+                n / cells,
+                v / cells
+            );
         }
     }
 
@@ -656,7 +739,7 @@ mod tests {
         pool.submit(id, 1.0);
         let got = pool.recv().unwrap().unwrap();
         let (out, _) = l2_build(WorldSeed(5), &L1Cache::default(), id.key);
-        let mut direct = mesh_primitives(&mesh_prims_l2(&out.primitives, &out.ports)).0;
+        let mut direct = mesh_primitives(&mesh_prims_l2(&out.primitives, &out.ports, false)).0;
         crate::debugview::tag_level(&mut direct.vertices, id.key.level);
         assert_eq!(got.id, id);
         assert_eq!(got.mesh.vertices, direct.vertices);

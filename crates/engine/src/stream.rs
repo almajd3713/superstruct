@@ -124,7 +124,7 @@ impl Default for StreamConfig {
     fn default() -> Self {
         Self {
             l3_radius_m: 96.0,
-            l2_radius_m: 1024.0,
+            l2_radius_m: 640.0,
             l2_mid_radius_m: 3072.0,
             l1_full_radius_m: 4096.0,
             l1_far_radius_m: 51200.0,
@@ -140,7 +140,7 @@ pub struct Wanted {
 }
 
 /// Distance in metres from `cam` to the nearest point of `key`'s cell; zero inside it.
-fn distance_to_cell(cam: &WorldPos, key: CellKey) -> Option<f64> {
+pub fn distance_to_cell(cam: &WorldPos, key: CellKey) -> Option<f64> {
     let bounds = key.aabb_world().ok()?;
     let min = bounds.min.delta(cam);
     let size = bounds.size_m as f64;

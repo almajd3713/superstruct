@@ -199,6 +199,45 @@ impl Streamer {
         }
     }
 
+    /// `(resident, wanted)` among the full-detail chunks within `radius` metres of `cam`: how
+    /// much of the place the camera stands in has arrived (PW.4.24).
+    pub fn near_arrived(&self, cam: &WorldPos, radius: f64) -> (usize, usize) {
+        let (mut have, mut want) = (0, 0);
+        for w in &self.wanted {
+            if w.id.detail != Detail::Full {
+                continue;
+            }
+            if crate::stream::distance_to_cell(cam, w.id.key).is_some_and(|d| d <= radius) {
+                want += 1;
+                have += usize::from(self.resident.contains_key(&w.id));
+            }
+        }
+        (have, want)
+    }
+
+    /// The full-detail chunks within `radius` of `cam` that are not resident yet.
+    pub fn near_missing(&self, cam: &WorldPos, radius: f64) -> Vec<ChunkId> {
+        self.wanted
+            .iter()
+            .filter(|w| w.id.detail == Detail::Full && !self.resident.contains_key(&w.id))
+            .filter(|w| crate::stream::distance_to_cell(cam, w.id.key).is_some_and(|d| d <= radius))
+            .map(|w| w.id)
+            .collect()
+    }
+
+    /// Resident chunks and bytes by level and detail, for the logs (PW.4.23).
+    pub fn breakdown(&self) -> std::collections::BTreeMap<String, (usize, u64)> {
+        let mut by = std::collections::BTreeMap::new();
+        for (id, r) in &self.resident {
+            let e = by
+                .entry(format!("{:?} {:?}", id.key.level, id.detail))
+                .or_insert((0, 0));
+            e.0 += 1;
+            e.1 += r.bytes;
+        }
+        by
+    }
+
     pub fn stats(&self) -> StreamStats {
         StreamStats {
             wanted: self.wanted.len(),

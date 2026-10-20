@@ -1925,6 +1925,14 @@ impl<'a> Emitter<'a> {
                 [hi[0] - T, hi[1], hi[2] - T],
             ),
         ];
+        // The part's whole box, for the mid band, which does not draw shells.
+        self.frame_box(
+            self.corner(b.lo),
+            self.corner(b.hi),
+            material,
+            FeatureKind::MASS,
+            PrimFlags::MID_ONLY | PrimFlags::NO_COLLIDE,
+        );
         for s in slabs {
             let mut pieces = vec![s];
             for c in cuts {
