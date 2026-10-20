@@ -210,6 +210,7 @@ pub struct ChunkMeshStats {
 
 /// Meshes `prims` (cell-local metres). Boxes and stair steps are culled against each other;
 /// ramps and cylinders are emitted whole and occlude nothing.
+#[allow(clippy::too_many_lines)] // cull, de-overlap and merge in one pass
 pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
     let mut mesh = Mesh::default();
     let mut boxes: Vec<SolidBox> = Vec::new();
@@ -287,6 +288,33 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
                         .or_default()
                         .extend(pieces.iter().copied());
                 }
+            }
+        }
+    }
+    // Quads of different materials in one plane that overlap would z-fight: the first material
+    // (lowest id) keeps the overlap, the others lose it.
+    let mut planes: BTreeMap<(u8, bool, Q), Vec<(u16, Vec<Rect>)>> = BTreeMap::new();
+    for ((axis, positive, plane, material), rects) in quads {
+        planes
+            .entry((axis, positive, plane))
+            .or_default()
+            .push((material, rects));
+    }
+    let mut quads: BTreeMap<(u8, bool, Q, u16), Vec<Rect>> = BTreeMap::new();
+    for ((axis, positive, plane), layers) in planes {
+        let mut covered: Vec<Rect> = Vec::new();
+        for (material, rects) in layers {
+            let mut kept = rects.clone();
+            for hole in &covered {
+                next.clear();
+                for r in kept.drain(..) {
+                    subtract(r, *hole, &mut next);
+                }
+                std::mem::swap(&mut kept, &mut next);
+            }
+            covered.extend(rects);
+            if !kept.is_empty() {
+                quads.insert((axis, positive, plane, material), kept);
             }
         }
     }
@@ -402,6 +430,30 @@ mod tests {
             let stored = oct_decode(mesh.vertices[tri[0] as usize].normal);
             assert!(geometric.dot(stored) > 0.99, "{geometric} vs {stored}");
         }
+    }
+
+    /// Two boxes of different materials with tops in one plane: the overlap is drawn once.
+    #[test]
+    fn coplanar_tops_of_two_materials_do_not_overlap() {
+        let mut a = bx([0, 0, 0], [64, 16, 64]);
+        let mut b = bx([32, 0, 0], [96, 16, 64]);
+        a.material = MaterialId(0);
+        b.material = MaterialId(1);
+        let (mesh, _) = mesh_primitives(&[a, b]);
+        let top_area: f32 = mesh
+            .indices
+            .chunks(3)
+            .filter(|t| {
+                t.iter()
+                    .all(|&i| (mesh.vertices[i as usize].position[1] - 1.0).abs() < 1e-4)
+            })
+            .map(|t| {
+                let p = |k: usize| Vec3::from_array(mesh.vertices[t[k] as usize].position);
+                (p(1) - p(0)).cross(p(2) - p(0)).length() * 0.5
+            })
+            .sum();
+        // The union of the two tops: 6 m by 4 m.
+        assert!((top_area - 24.0).abs() < 1e-3, "top area {top_area}");
     }
 
     #[test]

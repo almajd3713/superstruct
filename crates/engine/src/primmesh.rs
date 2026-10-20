@@ -34,7 +34,7 @@ pub fn add_primitive(mesh: &mut Mesh, prim: &Primitive) {
 
 /// How far a turned box is grown on every side, in metres. Turned pieces are not culled
 /// against each other, so two of them with a face in one plane would z-fight; each grows by
-/// 0.25 to 2 mm from a hash of its own geometry, which settles who is in front the same way
+/// 0.15 to 2.4 mm from a hash of its own geometry, which settles who is in front the same way
 /// every time and in every chunk. Skin and windows sit 4 mm further out than what they clad.
 fn nudge(o: &Oriented, kind: FeatureKind) -> f32 {
     let LocalShape::Box { aabb } = o.local else {
@@ -47,13 +47,13 @@ fn nudge(o: &Oriented, kind: FeatureKind) -> f32 {
     ] {
         h = (h ^ u64::from(v.cast_unsigned())).wrapping_mul(0x0100_0000_01b3);
     }
-    let level = (h >> 32) % 8 + 1;
+    let level = (h >> 32) % 16 + 1;
     let base = if kind == FeatureKind::SKIN || kind == FeatureKind::WINDOW {
         0.004
     } else {
         0.0
     };
-    base + level as f32 * 0.000_25
+    base + level as f32 * 0.000_15
 }
 
 fn add_shape(mesh: &mut Mesh, shape: Shape, material: u16) {
