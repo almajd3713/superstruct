@@ -24,7 +24,8 @@ pub fn l2_cell_web(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutpu
     for s in &t.structures {
         structures.extend(s.primitives(&t.lattice));
     }
-    // The doorways and passages are cut out of the structures; the pieces that line them stay.
+    // The doorways and passages are cut out of the structures and the skin's cladding; the
+    // pieces that line them stay.
     let bores: Vec<Primitive> = t
         .paths
         .bores
@@ -33,8 +34,8 @@ pub fn l2_cell_web(seed: WorldSeed, cache: &L1Cache, cell: CellKey) -> CellOutpu
         .chain(&t.paths.corridors)
         .copied()
         .collect();
+    structures.extend(t.skin.cladding.iter().copied());
     let (mut primitives, _) = carve(structures, &bores, [0; 3]);
-    primitives.extend(t.skin.cladding.iter().copied());
     primitives.extend(t.paths.prims.iter().copied());
     primitives.extend(t.thresholds.prims.iter().copied());
     primitives.extend(t.payoffs.prims.iter().copied());
@@ -369,7 +370,7 @@ mod tests {
         assert!(w.samples > 1000);
         assert!(w.by_l1 == 0, "{} samples blocked by the L1 solid", w.by_l1);
         assert!(w.no_floor * 12 <= w.samples, "{w:?}");
-        assert!(w.blocked() * 20 <= w.samples, "{w:?}");
+        assert!(w.blocked() * 100 <= w.samples, "{w:?}");
     }
 
     /// The same for the open level segments (catwalks, bridges, avenues): what blocks them.
@@ -387,6 +388,7 @@ mod tests {
         eprintln!("open: {w:?}");
         assert!(w.samples > 10_000);
         assert!(w.blocked() * 500 <= w.samples, "{w:?}");
+        assert_eq!(w.by_rail, 0, "a rail or wall across a walkway: {w:?}");
         // Where a leg meets a stair the stair is turned so that the leg comes in along its
         // corridor or from its free side (PW.3.12b).
         let stairs: usize = w

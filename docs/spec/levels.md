@@ -1128,6 +1128,17 @@ The clear boxes of bored passages and thresholds are cut out of solid boxes (`ca
 - **Windows.** A structure window is a 1.4 m by 1.6 m panel on a 4 m grid (one storey), 12 cm thick, about 30 % of grid places lit (hash of the slab and the grid place), instead of four 8 m squares of pure white per slab. The material is the new `LIT_WINDOW` (id 8: warm, emissive 0.4; lamps keep `EMISSIVE`), also used for path glass, the lit panels of path modifiers and the cliff windows. Windows go only on the faces of the structure's box parts: a cylinder, dome, helix or other shaped form fills its bounding box's corners with air, and a window there floated; and not on a face against another solid slot (built, parent solid, engulfed), which has no outside. At most 8 slot faces per box part.
 - **Test.** `zfight::windows_lie_on_walls`: of the 3 400 structure window panels in 60 cells, 1 % (36) do not have a solid piece behind and none in front (the bar is 2 %); these are mostly SV-18 (windows only: openings in the parent's wall), whose host is the parent's solid in the parent's frame, not the lattice's. Open: make SV-18 test its host.
 
+### 5W.30 Collisions on the paths (PW.3.21f, version 14)
+
+What keeps a walker from being stopped on a path:
+
+- **Bored steps.** `tissue::SolidProbe` tests a route step against the parent's solid along its whole length, not only at slot centres: a step that runs into a plate or wall no centre lies in counts as bored, so its slots are `crossed` and the L1 solid is cut there. Segments are also cut at junction slots (three or more routes), so stairs and decks meet at nodes.
+- **Trim.** `Leg::trim`: rails, walls and posts stop 1.7 m past a corner node (half a width plus 1.7 m), because they stood across the other leg's walkway (`Build::clamp_side`, `side_solid`); applied to rails, walls, posts, PH-11/12 linings, PH-14 walls and the enclosure walls of `modifiers.rs`.
+- **Corridors.** `PathPieces::corridors`: each leg's walkway 1 m each side and 4 m high, each stair's footprint, cut out of the structures and the skin's cladding by `l2_web` (turned and tilted parts reach past their slots).
+- **Stairs.** A stair's plan is turned so that no leg meets its foot on its solid side (§5W.17).
+- **The cut does not read growth.** `paths::bored_bores` runs on the routes alone, so the L1 solid can be cut before a cell has grown: a bored passage's plan reads the segments, not `Tissue::route` (which growth extends), and a bored passage has no wall side. Test `the_cuts_follow_from_the_routes_alone`.
+- **Measured** (`l2_web::tests`, one L1 cell, samples along centre lines 0.3, 0.9 and 1.1 m above the floor): open level segments 52 000 samples, blocked 0.13 % (stairs and ramps 16, structures 24, none by L1 solid or rail); bored passages 8 900 samples, blocked 0.4 % (structures 25: a cut that is not a box, or a frame that differs, stays whole). Bars: 0.2 % open (0 by rails), 1 % bored.
+
 
 ## 6. L3: Blocks (64 m)
 
