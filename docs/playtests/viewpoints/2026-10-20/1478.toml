@@ -1,0 +1,21 @@
+# Shot out/screenshot-1792511478.png of the 2026-10-20 walk. Position from its overlay; the
+# view direction, bands and window were not recorded (before PW.4.6), so yaw and pitch are 0
+# and the rest are the defaults: turn to match the shot, press F12, and replace this file with
+# the new sidecar.
+seed = 0
+gen_version = 17
+sector = [0, 3, 1]
+local = [375.55, 101.7, 339.14]
+yaw = 0.0
+pitch = 0.0
+fov_deg = 90.0
+fly = true
+width = 1600
+height = 900
+
+[bands]
+l3 = 96.0
+l2 = 1024.0
+l2_mid = 3072.0
+l1_full = 4096.0
+l1_far = 51200.0

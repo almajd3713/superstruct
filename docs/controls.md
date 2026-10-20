@@ -34,7 +34,7 @@ The bindings below are the defaults in `crates/engine/src/input.rs` (`Bindings::
 | F3 | Toggle debug boxes |
 | F7 | Freeze culling (keeps the old frustum) |
 | F11 | Toggle fullscreen |
-| F12 | Screenshot to `out/` |
+| F12 | Screenshot to `out/`, with a `.toml` sidecar (pose, seed, `GEN_VERSION`, bands, overlay readings) that `SUPERSTRUCT_SHOT` replays |
 | Tab | Toggle the altimeter and coordinates readout (absolute metres) |
 
 ## Stylization prototypes (P4.3.3)
@@ -54,7 +54,9 @@ Set before launch (`scripts/win.sh run` forwards them):
 |---|---|
 | `SUPERSTRUCT_LOG` | Tracing filter |
 | `SUPERSTRUCT_SETTINGS` | Settings file |
-| `SUPERSTRUCT_AUTOSHOT=<frames>` | Save a screenshot after that many frames, then exit |
+| `SUPERSTRUCT_AUTOSHOT=<frames>` | Save a screenshot after that many frames, then exit. `settle` (or `settle:<max frames>`) waits until streaming has been idle for 60 frames |
+| `SUPERSTRUCT_SHOT=<sidecar.toml>` | Start from a screenshot's sidecar: seed, window size, FOV, bands, fly or walk, position and view |
+| `SUPERSTRUCT_SHOT_NAME=<name>` | Save screenshots as `out/<name>.png` (and `.toml`), overwriting |
 | `SUPERSTRUCT_OVERLAY=1` | Start with the overlay on |
 | `SUPERSTRUCT_PHOTO=<stops>` | Start photo mode at frame 2 with that exposure |
 | `SUPERSTRUCT_READOUT=1` | Start with the altimeter readout on |

@@ -45,6 +45,7 @@ pub mod respawn;
 pub mod save;
 pub mod settings;
 pub mod shaders;
+pub mod shot;
 pub mod stream;
 pub mod streamer;
 pub mod suballoc;

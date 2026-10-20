@@ -45,6 +45,42 @@ After playing the Phase 5 build, the user found the world empty and dull: deck s
 
 The user wants wild, varied ideas, not literal readings. Their examples, and the ones in these docs, are seeds. When implementing a family, multiply its variants. When stuck for ideas, research or ask the user.
 
+## Handoff 2026-10-20 (latest): the user's walk, the fix items PW.4.6 to PW.4.26, PW.4.6 done
+
+**What happened.** The user walked `GEN_VERSION` 17 on Windows and saved 25 screenshots (`out/screenshot-1792511403.png` to `...2255.png`). `docs/playtests/2026-10-20-web-walk.md` reads every shot and traces each defect to the code. `CHECKLIST.md` has a new section, "PW.4 fixes from the walk of 2026-10-20", with items **PW.4.6 to PW.4.26**. Each item removes a cause, not a single shot. Work them in order before PW.5. The user asked for the first three (4.6, 4.7, 4.8) and then stopped the session after 4.6.
+
+**User decisions (2026-10-20).**
+- Tilted, sideways and inverted masses keep an interior, solved upright (lattice yaw only) inside the tilted shell (PW.4.20 has the rule).
+- Open-topped rings stay, and roofed rings are added: new idea FORM-24 in `the-web.md` §6.3 and the registry, owned by PW.4.26.
+
+**PW.4.6 (done, committed): replayable screenshots.**
+- `crates/engine/src/shot.rs`: F12 and autoshots write a `.toml` sidecar beside the PNG.
+- `SUPERSTRUCT_SHOT=<toml>` replays a sidecar.
+- `SUPERSTRUCT_AUTOSHOT=settle` shoots once streaming has been idle for 60 frames.
+- `SUPERSTRUCT_SHOT_NAME=<name>` fixes the output name.
+- All of these are forwarded by `scripts/win.sh` and listed in `docs/controls.md`.
+- **CLAUDE.md §7 still lists the old environment switches only.** It changes only with the user's agreement, so ask before adding the new ones.
+- Check: run `SS_TARGET=ss-target-claude SUPERSTRUCT_SHOT=out/replay-a.toml SUPERSTRUCT_AUTOSHOT=settle SUPERSTRUCT_SHOT_NAME=replay-b scripts/win.sh run --release`, then compare `out/replay-a.png` with `out/replay-b.png`. They differ in 3 scene pixels.
+- One unexplained difference: the altitude readout appeared in run A and not in run B. Look at it if HUD state matters for comparisons. The simplest fix is to hide the HUD in autoshots.
+- `docs/playtests/viewpoints/2026-10-20/*.toml` holds the 17 shots that had the overlay on. Their yaw and pitch are 0, because the old shots did not record them. Ask the user to re-take the important ones with F12.
+
+**Next: PW.4.7 (pick and debug colour views).** What I found while planning it:
+- `Vertex` (`vertex.rs`) has a spare `u16` (`_pad`). Put the debug class there when meshing: `FeatureKind` (6 bits), frame class (upright, turned, tilted, sideways: 2 bits) and level (2 bits). `scene.wgsl` then picks the colour by a debug-mode uniform. A key (V is free) cycles the modes. Chunk colour can come from the instance index.
+- Primitives carry **no registry ID tag** (`prim::Primitive` is shape, material, kind, flags). The census counts from the tissue data instead. Do not add a field to `Primitive`: that is an output change that bumps `GEN_VERSION`. For the pick, build a traced copy of the L2 assembly that returns a parallel `Vec<Source>`:
+  - sources: structure index plus form, cladding, path segment plus PH or PV id, threshold, payoff, rail from a deck edge or a flight;
+  - `carve` needs a variant that returns each output piece's origin index;
+  - `PathPieces` can record `(segment, id, start, end)` ranges as it emits. That is not cell output, so it changes no output.
+- Pick key (X is free): send the camera ray to a `debugcmd` thread. It regenerates the L1, L2 and L3 cells along the ray (pure functions; mirror what `meshpool::build` meshes, including `l1_primitives_carved` for L1). It then ray-marches the AABB-filtered primitives with `Shape::contains` in 2 cm steps, and reports kind, material, flags, cell, frame, shape, source, and whether the piece collides. For `RAILING`, also report where `l4::railing_modules` draws it. That shows the PW.4.9 mismatch directly.
+- Done when the cause of the dark patches in shots 1543, 1572 and 1872 is named. Use the viewpoint files to get there: `SUPERSTRUCT_SHOT=docs/playtests/viewpoints/2026-10-20/1872.toml`, then turn to the view in the shot.
+
+**Then PW.4.8 (defect census).** Add `--defects` to `tools/web-report` (which today is L1 only) and a small sampled test. It has nine counters, (a) to (i) as listed in the item. Most need the walk lines: `paths::walk_line`, `paths_v` `Rise::walk`, and the corridors in `PathPieces::corridors`. Write the baseline counts into the playtest note.
+
+**Other leads from the audit** (details in the playtest note):
+- The rail bugs come mostly from `l4::railing_modules`, `edges.rs` frame-up, and `edges::World` not seeing neighbouring cells.
+- Dressing kept by `drop_in_tram_volumes` is a source of floating windows and cables.
+- The world-aligned grid in `scene.wgsl` draws diagonal lines on turned rooms.
+- `WebL3` keeps the lattice tilt, so interiors in tilted masses slope.
+
 ## Handoff 2026-10-20 (later): PW.4 built (Web L3), `GEN_VERSION` 17
 
 PW.4.1 to PW.4.5 are committed (`3de3f57` and after; specs `levels.md` §6W.10 to §6W.13, checklist notes list every deviation). New modules: `l3_web.rs` (masses, entrances, `WebL3` context, world-cell wrapper), `l3_arch.rs`, `l3_dress.rs` (corridor kinds), `l3_rooms.rs` (INT-01..19); `l3_plan.rs`, `l3.rs`, `l3_tiles.rs`, `l3_solver.rs` (`solve_weighted`) were changed; `l3_validate.rs` was deleted (replaced by tests in `l3_web.rs`). Interiors work in the game: see the viewpoint in the PW.4.1 note. Also this session: empty mesh pages are released (VRAM leak) and the overlay shows page bytes; coplanar quads of different materials no longer overlap in `chunkmesh`; stair rails are a box plus a ramp that follow the flight (`edges.rs`).

@@ -37,6 +37,7 @@ use crate::respawn::{Event, SafeSpot, Survival};
 use crate::save::{BeaconPos, Save, save_path};
 use crate::settings::{Settings, VsyncMode};
 use crate::shaders::{ShaderSources, ShaderWatcher};
+use crate::shot::{AutoShot, Bands, Readings, Shot};
 use crate::streamer::{RendererSink, Streamer, StreamerConfig};
 use crate::tramauto::TramAuto;
 use crate::tramdraw::TramDraw;
@@ -127,8 +128,13 @@ struct App {
     autofly: Option<f32>,
     frame_count: u64,
     quit: bool,
-    /// `SUPERSTRUCT_AUTOSHOT=<n>`: screenshot after n frames, then exit. For remote runs.
-    autoshot_after: Option<u64>,
+    /// `SUPERSTRUCT_AUTOSHOT=<n>|settle[:<n>]`: screenshot after n frames, or once streaming
+    /// is idle, then exit. For remote runs.
+    autoshot: Option<AutoShot>,
+    /// Frames in a row in which the streamer had nothing queued, running or to upload.
+    quiet_frames: u32,
+    /// `SUPERSTRUCT_SHOT=<sidecar>`: the screenshot this run replays (PW.4.6).
+    replay: Option<Shot>,
 }
 
 impl App {
@@ -537,6 +543,19 @@ impl App {
     /// outside the low corner of `SUPERSTRUCT_CELL` (default: the busiest L2 cell near the origin),
     /// high up and looking at its centre.
     fn place_camera(&mut self) {
+        if let Some(shot) = &self.replay {
+            let [x, y, z] = shot.sector;
+            match WorldPos::new(I64Vec3::new(x, y, z), Vec3::from_array(shot.local)) {
+                Ok(p) => {
+                    self.camera.pos = p;
+                    self.prev_cam_pos = p;
+                    self.camera.yaw = shot.yaw;
+                    self.camera.pitch = shot.pitch;
+                }
+                Err(err) => error!("cannot replay the shot's position: {err}"),
+            }
+            return;
+        }
         if let Some([x, y, z]) = std::env::var("SUPERSTRUCT_SECTOR")
             .ok()
             .and_then(|v| parse_triple(&v))
@@ -749,7 +768,27 @@ impl App {
             running.gpu.queue.submit([encoder.finish()]);
             running.timer.after_submit();
             if want_screenshot {
-                save_screenshot(&running.gpu, &frame.texture);
+                let (width, height) = running.gpu.size();
+                let shot = Shot {
+                    seed: self.settings.seed,
+                    gen_version: worldgen::GEN_VERSION,
+                    sector: render_camera.pos.sector().to_array(),
+                    local: render_camera.pos.local().to_array(),
+                    yaw: render_camera.yaw,
+                    pitch: render_camera.pitch,
+                    fov_deg: render_camera.fov_y.to_degrees(),
+                    fly: self.fly_mode,
+                    width,
+                    height,
+                    bands: Bands::of(&self.settings),
+                    readings: Readings::of(
+                        &self.streamer.stats(),
+                        running.renderer.gpu_bytes(),
+                        frame_time * 1000.0,
+                        self.worst_frame * 1000.0,
+                    ),
+                };
+                save_screenshot(&running.gpu, &frame.texture, &shot);
             }
             running.window.pre_present_notify();
             crate::zone!("present");
@@ -793,7 +832,15 @@ impl App {
         self.parts_ms[0] = t_sim.elapsed().as_secs_f64() * 1000.0;
         let alpha = (self.accumulator / SIM_DT) as f32;
         self.frame_count += 1;
-        let autoshot = self.autoshot_after.is_some_and(|n| self.frame_count == n);
+        let stats = self.streamer.stats();
+        self.quiet_frames = if crate::shot::idle(&stats) && self.frame_count > 10 {
+            self.quiet_frames.saturating_add(1)
+        } else {
+            0
+        };
+        let autoshot = self
+            .autoshot
+            .is_some_and(|a| a.due(self.frame_count, self.quiet_frames));
         let want_screenshot = autoshot || self.input.pressed(Action::Screenshot);
         self.run_debug_commands();
         self.handle_actions();
@@ -916,6 +963,11 @@ impl ApplicationHandler for App {
 
 /// Opens the window and blocks until it is closed.
 pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
+    let replay = crate::shot::from_env();
+    let settings = match &replay {
+        Some(shot) => shot.apply_to(&settings),
+        None => settings,
+    };
     let settings_fov = settings.fov_deg;
     let settings_seed = settings.seed;
     let settings_bands = settings.stream_config();
@@ -955,8 +1007,13 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         debug_tx,
         debug_rx,
         sanctuary_pick: 0,
-        fly_mode: std::env::var_os("SUPERSTRUCT_WALK").is_none()
-            && std::env::var_os("SUPERSTRUCT_TRAM").is_none(),
+        fly_mode: replay.as_ref().map_or_else(
+            || {
+                std::env::var_os("SUPERSTRUCT_WALK").is_none()
+                    && std::env::var_os("SUPERSTRUCT_TRAM").is_none()
+            },
+            |s| s.fly,
+        ),
         fly_speed: 20.0,
         streamer: Streamer::new(
             StreamerConfig {
@@ -988,9 +1045,11 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
             .and_then(|v| v.parse().ok()),
         frame_count: 0,
         quit: false,
-        autoshot_after: std::env::var("SUPERSTRUCT_AUTOSHOT")
+        autoshot: std::env::var("SUPERSTRUCT_AUTOSHOT")
             .ok()
-            .and_then(|v| v.parse().ok()),
+            .and_then(|v| AutoShot::parse(&v)),
+        quiet_frames: 0,
+        replay,
     };
     event_loop.run_app(&mut app)?;
     app.failure.map_or(Ok(()), Err)
@@ -1026,16 +1085,18 @@ fn neighbourhood() -> impl Iterator<Item = I64Vec3> {
     (-1..=1).flat_map(|x| (-1..=1).flat_map(move |y| (-1..=1).map(move |z| I64Vec3::new(x, y, z))))
 }
 
-fn save_screenshot(gpu: &Gpu, texture: &wgpu::Texture) {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let path = PathBuf::from(format!("out/screenshot-{stamp}.png"));
+/// Saves the frame to `out/` with its sidecar (`crate::shot`), which `SUPERSTRUCT_SHOT` replays.
+fn save_screenshot(gpu: &Gpu, texture: &wgpu::Texture, shot: &Shot) {
+    let path = crate::shot::next_path();
     let result = readback::read_texture_rgba8(&gpu.device, &gpu.queue, texture)
         .and_then(|px| readback::save_png(&path, texture.width(), texture.height(), &px));
     match result {
         Ok(()) => info!(path = %path.display(), "screenshot saved"),
         Err(err) => error!("screenshot failed: {err}"),
+    }
+    let sidecar = crate::shot::sidecar_of(&path);
+    if let Err(err) = shot.save(&sidecar) {
+        error!(path = %sidecar.display(), "screenshot sidecar failed: {err}");
     }
 }
 
