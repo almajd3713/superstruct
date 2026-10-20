@@ -957,6 +957,7 @@ Size is drawn per form in metres (`[width, depth, height]`), multiplied by the s
 | FORM-20 polygonal ring | ROUND | a wall of 8 or 16 facets |
 | FORM-21 starburst hub | ANGLED | a core and eight arms every 45° |
 | FORM-22 wedge | ANGLED | a prism whose roof rises towards one of four directions |
+| FORM-24 roofed ring | ROUND | a FORM-20 or FORM-16 ring wall with a roof, by a draw keyed by where the ring is: two in five roofed, half of those flat (a 1 m disc on the wall) and half with an oculus (a 1 m ring of facets from 0.3 of the radius out to the wall); three in five stay open-topped |
 | FORM-23 cone or funnel | ANGLED | eight stacked cylinders narrowing upwards, or downwards |
 
 The support variants (§5W.13) work on the form's boxes (its envelope when it is made of shaped pieces).

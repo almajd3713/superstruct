@@ -958,4 +958,47 @@ mod tests {
             );
         }
     }
+
+    /// Prints a place beside an open ring, a flat-roofed one and one with an oculus.
+    #[test]
+    #[ignore = "prints viewpoints"]
+    fn print_ring_viewpoints() {
+        use crate::tissue_grow::Shaped;
+        let cache = L1Cache::default();
+        let mut want = vec![(16usize, "open"), (17, "flat roof"), (32, "oculus")];
+        for c in block(I64Vec3::new(-6, 4, -6), I64Vec3::new(14, 4, 14)) {
+            if want.is_empty() {
+                break;
+            }
+            let t = tissue_cell(WorldSeed(0), cache.tissue(), CellKey::new(Level::L2, c));
+            for s in &t.structures {
+                for (sh, b) in &s.shaped {
+                    let Shaped::Ring(n) = sh else { continue };
+                    if *n != 16 {
+                        continue;
+                    }
+                    let mut e = crate::tissue_grow::Emitter::new(&t.lattice);
+                    e.ring(b, *n, PrimFlags::NONE);
+                    let Some(k) = want.iter().position(|w| w.0 == e.out.len()) else {
+                        continue;
+                    };
+                    let (_, name) = want.remove(k);
+                    let pitch = t.lattice.pitch as f64;
+                    let top = e.at([
+                        (f64::from(b.lo[0] + b.hi[0]) / 2.0) * pitch,
+                        f64::from(b.hi[1]) * pitch + 12.0,
+                        (f64::from(b.lo[2] + b.hi[2]) / 2.0) * pitch + 30.0,
+                    ]);
+                    let w = top
+                        + DVec3::new(c.x as f64 * 512.0, c.y as f64 * 512.0, c.z as f64 * 512.0);
+                    let sec = (w / 1024.0).floor();
+                    let loc = w - sec * 1024.0;
+                    eprintln!(
+                        "RING {name}: SUPERSTRUCT_SECTOR={},{},{} SUPERSTRUCT_LOCAL={:.1},{:.1},{:.1} SUPERSTRUCT_YAW=180 SUPERSTRUCT_PITCH=-35",
+                        sec.x, sec.y, sec.z, loc.x, loc.y, loc.z
+                    );
+                }
+            }
+        }
+    }
 }

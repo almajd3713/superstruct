@@ -2100,17 +2100,59 @@ impl<'a> Emitter<'a> {
         });
     }
 
-    /// A wall of `n` facets round the box's vertical axis.
-    fn ring(&mut self, b: &SlotBox, n: u8, flags: PrimFlags) {
+    /// A wall of `n` facets round the box's vertical axis, open at the top, or (two in five)
+    /// roofed (FORM-24): flat, or a roof with an oculus over the middle.
+    pub(crate) fn ring(&mut self, b: &SlotBox, n: u8, flags: PrimFlags) {
         let (lo, hi) = (self.corner(b.lo), self.corner(b.hi));
         let r = (hi[0] - lo[0]).min(hi[2] - lo[2]) / 2.0;
-        self.ring_at(
-            [(lo[0] + hi[0]) / 2.0, lo[1], (lo[2] + hi[2]) / 2.0],
-            r,
-            hi[1] - lo[1],
-            n,
-            flags,
-        );
+        let centre = [(lo[0] + hi[0]) / 2.0, lo[1], (lo[2] + hi[2]) / 2.0];
+        self.ring_at(centre, r, hi[1] - lo[1], n, flags);
+        // The draw is keyed by where the ring is, so the same ring is roofed the same way in
+        // every cell that builds it.
+        let mut h = 0x9e37_79b9_7f4a_7c15_u64;
+        for v in [centre[0], centre[1], centre[2], r] {
+            h = (h ^ u64::from(quanta(v).cast_unsigned())).wrapping_mul(0x0100_0000_01b3);
+        }
+        let roof = (h >> 33) % 5;
+        if roof >= 2 {
+            return;
+        }
+        let thick = 8.0_f64.min(r / 2.0);
+        let inner = (r - thick).max(1.0);
+        // The roof is 1 m thick and sits on the wall, inside its inner face.
+        let top = [centre[0], hi[1] - 1.0, centre[2]];
+        let (x0, z0) = (centre[0] - inner, centre[2] - inner);
+        let at = self.at([x0, top[1], z0]);
+        if roof == 0 {
+            // Flat: a cylinder across the ring.
+            let local = LocalShape::Cylinder {
+                axis: Axis::Y,
+                base: QVec3::new(quanta(inner), 0, quanta(inner)),
+                length: quanta(1.0),
+                radius: quanta(inner),
+            };
+            self.out.push(Primitive {
+                shape: Shape::oriented(self.lat.frame, Self::qv(at), local, self.cell),
+                material: MaterialId::CONCRETE,
+                kind: FeatureKind::MASS,
+                flags,
+            });
+        } else {
+            // With an oculus: a ring of facets, 1 m high, from the oculus out to the wall.
+            let oculus = inner * 0.3;
+            let rr = crate::orient::FacetRing {
+                axis: Self::qv(self.at([centre[0], top[1], centre[2]])),
+                radius: quanta(oculus),
+                thick: quanta(inner - oculus + 0.5),
+                height: quanta(1.0),
+                n,
+                start: 0,
+                material: MaterialId::CONCRETE,
+                kind: FeatureKind::MASS,
+                flags,
+            };
+            self.out.extend(crate::orient::facet_ring(&rr, self.cell));
+        }
     }
 
     fn ring_at(&mut self, centre: [f64; 3], radius: f64, height: f64, n: u8, flags: PrimFlags) {
@@ -2337,6 +2379,32 @@ mod tests {
     use crate::seed::WorldSeed;
     use crate::tissue::{TissueCache, tissue_cell};
     use glam::I64Vec3;
+
+    /// FORM-24: a ring is open at the top, or roofed (flat, or with an oculus), by a draw keyed
+    /// by where it is: about three in five stay open, a fifth are flat and a fifth have an oculus.
+    #[test]
+    fn rings_are_open_or_roofed() {
+        let lat = crate::tissue::Lattice::new(crate::orient::Frame::Id);
+        let (mut open, mut flat, mut oculus) = (0, 0, 0);
+        for k in 0..300i32 {
+            let b = SlotBox {
+                lo: [k % 5, k / 5 % 4, k / 20 % 5],
+                hi: [k % 5 + 2, k / 5 % 4 + 2, k / 20 % 5 + 2],
+            };
+            let mut e = Emitter::new(&lat);
+            e.ring(&b, 16, PrimFlags::NONE);
+            match e.out.len() {
+                16 => open += 1,
+                17 => flat += 1,
+                32 => oculus += 1,
+                n => panic!("{n} pieces in a ring"),
+            }
+        }
+        assert!(
+            open > 120 && flat > 30 && oculus > 30,
+            "{open} open, {flat} flat, {oculus} with an oculus"
+        );
+    }
 
     fn seed() -> WorldSeed {
         WorldSeed(0x5eed)
