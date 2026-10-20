@@ -587,6 +587,68 @@ mod tests {
         }
     }
 
+    /// PW.4.27: no chunk is over what the streamer accepts (4 times the 16 MiB upload budget of a
+    /// frame; a bigger one is dropped, which leaves a hole in the world). L1 chunk (0,1,-1) of seed 0
+    /// was 69.7 MB, because a 400 m diagonal beam cut by the bores of 1 700 passages was 73 000
+    /// turned boxes whose shared faces were all drawn; the mesher now culls them in the beam's
+    /// frame.
+    #[test]
+    fn chunks_fit_the_upload_budget() {
+        const BUDGET: usize = 4 * 16 * 1024 * 1024;
+        let seed = WorldSeed(0);
+        let cache = L1Cache::default();
+        let bytes = |m: &Mesh| m.vertices.len() * 20 + m.indices.len() * 4;
+        for c in [
+            I64Vec3::new(0, 1, -1),
+            I64Vec3::new(-1, 0, 0),
+            I64Vec3::new(0, 0, 0),
+        ] {
+            let key = CellKey::new(Level::L1, c);
+            let (mut prims, _) = worldgen::l2_web::l1_primitives_carved(seed, &cache, key);
+            prims.extend(worldgen::tram::tram_pieces(seed, key));
+            let b = bytes(&mesh_primitives(&prims).0);
+            assert!(b <= BUDGET, "L1 chunk {c:?} is {b} bytes");
+        }
+        for c in [
+            I64Vec3::new(0, 6, 2),
+            I64Vec3::new(0, 6, 3),
+            I64Vec3::new(1, 5, 2),
+        ] {
+            let key = CellKey::new(Level::L2, c);
+            let (out, _) = l2_build(seed, &cache, key);
+            let m = mesh_primitives(&mesh_prims_l2(&out.primitives, &out.ports)).0;
+            assert!(bytes(&m) <= BUDGET, "L2 chunk {c:?} is {} bytes", bytes(&m));
+        }
+    }
+
+    #[test]
+    #[ignore = "prints"]
+    fn l2_chunk_anatomy() {
+        let cache = L1Cache::default();
+        let key = CellKey::new(Level::L2, I64Vec3::new(0, 6, 2));
+        let (out, _) = l2_build(WorldSeed(0), &cache, key);
+        let draw = mesh_prims_l2(&out.primitives, &out.ports);
+        let mut by: std::collections::BTreeMap<u8, (usize, usize)> =
+            std::collections::BTreeMap::new();
+        for p in &draw {
+            let mut m = Mesh::default();
+            crate::primmesh::add_primitive(&mut m, p);
+            let e = by.entry(p.kind.0).or_default();
+            e.0 += 1;
+            e.1 += m.vertices.len();
+        }
+        let mesh = mesh_primitives(&draw).0;
+        eprintln!(
+            "{} prims {} verts {} idx",
+            draw.len(),
+            mesh.vertices.len(),
+            mesh.indices.len()
+        );
+        for (k, (n, v)) in by {
+            eprintln!("  kind {k}: {n} pieces {v} unmerged verts");
+        }
+    }
+
     #[test]
     fn jobs_run_off_thread_and_match_the_direct_result() {
         let id = ChunkId::l2(I64Vec3::new(1, 0, -2));

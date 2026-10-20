@@ -121,7 +121,20 @@ fn add_oriented(mesh: &mut Mesh, o: &Oriented, material: u16, grow: f32) {
     turn_into(mesh, &local, o, material);
 }
 
-/// A mesh in the frame of `o`, turned into place and clipped to the cell box.
+/// A mesh of several boxes in the frame of `o` (their own materials and tags), turned into
+/// place and clipped to the cell box.
+pub fn turn_group(mesh: &mut Mesh, local: &Mesh, o: &Oriented) {
+    let first = mesh.vertices.len();
+    turn_into(mesh, local, o, 0);
+    let orient = orient_bits(&Shape::Oriented(*o));
+    for v in &mut mesh.vertices[first..] {
+        v.material |= orient;
+    }
+}
+
+/// A mesh in the frame of `o`, turned into place and clipped to the cell box. Each vertex
+/// keeps the material and tag of the local vertex it comes from (`material` is the fallback
+/// for meshes that carry none).
 fn turn_into(mesh: &mut Mesh, local: &Mesh, o: &Oriented, material: u16) {
     let [ex, ey, ez] = o.frame.axes();
     let rot = Mat3::from_cols(ex.as_vec3(), ey.as_vec3(), ez.as_vec3());
@@ -139,8 +152,12 @@ fn turn_into(mesh: &mut Mesh, local: &Mesh, o: &Oriented, material: u16) {
             continue;
         }
         let base = mesh.vertices.len() as u32;
-        mesh.vertices
-            .extend(poly.iter().map(|&p| Vertex::new(p, n, material)));
+        let (m, tag) = (v(tri[0]).material, v(tri[0]).tag);
+        mesh.vertices.extend(poly.iter().map(|&p| {
+            let mut vert = Vertex::new(p, n, if m == 0 { material } else { m });
+            vert.tag = tag;
+            vert
+        }));
         for i in 1..poly.len() as u32 - 1 {
             mesh.indices.extend([base, base + i, base + i + 1]);
         }
@@ -150,10 +167,9 @@ fn turn_into(mesh: &mut Mesh, local: &Mesh, o: &Oriented, material: u16) {
 /// Post spacing, metres, and the sizes of a railing's parts.
 /// The height of a rail above its walking surface: `edges::HEIGHT`, 18 quanta.
 pub const RAIL_HEIGHT: f32 = 1.125;
-const POST_SPACING: f32 = 2.5;
+const POST_SPACING: f32 = 3.0;
 const POST: f32 = 0.1;
 const BAR: f32 = 0.07;
-const TOE: f32 = 0.12;
 
 /// A post centred on `at`, kept inside `[l0, l1]` (a sliver of a rail gets a thin post).
 fn post_span(at: f32, l0: f32, l1: f32) -> (f32, f32) {
@@ -169,7 +185,7 @@ fn posts_in(len: f32) -> usize {
 }
 
 /// A railing in the frame of its piece (`primitives.md` §9): posts stand plumb, the top and
-/// middle bars and the toe plate follow the line of the piece. A box rail is level; the wedge a
+/// middle bars follow the line of the piece. A box rail is level; the wedge a
 /// flight's rail is is raked with the flight. Returns false for a shape that is neither.
 fn add_rail(mesh: &mut Mesh, prim: &Primitive) -> bool {
     let material = prim.material.0;
@@ -179,6 +195,14 @@ fn add_rail(mesh: &mut Mesh, prim: &Primitive) -> bool {
         Shape::Ramp { aabb, rise } => (plain_frame(aabb), LocalShape::Ramp { aabb, rise }),
         _ => return false,
     };
+    // A path builds its rails from posts and bars of its own: a box lower than 0.4 m (a bar, a
+    // handrail slab) or shorter than 0.5 m (a post) is drawn as the box it is.
+    if let LocalShape::Box { aabb } = local {
+        let (lo, hi) = (v3(aabb.min), v3(aabb.max));
+        if hi.y - lo.y < 0.4 || (hi.x - lo.x).max(hi.z - lo.z) < 0.5 {
+            return false;
+        }
+    }
     let mut l = Mesh::default();
     match local {
         LocalShape::Box { aabb } => rail_level(&mut l, v3(aabb.min), v3(aabb.max), material),
@@ -235,7 +259,6 @@ fn rail_level(m: &mut Mesh, lo: Vec3, hi: Vec3, material: u16) {
     put(m, l0, l1, hi.y - BAR, hi.y, POST);
     let mid = lo.y + (hi.y - lo.y) * 0.5;
     put(m, l0, l1, mid - BAR * 0.5, mid + BAR * 0.5, BAR);
-    put(m, l0, l1, lo.y, lo.y + TOE, hi[ac] - lo[ac]);
 }
 
 /// The rail of a flight: the wedge `[lo, hi]` rising along `rise`, its sloped top the rail's top.

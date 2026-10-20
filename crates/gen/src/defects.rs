@@ -643,6 +643,11 @@ fn scan_cell(
         };
         let mut hit_by: std::collections::BTreeSet<u32> = Default::default();
         for (s, _) in &samples {
+            // A sample on the cell's side is where a neighbour's walkway of another width
+            // begins: nothing stands across it, but its rails start on that plane.
+            if s.cmplt(Vec3::splat(0.5)).any() || s.cmpgt(Vec3::splat(511.5)).any() {
+                continue;
+            }
             r.base("b samples", 1);
             for dy in [0.3f32, 0.9, 1.5, 1.8] {
                 let q = *s + up * dy;

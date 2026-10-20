@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use glam::Vec3;
 use worldgen::cell::Axis;
+use worldgen::orient::{LocalShape, Oriented};
 use worldgen::prim::{Dir4, Primitive, Q, Q_PER_M, QAabb, Shape};
 
 use crate::mesh::Mesh;
@@ -218,6 +219,9 @@ type Layers = Vec<(u32, Vec<Rect>)>;
 pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
     let mut mesh = Mesh::default();
     let mut boxes: Vec<SolidBox> = Vec::new();
+    // Turned boxes of one frame and origin (the fragments a bored beam is cut into) are culled
+    // against each other in their own frame, like plain boxes (PW.4.27).
+    let mut turned: BTreeMap<TurnedKey, (Oriented, Vec<SolidBox>)> = BTreeMap::new();
     for p in prims {
         let material = p.material.0;
         let tag = if crate::debugview::enabled() {
@@ -244,12 +248,75 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
                     });
                 });
             }
+            Shape::Oriented(o) if matches!(o.local, LocalShape::Box { .. }) => {
+                let LocalShape::Box { aabb } = o.local else {
+                    continue;
+                };
+                turned
+                    .entry(turned_key(&o))
+                    .or_insert_with(|| (o, Vec::new()))
+                    .1
+                    .push(SolidBox {
+                        aabb,
+                        material,
+                        tag,
+                    });
+            }
             Shape::Ramp { .. } | Shape::Cylinder { .. } | Shape::Oriented(_) => {
                 primmesh::add_primitive(&mut mesh, p);
             }
             Shape::LiftShaft { .. } => {}
         }
     }
+    for (_, (o, group)) in turned {
+        if group.len() < 4 {
+            for b in group {
+                let prim = Primitive {
+                    shape: Shape::Oriented(Oriented {
+                        local: LocalShape::Box { aabb: b.aabb },
+                        ..o
+                    }),
+                    material: worldgen::prim::MaterialId(b.material),
+                    kind: worldgen::prim::FeatureKind::MASS,
+                    flags: worldgen::prim::PrimFlags::NONE,
+                };
+                primmesh::add_primitive(&mut mesh, &prim);
+            }
+            continue;
+        }
+        let mut local = Mesh::default();
+        mesh_boxes(&group, &mut local);
+        primmesh::turn_group(&mut mesh, &local, &o);
+    }
+    let stats = mesh_boxes(&boxes, &mut mesh);
+    (mesh, stats)
+}
+
+/// A frame, an origin and a clip box, as a map key.
+type TurnedKey = (i32, [i32; 4], [i32; 3], [i32; 6]);
+
+fn turned_key(o: &Oriented) -> TurnedKey {
+    let (kind, f) = match o.frame {
+        worldgen::orient::Frame::Id => (0, [0; 4]),
+        worldgen::orient::Frame::Table { yaw, tilt } => {
+            (1, [i32::from(yaw), i32::from(tilt), 0, 0])
+        }
+        worldgen::orient::Frame::Dir { d } => {
+            (2, [i32::from(d[0]), i32::from(d[1]), i32::from(d[2]), 0])
+        }
+    };
+    let c = o.clip;
+    (
+        kind,
+        f,
+        [o.origin.x, o.origin.y, o.origin.z],
+        [c.min.x, c.min.y, c.min.z, c.max.x, c.max.y, c.max.z],
+    )
+}
+
+/// Culls, de-overlaps and merges the faces of `boxes` into `mesh`.
+#[allow(clippy::too_many_lines)] // cull, de-overlap and merge in one pass
+fn mesh_boxes(boxes: &[SolidBox], mesh: &mut Mesh) -> ChunkMeshStats {
     let stats = ChunkMeshStats {
         boxes: boxes.len(),
         tris_unculled: boxes.len() * 12,
@@ -258,7 +325,7 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
     let mut pieces = Vec::new();
     let mut next = Vec::new();
     let mut near = Vec::new();
-    let mut grid = BoxGrid::new(&boxes);
+    let mut grid = BoxGrid::new(boxes);
     for (i, b) in boxes.iter().enumerate() {
         grid.query(&b.aabb, &mut near);
         for axis in [Axis::X, Axis::Y, Axis::Z] {
@@ -351,7 +418,7 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
         let axis = [Axis::X, Axis::Y, Axis::Z][usize::from(axis)];
         for r in rects {
             emit_quad(
-                &mut mesh,
+                mesh,
                 axis,
                 positive,
                 plane,
@@ -361,7 +428,7 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
             );
         }
     }
-    (mesh, stats)
+    stats
 }
 
 /// Merges rectangles that share a full edge, along `u` and then `v`, until no pair does.
