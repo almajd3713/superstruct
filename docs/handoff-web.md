@@ -45,6 +45,19 @@ After playing the Phase 5 build, the user found the world empty and dull: deck s
 
 The user wants wild, varied ideas, not literal readings. Their examples, and the ones in these docs, are seeds. When implementing a family, multiply its variants. When stuck for ideas, research or ask the user.
 
+## Handoff 2026-10-20: PW.3.12b, 21d, 21e, 21f, 22, 15c done; `GEN_VERSION` 16
+
+All committed (`git log`): the whole PW.2.9 to PW.3.21c stretch in `5f621ec`, then one commit per item. Full `cargo nextest run --workspace` passes (393 tests, about 5 minutes; the tram golden test alone takes 4 minutes now). Goldens are at version 16.
+
+- **PW.3.12b** (done): `place_rise` turns the stair so no leg meets the foot on the solid lane side (`levels.md` §5W.17). **PW.3.21f** (built, waits for your walk): also the skin's cladding is cut by the bores, the bored cut no longer reads growth (§5W.30).
+- **PW.3.21d** (done): `engine::primmesh::nudge` grows turned boxes by 0.25 to 2 mm from a hash of their geometry; identical pieces are dropped in `l2_web` (§5W.29). **PW.3.21e** (done): `LIT_WINDOW` material (id 8), 1.4 by 1.6 m panels, box walls only. 36 of 3 400 panels (1 %) have no wall behind them, mostly SV-18 (windows only): open item, SV-18 should test its host.
+- **PW.3.22** (done): `edges.rs`, rails on open edges above a drop (§5W.31). **Cost to watch:** L2 cell generation went from 42 to 83 ms on average (worst 0.44 s), L2 chunks are 4.5 MiB median, 8.9 p90, 12.1 max (limit 16). If streaming stalls on Windows, speed up `edges::Index` (the three indexes are 40³ bucket grids, 10 ms of fixed cost a cell) or cap the rails per cell.
+- **PW.3.15c** (done): no slab fallback for hubs, sets or locals; knot hub tried four times; 97.5 % of knot cells have their hub.
+
+**First thing next session:** walk it on Windows (`scripts/win.sh run --release`, `SUPERSTRUCT_WALK=1`) and check: rails at corners and at doorways (a rail where a leg continues would block it: the test only samples centre lines and excludes PH-04, 05, 19, 20), the windows, z-fighting on decks, stair feet. Then PW.3.21 and PW.3.21b sign-offs, then PW.4 (L3 interiors, the user's stop point).
+
+**Tests worth knowing:** `l2_web::tests::{an_open_segment_can_be_walked, a_bored_passage_can_be_walked}` (0.13 % open, 0.4 % bored blocked), `edges::tests::open_edges_above_a_drop_are_guarded`, `zfight::tests::{coplanar_faces, windows_lie_on_walls}`, `hubs::tests::every_hub_occurs`.
+
 ## Handoff 2026-10-19 (end of session): collision fixes from the user's screenshots, in progress
 
 **State.** Everything is uncommitted. PW.3.9 to PW.3.21c are built (see the checklist and §5W.16 to §5W.28); PW.3.21 and PW.3.21b wait for the user's own Windows walk. The last full run (`cargo nextest run --workspace`, 388 tests) passed **before** the fixes below; after them only `cargo clippy -p gen` and the two walk tests were run. **First thing next session: `cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo nextest run --workspace`, then `UPDATE_GOLDEN=1 cargo nextest run -p gen --test golden --test tram` (output changed), then rebuild and run the game.**
