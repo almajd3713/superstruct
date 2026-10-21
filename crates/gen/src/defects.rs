@@ -706,7 +706,7 @@ fn scan_cell(
         // f: the ends.
         if w.rise {
             // A rise's foot and top: a floor that is not the rise's own within 3 m, any way.
-            for e in [pts[0], pts[pts.len() - 1]] {
+            for (which, e) in [("foot", pts[0]), ("top", pts[pts.len() - 1])] {
                 r.base("f rise ends", 1);
                 let e = v(e);
                 const H: f32 = std::f32::consts::FRAC_1_SQRT_2;
@@ -734,9 +734,10 @@ fn scan_cell(
                     })
                 });
                 if !found {
-                    r.hit("f rise", || {
+                    r.hit(&format!("f rise {which} id {}", w.id), || {
                         format!("PV {} end at ({:.1}, {:.1}, {:.1})", w.id, e.x, e.y, e.z)
                     });
+                    r.hit("f rise", || String::new());
                 }
             }
         }
@@ -842,6 +843,9 @@ fn scan_cell(
                 )
             });
         }
+    }
+    for e in &mut r.examples {
+        *e = format!("[cell {} {} {}] {e}", c.x, c.y, c.z);
     }
     r
 }

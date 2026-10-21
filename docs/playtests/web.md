@@ -156,3 +156,19 @@ With the three blocks at the origin (6.2, 0.99 and 1.6 km) the median over seven
 on average; the spread between blocks is wide because it follows where the Betweens are).
 MET-07 holds everywhere; MET-08 is between 6.5 and 9.4 (target 8). MET-05 (14–32 m) holds
 everywhere.
+
+### The principles against the numbers (PRN-01..08; PW.12.1, 2026-10-21, `GEN_VERSION` 33)
+
+| Principle | What measures it | State |
+|---|---|---|
+| PRN-01 Built is the default; air is carved | MET-01 (crust built fraction, envelopes as solid): 0.61, 0.66, 0.65 on three seeds against 0.70–0.90 | close, short |
+| PRN-02 Breathing space shows the extent | MET-05: median 0–32 m to a view detail (target ≤ 150 m); MET-04: median 1.0–6.2 km to a 2 km sightline (target 1.5–2.5 km) in the origin blocks, 4.4 km over seven blocks | breathing space holds; long views too rare |
+| PRN-03 Every axis, and every angle, is a direction of travel | MET-07 vertical share of walked distance 0.33–0.40 (target ≥ 0.33); gravity wells and gates (`gravity.md`) | holds |
+| PRN-04 Everything crosses everything | connectivity of the route graph across L1 faces: the largest component holds 79–86 % of the nodes of a block (13 % before the port fix of version 30); `routes_connect_every_anchor_in_ten_thousand_cells` | holds since version 30 |
+| PRN-05 No dead end without a payoff | MET-09: test `every_dead_end_is_paid_off` | holds (by test) |
+| PRN-06 The same grammar at every scale | far-against-near silhouette agreement 90.6–99.2 % (`far_near`); the far lights match the near lit share | holds |
+| PRN-07 Variety from combination | MET-08 path types per km walked 6.5–9.4 (target ≥ 8); 617 of 663 registry IDs present in the world or a test | borderline |
+| PRN-08 Not every combination is allowed | the legality rules of paths, forms and sets (`paths::legal`, `sets`, `forms`) and their tests, which also filter `GEN_VERSION`-pinned combinations | holds (by test) |
+
+The targets that are not met are listed in `PW.12.0` (MET-01, MET-10), `PW.7.3` (MET-04) and
+`PW.4.26` (the defects of the user's walk).
