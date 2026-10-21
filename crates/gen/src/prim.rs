@@ -210,6 +210,8 @@ impl MaterialId {
     pub const TRAIN_LIGHT: Self = Self(7);
     /// A lit window pane: dim and warm, not a lamp.
     pub const LIT_WINDOW: Self = Self(8);
+    /// A dim red signal lamp: one of the four light colours of a knot's far signature.
+    pub const SIGNAL: Self = Self(9);
 }
 
 /// What a primitive belongs to. Append-only.
@@ -262,6 +264,9 @@ impl PrimFlags {
     /// Drawn only in the mid band, where it stands for the hollow parts (their shells are not
     /// drawn there); never in a full chunk, never collides (PW.4.23).
     pub const MID_ONLY: Self = Self(1 << 4);
+    /// Drawn by the far band only (a silhouette that the near band replaces with the real
+    /// thing): the L1 full mesh leaves it out. Always `NO_COLLIDE`.
+    pub const FAR_ONLY: Self = Self(1 << 5);
 
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0

@@ -16,6 +16,7 @@ pub mod gravity;
 pub mod hash;
 pub mod hubs;
 pub mod key;
+pub mod kit_ext;
 pub mod l1;
 pub mod l1_artery;
 pub mod l1_between;
@@ -83,4 +84,4 @@ pub(crate) mod zfight;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 20;
+pub const GEN_VERSION: u32 = 21;

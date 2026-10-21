@@ -251,6 +251,8 @@ pub enum TieKind {
     Beam,
     Crust,
     Between,
+    /// The L2 cells of an infinite staircase's footprint column.
+    Stair,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -627,6 +629,29 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
             }
         }
         b.tie(k, &cells, TieKind::Between);
+    }
+
+    // The infinite staircase's cells are on the tree, so the routes of the tissue reach it.
+    let column = crate::key::ColumnKey {
+        level: Level::L1,
+        x: l1.x,
+        z: l1.z,
+    };
+    if let Some(foot) = crate::l1::stair_footprint(seed, column) {
+        let l2 = |q: i32| i64::from(q / 16).div_euclid(512);
+        let (xs, zs) = (
+            (l2(foot.x0), l2(foot.x1 - 1)),
+            (l2(foot.z0), l2(foot.z1 - 1)),
+        );
+        let mut cells = Vec::new();
+        for z in zs.0..=zs.1 {
+            for y in 0..N {
+                for x in xs.0..=xs.1 {
+                    cells.push([x, y, z]);
+                }
+            }
+        }
+        b.tie(k, &cells, TieKind::Stair);
     }
 
     Some(Skeleton {

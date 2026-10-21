@@ -82,6 +82,7 @@ pub fn l2_cell_web_edges(
         .primitives
         .iter()
         .filter(near)
+        .filter(|p| !p.flags.contains(crate::prim::PrimFlags::FAR_ONLY))
         .map(|p| translated(p, at))
         .collect();
     let clear: Vec<Primitive> = t
@@ -119,9 +120,7 @@ pub fn l2_cell_web_edges(
     let mut primitives = crate::edges::cut_rails(primitives, &ways);
     let mut seen = std::collections::HashSet::new();
     primitives.retain(|p| seen.insert((p.shape, p.material, p.kind, p.flags)));
-    // The rings of light that mark gravity gates (GRV-04).
-    primitives.extend(crate::gates::cell_markers(seed, cell.coords));
-    primitives.extend(crate::wellgeom::cell_pieces(seed, cell.coords));
+    add_extras(seed, cell, &t, &mut primitives);
     let child_constraints = t
         .paths
         .bores
@@ -137,6 +136,18 @@ pub fn l2_cell_web_edges(
         meta: CellMeta::default(),
     };
     (out, stats)
+}
+
+/// What the cell gets on top of its tissue: the rings of light at gravity gates (GRV-04), the
+/// geometry of the wells round it (`wellgeom`) and the exterior kit of its structures
+/// (`kit_ext`).
+fn add_extras(seed: WorldSeed, cell: CellKey, t: &crate::tissue::Tissue, out: &mut Vec<Primitive>) {
+    out.extend(crate::gates::cell_markers(seed, cell.coords));
+    out.extend(crate::kit_ext::dress(t).into_iter().map(|(_, p)| p));
+    out.extend(crate::wellgeom::cell_pieces(seed, cell.coords));
+    // Two identical pieces would z-fight, and no offset can separate them.
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|p| seen.insert((p.shape, p.material, p.kind, p.flags)));
 }
 
 /// A tram line's volume is clear air (`tissue::drop_tram_slots` keeps slots out of it), but a

@@ -39,6 +39,7 @@ pub const TABLE: [Material; SLOTS] = {
     t[MaterialId::BEACON.0 as usize] = m([1.0, 0.8, 0.45], 1.0, 1.0);
     t[MaterialId::TRAIN_LIGHT.0 as usize] = m([0.75, 0.9, 1.0], 1.0, 1.0);
     t[MaterialId::LIT_WINDOW.0 as usize] = m([0.5, 0.38, 0.24], 0.35, 0.4);
+    t[MaterialId::SIGNAL.0 as usize] = m([0.9, 0.22, 0.14], 1.0, 1.0);
     t
 };
 
@@ -69,6 +70,7 @@ mod tests {
             MaterialId::BEACON,
             MaterialId::TRAIN_LIGHT,
             MaterialId::LIT_WINDOW,
+            MaterialId::SIGNAL,
         ] {
             let mat = TABLE[usize::from(id.0)];
             assert_ne!(mat, FALLBACK, "id {} has no entry", id.0);
@@ -103,6 +105,7 @@ mod tests {
                 MaterialId::BEACON,
                 MaterialId::TRAIN_LIGHT,
                 MaterialId::LIT_WINDOW,
+                MaterialId::SIGNAL,
             ]
             .iter()
             .any(|m| usize::from(m.0) == i);

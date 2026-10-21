@@ -294,6 +294,7 @@ fn far_digest(id: ChunkId, prims: &[Primitive]) -> Option<u64> {
     let mut h = DefaultHasher::new();
     for p in prims
         .iter()
+        .filter(|p| !p.flags.contains(PrimFlags::FAR_ONLY))
         .filter(|p| id.detail == Detail::Far || p.flags.contains(PrimFlags::FAR_VISIBLE))
     {
         p.hash(&mut h);
@@ -556,6 +557,8 @@ fn build(
             let (mut prims, _) = worldgen::l2_web::l1_primitives_carved(seed, cache, id.key);
             // Static tram track: drawn with the L1 full chunk, never collidable.
             prims.extend(worldgen::tram::tram_pieces(seed, id.key));
+            // Far-band silhouettes give way to the real thing (STAIR-04).
+            prims.retain(|p| !p.flags.contains(PrimFlags::FAR_ONLY));
             (prims, None)
         }
     };

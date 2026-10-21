@@ -14,7 +14,7 @@ use crate::l1_frame::frame_content;
 use crate::l1_surface::surface_content;
 use crate::l1_void::voids_of_cell;
 use crate::port::{Port, PortKind};
-use crate::prim::{CellMeta, CellOutput, ChildConstraint, Q, QRect};
+use crate::prim::{CellMeta, CellOutput, ChildConstraint, Primitive, Q, QRect, Shape};
 use crate::seed::WorldSeed;
 use glam::I64Vec3;
 
@@ -49,12 +49,76 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
             });
         }
     }
+    add_staircase(seed, l1, &mut out);
     if let Some(s) = skeleton(seed, l1) {
         out.ports = skeleton_ports(l1, &s);
         out.child_constraints
             .extend((0..out.ports.len()).map(|i| ChildConstraint::ForcedPort { port: i as u32 }));
     }
     out
+}
+
+/// The infinite staircase of this L1 column, if it has one (STAIR-01..04): the other pieces of
+/// the cell are cut out of its footprint, which stays clear of everything the cell's children
+/// make, and the open flights and the core go in.
+fn add_staircase(seed: WorldSeed, l1: I64Vec3, out: &mut CellOutput) {
+    let column = crate::key::ColumnKey {
+        level: Level::L1,
+        x: l1.x,
+        z: l1.z,
+    };
+    let Some(foot) = crate::l1::stair_footprint(seed, column) else {
+        return;
+    };
+    let keep = crate::l1_stair::keep_out(foot);
+    let bore = Primitive {
+        shape: Shape::Box { aabb: keep },
+        material: crate::prim::MaterialId::CONCRETE,
+        kind: crate::prim::FeatureKind::MISC,
+        flags: crate::prim::PrimFlags::NO_COLLIDE,
+    };
+    let prims = std::mem::take(&mut out.primitives);
+    out.primitives = crate::carve::carve(prims, &[bore], [0; 3]).0;
+    // What the carve cannot cut (cables, turned beams) goes if it really enters the footprint.
+    out.primitives.retain(|p| !enters(p, &keep));
+    out.child_constraints
+        .push(ChildConstraint::KeepOut { aabb: keep });
+    out.primitives.extend(crate::l1_stair::stair_pieces(
+        foot,
+        crate::l1_stair::style(seed, column),
+    ));
+}
+
+/// Whether the shape of `p` has a point inside the column `keep`, found by sampling the part of
+/// the shape's box that overlaps it every 1 m across and 8 m along.
+pub(crate) fn enters(p: &Primitive, keep: &crate::prim::QAabb) -> bool {
+    use glam::Vec3;
+    let b = p.aabb();
+    let lo = [
+        b.min.x.max(keep.min.x),
+        b.min.y.max(keep.min.y),
+        b.min.z.max(keep.min.z),
+    ];
+    let hi = [
+        b.max.x.min(keep.max.x),
+        b.max.y.min(keep.max.y),
+        b.max.z.min(keep.max.z),
+    ];
+    if (0..3).any(|k| lo[k] >= hi[k]) {
+        return false;
+    }
+    let step = |a: Q, z: Q, s: usize| (a..z).step_by(s);
+    for x in step(lo[0], hi[0], 16) {
+        for z in step(lo[2], hi[2], 16) {
+            for y in step(lo[1], hi[1], 128) {
+                let v = Vec3::new(x as f32 / 16.0, y as f32 / 16.0, z as f32 / 16.0);
+                if p.shape.contains(v) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 #[allow(clippy::cast_possible_truncation)] // port counts are small

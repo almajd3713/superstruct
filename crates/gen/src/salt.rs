@@ -124,6 +124,10 @@ salts! {
     WALKWAY = 0x0304;
     /// Keyed by the L2 cell: gate placement and kind (`gravity.md` §4).
     GATE = 0x0317;
+    /// Keyed by the L2 cell: the exterior kit on structure faces (`levels.md` §5W.34).
+    KIT_EXT = 0x0318;
+    /// Keyed by the L1 column: the infinite staircase's core and plan (`levels.md` §5W.35).
+    STAIR_STYLE = 0x0319;
     RAMP = 0x0305;
     EDGE_GUARD = 0x0306;
     VISTA = 0x0307;

@@ -1183,6 +1183,44 @@ A test-side measurement that changes no output. `scan_cells` takes L2 cells; for
 
 Each count comes with the number measured (`[a rails]`, `[b samples]`, ...) so a rate can be read. Rules for the counters are deliberately generous (a floor anywhere within the probe counts), so a count of 0 is a real 0. `web-report --defects N --seed S --origin x,y,z --size m` samples N cells from the region; the test `defects::tests::census_runs` runs one cell (set `DEFECT_N`).
 
+### 5W.33 Far signatures and the far-vs-near measurement (PW.7.1, PW.7.2, `GEN_VERSION` 21)
+
+**Knot signature (HOR-07).** `Emitter::knot` draws one of eight silhouettes from `(signature >> 2) & 7`: 0 monolith, 1 spire on a base, 2 twin pylons with a bridge, 3 square ring of beams, 4 ziggurat, 5 cross of long bars on a core, 6 disc on a stem, 7 crown (core and four spikes); the size is `48 + 16 · (signature & 3)` m; the lamp on top is one of four lights from `(signature >> 5) & 3`: amber (`BEACON`), cold white (`TRAIN_LIGHT`), white (`EMISSIVE`) and a red signal (`SIGNAL`, new material id 9). Every piece is a `FAR_VISIBLE` box at least 32 m thick, so the far band draws all of them, and stays near the knot's own L2 cell. The knot's hub behind the signature (HOR-08) is `Skeleton::knot_hub`, the route (HOR-09) is the artery tree rooted at the knot, and there is one knot per L1 cell, so landmarks are 4 km apart (HOR-10). A well's furnace forces the knot of its L1 cell (`gravity.md` §3.3). The blink rhythm is data in the signature and is not drawn yet.
+
+**Far-vs-near measurement (HOR-03, HOR-06).** `crates/gen/tests/far_near.rs` (ignored; release): first-hit depth maps of the boxes along the three axes at 16 m pixels for one L1 cell: far (the L1 primitives, as drawn at 5 km), mid (plus the L2 envelopes, 3 km) and near (everything, 300 m); two surfaces within 48 m are the same. Result over four L1 cells on 2026-10-21: the near view shares its first surface with the far view on 4–48 % of the pixels, the far view has nothing where the near view has a structure on 9–54 %, and the surfaces differ on 20–49 %. The far view never has something the near view lacks. **This fails HOR-03:** L2 structures are large (hundreds of metres) and L1 draws no mass for them, so they appear at the L2 mid radius. The remedy is an L1 mass proxy from the fill field (PW.7.1b); nothing is hidden by the measurement, and the test only prints.
+
+### 5W.34 The exterior kit (PW.8.1, PW.8.2, `worldgen::kit_ext`, `GEN_VERSION` 21)
+
+`kit_ext::dress(&tissue)` adds visual relief to the box parts of structures: for each part (all `Structure::parts`, in the lattice's own frame, so turned lattices carry it turned) three draws pick a kit piece and a face; a part takes the kit with chance 1/2 and only if it is at least 8 m tall. Every piece is `NO_COLLIDE`, at most 3 m deep, and is dropped if it comes within 0.5 m of a bore (`t.paths.bores`, `t.thresholds.bores`). Salt `KIT_EXT` (`0x0318`), keyed by the L2 cell and mixed with the structure and part indices. Round things (masts, pipes, cables, fans) are square bars: the emitter makes boxes in the lattice's frame.
+
+| ID | Piece |
+|---|---|
+| KIT-01 | a strip of lit windows (1.2 m tall) at a storey or a field of 1.4 × 2 m panes on a 3 × 4 m grid (`LIT_WINDOW`) |
+| KIT-02 | a cornice at the top (1.2 m out, 0.5 m) or a ledge at a storey |
+| KIT-03 | vertical ribs every 8 m (0.6 m) |
+| KIT-04 | a vent grille (3 × 2 m) with a fan |
+| KIT-05 | a mast of 8–24 m on the roof with a lamp on its tip |
+| KIT-06 | one to three façade pipes the height of the face |
+| KIT-07 | cable runs across the face at two heights (`CABLE`) |
+| KIT-08 | a coffered underside: beams every 4 m in both directions under the part |
+| KIT-09 | one to four hanging lamps on chains from the underside |
+| KIT-10 | a glyph panel: a 3 × 4 m slab with three to five lit bars |
+| KIT-11 | a handrail along the foot of a face on posts every 2 m (stairs keep their own rails, PW.4) |
+| KIT-12 | a scaffold: poles every 3 m and a grating deck every 8 m, up to 24 m |
+| KIT-13 | every ladder family: built in PW.5 (`ladders.md`) |
+| KIT-14 | gravity-gate rings: built in PW.6.3 (`gates.rs`) |
+| KIT-15 | furnace machinery: in the L2 cell that holds a well's centre, eight boilers (16 m, 36 m tall, solid) on a ring of radius 200 m with a square pipe run at 10 m (`wellgeom.rs`) |
+
+### 5W.35 The infinite staircase in the Web (PW.8.3, `worldgen::l1_stair`, `GEN_VERSION` 21)
+
+The rare staircase (`regimes.md` §5.2: one L1 column in about one L0 column in a hundred, its footprint a 64 m square at a 16 m grid position, the same in every L1 cell of the column) is built again for the Web. Each L1 cell of the column holds 128 flights of 128 steps (0.25 m rise, 0.375 m tread, 4 m wide, 32 m of rise over 48 m of run) and 128 corner landings of 8 × 8 m, so a turn takes 128 m and a cell holds 32 turns.
+
+- **STAIR-01 open flights.** Each step is a tread plate of 0.125 m and each group of four treads has a stringer of 0.3 m under each edge (a stepped beam of 1.5 m), so there is air beneath. No `StairRun` wedge is used. A cell holds 24 576 flight pieces; the tread depth of 0.375 m is narrower than the walkability validator's plates, so the stairs are walked by the controller and not certified by `walk.rs` (they are not on any connectivity argument).
+- **STAIR-02 core.** A 32 m square core in the middle of the footprint, chosen by the column (`STAIR_STYLE`, `0x0319`): **glazed** (a solid column with a row of lit panes 2 m tall every 32 m on its four faces), **lattice** (four posts and a ring of beams every 32 m) or **trunk** (four walls of 4 m round a hollow). Nothing else stands in the footprint: the L1 pieces that enter it are cut (boxes) or dropped (cables and turned beams that really enter it, `l1_web::enters`), and the cell lists the footprint column as a `KeepOut`, which the tissue reads as void.
+- **STAIR-03 round spiral.** One column in three has a real round spiral instead: 64 faceted treads a turn on a radius of 24 m, 4 m wide, 0.4375 m rise (28 m a turn, 146 turns a cell), `orient::helix_stair`. The core is the same.
+- **STAIR-04 far band.** A core column of 32 × 4096 × 32 m and four corner pylons of 32 m are `FAR_VISIBLE | FAR_ONLY | NO_COLLIDE`: the far band draws them, the L1 full mesh leaves them out (new `PrimFlags::FAR_ONLY`, `1 << 5`), and the L2 parents ignore them. **Deviation:** the stringer silhouette is the four pylons, because a stringer is thinner than the 32 m the far band draws.
+- **Reach.** The skeleton ties the footprint's L2 cells to the tree (`TieKind::Stair`), so artery routes lead to the column; the flights themselves have no doors.
+
 ## 6. L3: Blocks (64 m)
 
 > **Web redesign.** From version 7 the plan, entrances and skeleton are those of §6W. The rest of this section (tiles, solver, sockets, fallback, validator) is reused.

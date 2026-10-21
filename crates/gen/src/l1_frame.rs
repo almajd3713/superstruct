@@ -1290,22 +1290,109 @@ impl Emitter {
     }
 
     /// The knot structure: a junction block and a beacon in its L2 cell.
+    /// The knot's far signature (HOR-07): one of eight silhouettes, four sizes and four light
+    /// colours from the knot's hash. Every piece is at least 32 m thick, so the far band draws
+    /// all of them, and they stay near the knot's L2 cell.
     fn knot(&mut self, k: &Knot) {
-        let centre = I64Vec3::new(k.l2[0], k.l2[1], k.l2[2]) * 512 + I64Vec3::splat(256);
+        let centre =
+            self.origin + I64Vec3::new(k.l2[0], k.l2[1], k.l2[2]) * 512 + I64Vec3::splat(256);
         let s = 48 + 16 * i64::from((k.signature & 3) as u8);
-        let lo = self.origin + centre - I64Vec3::splat(s);
-        let hi = self.origin + centre + I64Vec3::splat(s);
-        self.world_box(FRM_KNOT, lo, hi, MaterialId::METAL, PrimFlags::FAR_VISIBLE);
-        let top = hi.y;
+        let kind = (k.signature >> 2) & 7;
+        let light = KNOT_LIGHTS[((k.signature >> 5) & 3) as usize];
+        let far = PrimFlags::FAR_VISIBLE;
+        let part = |e: &mut Self, lo: [i64; 3], hi: [i64; 3]| {
+            let c = |v: i64, i: usize| centre[i] + v;
+            e.world_box(
+                FRM_KNOT,
+                I64Vec3::new(c(lo[0], 0), c(lo[1], 1), c(lo[2], 2)),
+                I64Vec3::new(c(hi[0], 0), c(hi[1], 1), c(hi[2], 2)),
+                MaterialId::METAL,
+                far,
+            );
+        };
+        // The top of every silhouette: where its light stands.
+        let mut top = centre.y + s;
+        match kind {
+            // A monolith.
+            0 => part(self, [-s, -s, -s], [s, s, s]),
+            // A spire on a base.
+            1 => {
+                part(self, [-s, -s, -s], [s, 0, s]);
+                part(self, [-20, 0, -20], [20, 4 * s, 20]);
+                top = centre.y + 4 * s;
+            }
+            // Twin pylons joined by a bridge.
+            2 => {
+                for x in [-s, s] {
+                    part(self, [x - 20, -s, -20], [x + 20, 2 * s, 20]);
+                }
+                part(self, [-s, s - 20, -20], [s, s + 20, 20]);
+                top = centre.y + 2 * s;
+            }
+            // A square ring of beams.
+            3 => {
+                let r = 3 * s / 2;
+                for z in [-r, r - 36] {
+                    part(self, [-r, -18, z], [r, 18, z + 36]);
+                }
+                for x in [-r, r - 36] {
+                    part(self, [x, -18, -r + 36], [x + 36, 18, r - 36]);
+                }
+                top = centre.y + 18;
+            }
+            // A ziggurat.
+            4 => {
+                part(self, [-s, -s, -s], [s, -s / 3, s]);
+                part(
+                    self,
+                    [-7 * s / 10, -s / 3, -7 * s / 10],
+                    [7 * s / 10, s / 3, 7 * s / 10],
+                );
+                part(
+                    self,
+                    [-2 * s / 5, s / 3, -2 * s / 5],
+                    [2 * s / 5, s, 2 * s / 5],
+                );
+            }
+            // A cross of long bars on a core.
+            5 => {
+                part(self, [-2 * s, -18, -18], [2 * s, 18, 18]);
+                part(self, [-18, -18, -2 * s], [18, 18, 2 * s]);
+                part(self, [-36, -s, -36], [36, s, 36]);
+            }
+            // A disc on a stem.
+            6 => {
+                part(self, [-2 * s, s - 18, -2 * s], [2 * s, s + 18, 2 * s]);
+                part(self, [-20, -s, -20], [20, s - 18, 20]);
+                top = centre.y + s + 18;
+            }
+            // A crown: a core with four spikes.
+            _ => {
+                part(self, [-s / 2, -s, -s / 2], [s / 2, s, s / 2]);
+                for (x, z) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                    let (cx, cz) = (x * (s - 20), z * (s - 20));
+                    part(self, [cx - 20, -s, cz - 20], [cx + 20, 2 * s, cz + 20]);
+                }
+                top = centre.y + 2 * s;
+            }
+        }
         self.world_box(
             FRM_KNOT,
-            I64Vec3::new(lo.x + s - 4, top, lo.z + s - 4),
-            I64Vec3::new(lo.x + s + 4, top + 24, lo.z + s + 4),
-            MaterialId::BEACON,
-            PrimFlags::NO_COLLIDE,
+            I64Vec3::new(centre.x - 18, top, centre.z - 18),
+            I64Vec3::new(centre.x + 18, top + 36, centre.z + 18),
+            light,
+            PrimFlags::NO_COLLIDE | far,
         );
     }
 }
+
+/// The four light colours of a knot's far signature.
+const KNOT_LIGHTS: [MaterialId; 4] = [
+    MaterialId::BEACON,
+    MaterialId::TRAIN_LIGHT,
+    MaterialId::EMISSIVE,
+    MaterialId::SIGNAL,
+];
 
 struct BeamCtx {
     frame: Frame,
@@ -1627,5 +1714,80 @@ mod tests {
             bad * 50 <= solid,
             "{bad} disagreements among {solid} solid samples"
         );
+    }
+
+    /// HOR-07: a knot's far signature is one of eight silhouettes with four lights, and the far
+    /// band draws it (every piece is at least 32 m thick unless the cell's edge cuts it).
+    #[test]
+    fn knot_signatures_are_distinct_and_far_sized() {
+        let seed = WorldSeed(3);
+        let mut kinds = [0usize; 8];
+        let mut lights = [0usize; 4];
+        let (mut pieces, mut far_sized) = (0usize, 0usize);
+        for x in -4..4 {
+            for y in 0..4 {
+                for z in -4..4 {
+                    let l1 = I64Vec3::new(x, y, z);
+                    let beams = beams_of_cell(seed, l1);
+                    let k = knot(seed, l1, &beams);
+                    kinds[((k.signature >> 2) & 7) as usize] += 1;
+                    lights[((k.signature >> 5) & 3) as usize] += 1;
+                    for p in frame_content(seed, l1).iter().filter(|p| p.tag == FRM_KNOT) {
+                        let b = p.prim.aabb();
+                        pieces += 1;
+                        let thin = (b.max.x - b.min.x)
+                            .min(b.max.y - b.min.y)
+                            .min(b.max.z - b.min.z);
+                        far_sized += usize::from(
+                            thin >= crate::l1::FAR_MIN_THICKNESS_Q
+                                && p.prim.flags.contains(PrimFlags::FAR_VISIBLE),
+                        );
+                    }
+                }
+            }
+        }
+        assert!(kinds.iter().all(|&n| n > 0), "{kinds:?}");
+        assert!(lights.iter().all(|&n| n > 0), "{lights:?}");
+        assert!(
+            far_sized * 10 >= pieces * 8,
+            "{far_sized} of {pieces} knot pieces are far sized"
+        );
+    }
+}
+
+#[cfg(test)]
+mod viewpoints {
+    use super::*;
+
+    /// `cargo test -p gen --lib print_knot_viewpoints -- --ignored --nocapture`: knots with a spot
+    /// 6 km east of each, to look back at them (yaw 90).
+    #[test]
+    #[ignore = "prints viewpoints for screenshots"]
+    fn print_knot_viewpoints() {
+        let seed = WorldSeed(0);
+        for l1 in [
+            I64Vec3::new(0, 1, -1),
+            I64Vec3::new(3, 0, 2),
+            I64Vec3::new(-2, 1, 1),
+            I64Vec3::new(5, 1, -3),
+        ] {
+            let beams = beams_of_cell(seed, l1);
+            let k = knot(seed, l1, &beams);
+            let c = l1 * L1_M + I64Vec3::new(k.l2[0], k.l2[1], k.l2[2]) * 512 + I64Vec3::splat(256);
+            let p = c + I64Vec3::new(6000, 0, 0);
+            println!(
+                "{l1}: silhouette {} size {} light {} hub {} SECTOR={},{},{} LOCAL={},{},{}",
+                (k.signature >> 2) & 7,
+                k.signature & 3,
+                (k.signature >> 5) & 3,
+                k.hub,
+                p.x.div_euclid(1024),
+                p.y.div_euclid(1024),
+                p.z.div_euclid(1024),
+                p.x.rem_euclid(1024),
+                p.y.rem_euclid(1024),
+                p.z.rem_euclid(1024)
+            );
+        }
     }
 }

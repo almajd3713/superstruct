@@ -298,6 +298,46 @@ fn debris(seed: WorldSeed, cell: &Cell, l2: I64Vec3, w: &Well, out: &mut Vec<Pri
     }
 }
 
+/// KIT-15: the furnace's machinery in the L2 cell that holds a well's centre: eight boilers on a
+/// ring of radius 200 m with a pipe run joining them, round the hub.
+fn furnace_machinery(cell: &Cell, w: &Well, out: &mut Vec<Primitive>) {
+    let c = w.centre;
+    if !(0..3).all(|i| c[i] >= cell.lo[i] && c[i] < cell.lo[i] + L2_SIZE) {
+        return;
+    }
+    // Eight points of a square ring: the corners and the middles of its sides.
+    let r = 200i64;
+    let spots: [(i64, i64); 8] = [
+        (-r, -r),
+        (0, -r),
+        (r, -r),
+        (r, 0),
+        (r, r),
+        (0, r),
+        (-r, r),
+        (-r, 0),
+    ];
+    for (dx, dz) in spots {
+        let (x, z) = (c[0] + dx, c[2] + dz);
+        let min = [x - 8, c[1] - 8, z - 8];
+        let max = [x + 8, c[1] + 28, z + 8];
+        if let Some(p) = cell.solid(min, max, MaterialId::PIPE) {
+            out.push(p);
+        }
+    }
+    // The pipe run: a square frame of 1 m pipes at 10 m up, no collision.
+    for (a, b) in [(0usize, 2usize), (2, 4), (4, 6), (6, 0)] {
+        let (p, q) = (spots[a], spots[b]);
+        let min = [c[0] + p.0.min(q.0) - 1, c[1] + 10, c[2] + p.1.min(q.1) - 1];
+        let max = [c[0] + p.0.max(q.0) + 1, c[1] + 12, c[2] + p.1.max(q.1) + 1];
+        if let Some(mut piece) = cell.solid(min, max, MaterialId::PIPE) {
+            piece.kind = FeatureKind::PIPE;
+            piece.flags = PrimFlags::NO_COLLIDE;
+            out.push(piece);
+        }
+    }
+}
+
 /// The pieces the wells near L2 cell `l2` build inside it (cell-local, 1/16 m).
 pub fn cell_pieces(seed: WorldSeed, l2: I64Vec3) -> Vec<Primitive> {
     let lo = [l2.x * L2_SIZE, l2.y * L2_SIZE, l2.z * L2_SIZE];
@@ -313,6 +353,7 @@ pub fn cell_pieces(seed: WorldSeed, l2: I64Vec3) -> Vec<Primitive> {
         for dy in -1..=1 {
             for dx in -1..=1 {
                 for w in wells_of(seed, home + I64Vec3::new(dx, dy, dz)).iter() {
+                    furnace_machinery(&cell, w, &mut out);
                     match w.kind {
                         WellKind::Point => cube_walls(&cell, w.centre, core_half(w), &mut out),
                         WellKind::Twin => {
