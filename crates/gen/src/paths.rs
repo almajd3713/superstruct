@@ -1755,7 +1755,7 @@ mod tests {
         use glam::I64Vec3;
         let seed = WorldSeed(0x5eed);
         let cache = TissueCache::default();
-        let mut seen = [0usize; 41];
+        let mut seen = [0usize; 64];
         let mut segments = 0usize;
         let mut bored = 0usize;
         let mut mods = [[0usize; 6]; 9];

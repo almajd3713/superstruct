@@ -150,10 +150,22 @@ pub fn face_artery_ports(seed: WorldSeed, cavity: &CavityView, face: FaceKey) ->
     ports_with(seed, cavity, face, near_well(seed, face))
 }
 
-/// Whether a gravity well is near the face centre. Wells exist from PW.6.1; until then no
-/// face is near one, so gravity gates are never offered.
-const fn near_well(_seed: WorldSeed, _face: FaceKey) -> bool {
-    false
+/// Whether the gravity field at the face centre differs from the default: a well reaches it.
+fn near_well(seed: WorldSeed, face: FaceKey) -> bool {
+    let o = face.owner.coords;
+    let side = 4096;
+    let mut c = [
+        o.x * side + side / 2,
+        o.y * side + side / 2,
+        o.z * side + side / 2,
+    ];
+    let k = match face.axis {
+        Axis::X => 0,
+        Axis::Y => 1,
+        Axis::Z => 2,
+    };
+    c[k] += side / 2;
+    crate::gravity::field_at_metres(seed, c) != crate::gravity::Gravity::DEFAULT
 }
 
 /// The cells `(i, j)` of `face` that a beam crosses: the beam has an L2 cell on the face in

@@ -118,7 +118,7 @@ fn isqrt(n: i64) -> i64 {
 }
 
 /// Spec §1.1: nearest-integer quantisation to max-norm 8 with floor division.
-fn quantise(v: [i64; 3]) -> [i64; 3] {
+pub(crate) fn quantise(v: [i64; 3]) -> [i64; 3] {
     let m = v[0].abs().max(v[1].abs()).max(v[2].abs());
     if m == 0 {
         return [0; 3];
@@ -126,13 +126,13 @@ fn quantise(v: [i64; 3]) -> [i64; 3] {
     [0, 1, 2].map(|i| (16 * v[i] + m).div_euclid(2 * m))
 }
 
-fn smooth_coverage(reach: i64, d: i64) -> i64 {
+pub(crate) fn smooth_coverage(reach: i64, d: i64) -> i64 {
     let t = ((reach - d) * 4 * 4096 / reach).clamp(0, 4096);
     let s = t * t * (3 * 4096 - 2 * t) / (4096 * 4096);
     s >> 4
 }
 
-fn dir(axis: usize) -> [i64; 3] {
+pub(crate) fn dir(axis: usize) -> [i64; 3] {
     DIRS[axis % DIR_COUNT].map(i64::from)
 }
 
@@ -339,6 +339,15 @@ fn draw_wells(seed: WorldSeed, l0: I64Vec3) -> Vec<Well> {
         strength
     };
     let axis = rng.below(DIR_COUNT as u64) as usize;
+    // A seam's membrane is a wall of boxes, so its normal is a coordinate axis.
+    let axis = if kind == WellKind::Seam {
+        const AXES: [[i8; 3]; 3] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+        DIRS.iter()
+            .position(|d| *d == AXES[axis % 3])
+            .unwrap_or(axis)
+    } else {
+        axis
+    };
     let mut extent = [0i64; 3];
     if matches!(kind, WellKind::Plane | WellKind::Seam) {
         extent = [0, 1, 2].map(|_| 256 + 64 * rng.below(61) as i64);
@@ -425,7 +434,7 @@ pub fn wells_of(seed: WorldSeed, l0: I64Vec3) -> Arc<Vec<Well>> {
 }
 
 /// Gravity at an absolute integer metre position.
-pub fn gravity_at_metres(seed: WorldSeed, p: [i64; 3]) -> Gravity {
+pub fn field_at_metres(seed: WorldSeed, p: [i64; 3]) -> Gravity {
     let home = I64Vec3::new(
         p[0].div_euclid(L0_SIZE),
         p[1].div_euclid(L0_SIZE),
@@ -477,6 +486,12 @@ pub fn gravity_at_metres(seed: WorldSeed, p: [i64; 3]) -> Gravity {
         up: q.map(|x| x as i8),
         strength: strength as u16,
     }
+}
+
+/// Gravity at an absolute integer metre position, with the gate zones of its L2 cell applied.
+pub fn gravity_at_metres(seed: WorldSeed, p: [i64; 3]) -> Gravity {
+    let base = field_at_metres(seed, p);
+    crate::gates::apply_gates(seed, p, base)
 }
 
 /// Gravity at a world position given as sector and local offset.

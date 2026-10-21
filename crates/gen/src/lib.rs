@@ -11,6 +11,7 @@ pub mod coord;
 pub mod defects;
 pub mod edges;
 pub mod forms;
+pub mod gates;
 pub mod gravity;
 pub mod hash;
 pub mod hubs;
@@ -81,4 +82,4 @@ pub(crate) mod zfight;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 18;
+pub const GEN_VERSION: u32 = 19;
