@@ -57,7 +57,7 @@ fn bx(lo: [i32; 3], hi: [i32; 3]) -> Shape {
 
 /// The heights in metres, inside the L1 cell, where a crust begins above a Between on the
 /// column's axis: the doorways of the tower.
-pub(crate) fn stations(seed: WorldSeed, l1: I64Vec3) -> Vec<i32> {
+pub fn stations(seed: WorldSeed, l1: I64Vec3) -> Vec<i32> {
     let l0 = l1.div_euclid(I64Vec3::splat(8));
     let st = stack(seed, l0);
     let origin = (l1 - l0 * 8) * 4096;

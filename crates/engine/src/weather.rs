@@ -427,6 +427,26 @@ mod tests {
         assert!(!mesh.vertices.is_empty());
     }
 
+    /// LGT-07, WX-09: next to a furnace the air is hot and a warm light shines.
+    #[test]
+    fn a_furnace_lights_the_fog_and_heats_the_air() {
+        use worldgen::gravity::{WellKind, find_well};
+        let (seed, w) = (0..40u64)
+            .map(WorldSeed)
+            .find_map(|s| {
+                find_well(s, WellKind::Point, 40)
+                    .filter(|(_, w)| !w.quiet)
+                    .map(|(_, w)| (s, w))
+            })
+            .expect("a furnace well");
+        let cam = pos_of(w.centre, Vec3::new(0.0, 10.0, 0.0)).unwrap();
+        let mut weather = Weather::default();
+        weather.sense(seed, &cam, 0);
+        assert!(weather.air.heat > 0.9, "heat {}", weather.air.heat);
+        assert!(!weather.lights.is_empty());
+        assert!(weather.lights[0].colour[0] > weather.lights[0].colour[2]);
+    }
+
     #[test]
     fn the_window_wave_stays_between_half_and_full() {
         for t in (0..600_000).step_by(7_000) {

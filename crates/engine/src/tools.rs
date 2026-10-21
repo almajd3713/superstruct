@@ -405,6 +405,13 @@ mod tests {
         f.forward = dir;
         tools.update(&f, &mut save, false);
         assert_eq!(save.marks.len(), 1, "{lm:?}");
+        // NOT-04: with a mark pinned a line of lamps, a kilometre of them at most, is laid ahead.
+        let route = tools
+            .route
+            .take()
+            .expect("the route is laid at the first frame");
+        assert_eq!(route.lamps.len(), ROUTE_LAMPS);
+        assert!((route.lamps[1] - route.lamps[0]).length() - ROUTE_STEP_M < 0.01);
         tools.update(&f, &mut save, false);
         assert!(save.marks.is_empty());
     }

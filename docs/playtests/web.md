@@ -172,3 +172,24 @@ everywhere.
 
 The targets that are not met are listed in `PW.12.0` (MET-01, MET-10), `PW.7.3` (MET-04) and
 `PW.4.26` (the defects of the user's walk).
+
+### The census of the world (`web-report --census --size 32768 --l2-cells 12000`, seed 42; 2026-10-21)
+
+The census was L1-only (70 IDs present, 517 absent). It now also reads the features of every L0
+and L1 cell of the region, a wide scan of 117 649 L0 cells for sites (wonders, strange regions,
+weightless sites, rare events, movers, wells, roads, rivers, spines, ramparts, staircases), the
+gate zones round seams, and the L2 tissue of 12 000 sampled cells (forms, supports, variants,
+mutations, paths, modifiers, thresholds, hubs, sets, places, quarters, kit, growth, payoffs). IDs
+that the world cannot carry (the controller, the tools, the weather, the lights of the engine) are
+listed with the test that exercises them. Result: **476 IDs present, 47 tested, 122 with no
+instance.** What is still zero, by group:
+
+- **not built**: RIDE-01..10 (the journeys, 🎮), SND-01..09 (sound, audio deferred);
+- **measured by the tools, not carried by the world**: MET-01..11, HOR-01, HOR-07..15, PRN-01..08
+  (except PRN-05, tested): the report and `docs/playtests/web.md` are their record;
+- **no detector yet** (the feature exists): INT-01..19 (the interiors need an L3 sample), ORI-01..16
+  (orientation policies), BTW-03, 06, 08, VOID-10, 12, 14, FRM-11, 14, GRV-01, 03, 05..08, 11,
+  KIT-13..15, QTR-03..05, LOC-03, SAN-07, 08, SC-05, SC-10, SC-11, RULE-01, 02, TEC-05, 06, TOOL-03,
+  LGT-09, WGT-08, WON-13;
+- **too rare for the sample**: FORM-24, SV-23, SUP-11 (needs a radial well), STG-11 (beyond 2^20 L0
+  cells, the Far Lands).

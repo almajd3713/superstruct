@@ -108,6 +108,11 @@ fn line(seed: WorldSeed, axis: usize, row: (i64, i64)) -> Option<(Road, (i64, i6
     ))
 }
 
+/// The registry ID of the road on L0 line `row` along `axis`, if the line has one (for the census).
+pub fn line_tag(seed: WorldSeed, axis: usize, row: (i64, i64)) -> Option<&'static str> {
+    line(seed, axis, row).map(|(r, _)| r.kind.id())
+}
+
 /// The roads through L1 cell `l1`: at most one along x and one along z.
 pub fn roads_in_cell(seed: WorldSeed, l1: I64Vec3) -> Vec<Road> {
     let l0 = l1.div_euclid(I64Vec3::splat(8));

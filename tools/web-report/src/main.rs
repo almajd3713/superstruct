@@ -19,6 +19,7 @@ use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
+mod census2;
 mod tissue;
 
 use anyhow::{Context, Result, bail};
@@ -50,6 +51,8 @@ const HELP: &str = "web-report: metrics and census of the generated world
   --samples N     points for the sampled metrics (default 20000)
   --defects N     count the defects of N sampled L2 cells with their L3 (PW.4.8) and exit
   --tissue N      MET-01, 08 and 10 over N sampled L2 cells and exit
+  --l2-cells N    L2 cells sampled for the census (default 3000)
+  --wide N        L0 cells each way scanned for sites (default 24, 117 649 cells)
   --threads N     threads for --defects and --tissue (default: all)
   --census        count the instances of every registry ID
   --ids A-,B-     restrict the census output and --strict to these prefixes
@@ -66,6 +69,8 @@ struct Args {
     census: bool,
     defects: usize,
     tissue: usize,
+    l2_cells: usize,
+    wide: i64,
     threads: usize,
     ids: Vec<String>,
     out: Option<String>,
@@ -83,6 +88,8 @@ fn parse() -> Result<Args> {
         census: false,
         defects: 0,
         tissue: 0,
+        l2_cells: 3000,
+        wide: 24,
         threads: std::thread::available_parallelism().map_or(1, usize::from),
         ids: Vec::new(),
         out: None,
@@ -109,6 +116,8 @@ fn parse() -> Result<Args> {
             "--samples" => a.samples = value("--samples")?.parse()?,
             "--census" => a.census = true,
             "--defects" => a.defects = value("--defects")?.parse()?,
+            "--wide" => a.wide = value("--wide")?.parse()?,
+            "--l2-cells" => a.l2_cells = value("--l2-cells")?.parse()?,
             "--tissue" => a.tissue = value("--tissue")?.parse()?,
             "--threads" => a.threads = value("--threads")?.parse()?,
             "--ids" => a.ids = value("--ids")?.split(',').map(String::from).collect(),
@@ -338,11 +347,249 @@ fn registry_ids(path: &str) -> Result<Vec<String>> {
 }
 
 /// IDs that no generator output carries but a named test exercises (`web-report.md` §4).
-const TESTED: &[(&str, &str, &str)] = &[(
-    "ART-02",
-    "bfs_finishes_a_walk_with_no_budget_left",
-    "crates/gen/src/l1_artery.rs",
-)];
+const TESTED: &[(&str, &str, &str)] = &[
+    (
+        "ART-02",
+        "bfs_finishes_a_walk_with_no_budget_left",
+        "crates/gen/src/l1_artery.rs",
+    ),
+    (
+        "CLB-01",
+        "a_ladder_is_grabbed_climbed_and_left_at_the_top",
+        "crates/engine/src/controller.rs",
+    ),
+    (
+        "CLB-02",
+        "a_ladder_is_grabbed_climbed_and_left_at_the_top",
+        "crates/engine/src/controller.rs",
+    ),
+    (
+        "CLB-03",
+        "climbing_down_ends_on_the_floor",
+        "crates/engine/src/controller.rs",
+    ),
+    (
+        "CLB-04",
+        "a_ladder_is_grabbed_climbed_and_left_at_the_top",
+        "crates/engine/src/controller.rs",
+    ),
+    (
+        "CLB-05",
+        "a_ladder_is_grabbed_climbed_and_left_at_the_top",
+        "crates/engine/src/controller.rs",
+    ),
+    (
+        "CLB-06",
+        "ladder_based_climbs_reach_the_top_and_are_dressed",
+        "crates/gen/src/paths_v/p2.rs",
+    ),
+    (
+        "CLB-07",
+        "a_low_duct_makes_you_crouch_and_standing_resumes_after",
+        "crates/engine/src/controller.rs",
+    ),
+    (
+        "TEC-01",
+        "identity_and_quarter_turns_are_exact",
+        "crates/gen/src/orient.rs",
+    ),
+    (
+        "TEC-02",
+        "clip_cuts_pieces_of_one_solid_exactly",
+        "crates/gen/src/orient.rs",
+    ),
+    (
+        "TEC-03",
+        "tilted_box_bounds_and_distance",
+        "crates/gen/src/orient.rs",
+    ),
+    (
+        "TEC-04",
+        "helix_is_a_monotone_chain_of_treads",
+        "crates/gen/src/orient.rs",
+    ),
+    (
+        "TEC-07",
+        "sdf_is_a_lower_bound_for_a_rotated_cylinder",
+        "crates/gen/src/orient.rs",
+    ),
+    (
+        "GRV-02",
+        "a_curved_stack_wraps_the_nearest_radial_well",
+        "crates/gen/src/gravity.rs",
+    ),
+    (
+        "GRV-09",
+        "taper_turns_at_most_one_step_per_metre",
+        "crates/gen/src/gravity.rs",
+    ),
+    (
+        "GRV-10",
+        "twin_midpoint_is_a_lull",
+        "crates/gen/src/gravity.rs",
+    ),
+    ("GRV-12", "pure_across_threads", "crates/gen/src/gravity.rs"),
+    (
+        "GRV-13",
+        "the_frame_turns_to_a_flipped_field_at_the_capped_rate",
+        "crates/engine/src/controller.rs",
+    ),
+    (
+        "GRV-14",
+        "free_drift_in_a_lull",
+        "crates/engine/src/controller.rs",
+    ),
+    (
+        "HOR-03",
+        "the_far_view_matches_the_near_view",
+        "crates/gen/tests/far_near.rs",
+    ),
+    (
+        "HOR-04",
+        "the_skin_is_covered",
+        "crates/gen/src/tissue_grow.rs",
+    ),
+    (
+        "HOR-05",
+        "the_far_view_matches_the_near_view",
+        "crates/gen/tests/far_near.rs",
+    ),
+    (
+        "HOR-06",
+        "the_far_view_matches_the_near_view",
+        "crates/gen/tests/far_near.rs",
+    ),
+    (
+        "SYS-01",
+        "the_pose_is_a_pure_function_of_the_world_clock",
+        "crates/gen/src/movers.rs",
+    ),
+    (
+        "NOT-01",
+        "sensed_movers_follow_the_walker_not_the_clock",
+        "crates/gen/src/movers.rs",
+    ),
+    (
+        "NOT-02",
+        "a_lift_notices_someone_who_waits_and_then_rests",
+        "crates/engine/src/liftsys.rs",
+    ),
+    (
+        "NOT-03",
+        "a_door_rises_for_the_walker_and_sinks_after",
+        "crates/engine/src/moversys.rs",
+    ),
+    (
+        "TOOL-01",
+        "zoom_narrows_the_view_by_the_factor",
+        "crates/engine/src/tools.rs",
+    ),
+    (
+        "TOOL-02",
+        "a_gaze_mark_pins_the_landmark_in_view_and_a_second_press_releases_it",
+        "crates/engine/src/tools.rs",
+    ),
+    (
+        "TOOL-04",
+        "the_trail_gains_a_lamp_every_25_metres_and_places_are_arrived_in",
+        "crates/engine/src/tools.rs",
+    ),
+    (
+        "TOOL-05",
+        "transliterations_are_distinct_per_name",
+        "crates/gen/src/glyphs.rs",
+    ),
+    (
+        "TOOL-06",
+        "the_trail_gains_a_lamp_every_25_metres_and_places_are_arrived_in",
+        "crates/engine/src/tools.rs",
+    ),
+    (
+        "TOOL-07",
+        "bearings_read_left_right_and_behind",
+        "crates/engine/src/tools.rs",
+    ),
+    (
+        "TOOL-08",
+        "chalk_goes_on_a_wall_in_reach_only",
+        "crates/engine/src/tools.rs",
+    ),
+    (
+        "WAKE-01",
+        "the_trail_gains_a_lamp_every_25_metres_and_places_are_arrived_in",
+        "crates/engine/src/tools.rs",
+    ),
+    (
+        "WAKE-02",
+        "the_trail_gains_a_lamp_every_25_metres_and_places_are_arrived_in",
+        "crates/engine/src/tools.rs",
+    ),
+    (
+        "WX-01",
+        "a_fog_sea_is_thick_below_its_top",
+        "crates/gen/src/weather.rs",
+    ),
+    (
+        "WX-02",
+        "fog_tides_come_and_go",
+        "crates/gen/src/weather.rs",
+    ),
+    (
+        "WX-03",
+        "every_effect_occurs_and_none_is_everywhere",
+        "crates/gen/src/weather.rs",
+    ),
+    (
+        "WX-04",
+        "every_effect_occurs_and_none_is_everywhere",
+        "crates/gen/src/weather.rs",
+    ),
+    (
+        "WX-05",
+        "every_effect_occurs_and_none_is_everywhere",
+        "crates/gen/src/weather.rs",
+    ),
+    (
+        "WX-07",
+        "every_effect_occurs_and_none_is_everywhere",
+        "crates/gen/src/weather.rs",
+    ),
+    (
+        "WX-08",
+        "every_effect_occurs_and_none_is_everywhere",
+        "crates/gen/src/weather.rs",
+    ),
+    (
+        "WX-09",
+        "every_effect_occurs_and_none_is_everywhere",
+        "crates/gen/src/weather.rs",
+    ),
+    (
+        "WX-10",
+        "lightning_strikes_now_and_then",
+        "crates/gen/src/weather.rs",
+    ),
+    (
+        "LGT-05",
+        "the_window_wave_stays_between_half_and_full",
+        "crates/engine/src/weather.rs",
+    ),
+    (
+        "PRN-05",
+        "every_dead_end_is_paid_off",
+        "crates/gen/src/payoffs.rs",
+    ),
+    (
+        "LGT-07",
+        "a_furnace_lights_the_fog_and_heats_the_air",
+        "crates/engine/src/weather.rs",
+    ),
+    (
+        "NOT-04",
+        "a_gaze_mark_pins_the_landmark_in_view_and_a_second_press_releases_it",
+        "crates/engine/src/tools.rs",
+    ),
+];
 
 fn wanted(id: &str, prefixes: &[String]) -> bool {
     prefixes.is_empty() || prefixes.iter().any(|p| id.starts_with(p.as_str()))
@@ -479,8 +726,23 @@ fn main() -> Result<()> {
             .par_iter()
             .flat_map(|&l0| l0_instances(seed, l0))
             .collect();
-        let per_l1: Vec<Vec<Found>> = l1s.par_iter().map(|&l1| l1_instances(seed, l1)).collect();
+        found.extend(
+            l0s.par_iter()
+                .flat_map(|&l0| census2::l0_extra(seed, l0))
+                .collect::<Vec<_>>(),
+        );
+        let per_l1: Vec<Vec<Found>> = l1s
+            .par_iter()
+            .map(|&l1| {
+                let mut v = l1_instances(seed, l1);
+                v.extend(census2::l1_extra(seed, l1));
+                v.extend(census2::gates_and_trees(seed, l1));
+                v
+            })
+            .collect();
         found.extend(per_l1.into_iter().flatten());
+        found.extend(census2::l2_census(seed, &sample_cells(&a, a.l2_cells)));
+        found.extend(census2::wide_scan(seed, a.wide));
         for f in found {
             let e = census
                 .entry(f.tag)
