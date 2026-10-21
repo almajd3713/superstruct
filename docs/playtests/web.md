@@ -104,3 +104,19 @@ slot of such a segment counted, the median walking distance to breathing space i
 42), 32 m (seed 7) and 32 m (seed 1234)** against at most 150 m: **MET-05 and HOR-11 hold** on all
 three seeds. MET-04 stands as above (0.99, 1.6 and 6.2 km against 1.5–2.5 km: seed 7 has more
 long views than the range, seed 42 fewer).
+
+### Windows frame times (PW.7.4; native, RTX 4070 Laptop, release, `GEN_VERSION` 30)
+
+`SUPERSTRUCT_AUTOFLY=60` (60 m/s level fly-through) from sector (0, 0, 0) local (450, 560, 200),
+5 000 frames, default stream radii (L2 640 m, mid 4 096 m, L1 full 4 096 m, far 51 km),
+volumetric fog and the new weather/tools systems on. 51 one-second windows from the game's own log:
+
+- mean 97 fps; steady state 80–140 fps; the first window 0.3 fps (start-up, everything loading);
+- the worst frame in a second: median 55 ms, 90th percentile 99 ms, maximum 186 ms (a handful of
+  seconds at 48–55 fps with 140–186 ms hitches while chunks stream in);
+- the 64 m shell was resident after 4.6 s; at the end 15 L1 full chunks (135 MiB), 59 L2 full
+  (509 MiB), 2 082 L2 mid (92 MiB) and 272 L3 (0 MiB) were resident; no "slow frame" line.
+
+No tuning was done and no budget of PLAN §11.4 is claimed. The hitches while flying are the
+streaming (chunk meshing and uploads), not the weather or the tools. HOR-15 (how much of the
+tissue the occlusion culling hides) was not measured: the renderer has no counter for it yet.
