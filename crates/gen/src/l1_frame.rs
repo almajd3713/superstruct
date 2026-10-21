@@ -570,7 +570,7 @@ pub fn is_mega_bridge(seed: WorldSeed, beam: &Beam) -> bool {
         let l0 = w.div_euclid(I64Vec3::splat(L0_M));
         let st = stack(seed, l0);
         let geo = regime(seed, l0).web.stack;
-        let u = crate::stack::u_units(geo, w - l0 * L0_M, None);
+        let u = crate::stack::u_units(geo, w - l0 * L0_M, st.well);
         if matches!(st.segment_at(u).stratum, Stratum::Between(_)) {
             return true;
         }
@@ -593,6 +593,9 @@ pub struct Knot {
 }
 
 pub const HUB_WEIGHTS: [u32; 5] = [40, 20, 25, 5, 10];
+
+/// The hub family of a gravity furnace (HUB-10).
+pub const FURNACE_HUB: u8 = 3;
 
 /// The knot of L1 cell `l1`, which may depend on its own beams (spec §4W.2.2).
 pub fn knot(seed: WorldSeed, l1: I64Vec3, beams: &[Beam]) -> Knot {
@@ -652,6 +655,20 @@ pub fn knot(seed: WorldSeed, l1: I64Vec3, beams: &[Beam]) -> Knot {
             }
             a += 256;
         }
+    }
+    // A well's furnace is the knot of its cell (spec `gravity.md` §3.3): the hub is HUB-10.
+    if let Some(c) = crate::gravity::well_centre_in_l1(seed, l1) {
+        let cell = [0, 1, 2].map(|k| {
+            (c[k] - [origin.x, origin.y, origin.z][k])
+                .div_euclid(512)
+                .clamp(1, 6)
+        });
+        return Knot {
+            l2: cell,
+            hub: FURNACE_HUB,
+            signature,
+            on_beam: false,
+        };
     }
     match best {
         Some((_, _, _, _, cell)) => Knot {

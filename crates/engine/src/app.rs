@@ -285,6 +285,12 @@ impl App {
                     Vec3::ZERO
                 },
                 run: steer && grabbed && self.input.held(Action::Sprint),
+                look: self.camera.forward(),
+                thrust: if steer {
+                    axis(Action::MoveForward, Action::MoveBack)
+                } else {
+                    0.0
+                },
                 // On a ladder forward moves where you look: up unless you look down.
                 climb: if steer {
                     axis(Action::MoveForward, Action::MoveBack)

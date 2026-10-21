@@ -173,7 +173,7 @@ pub fn character_at(seed: WorldSeed, l0: I64Vec3, local_m: I64Vec3) -> Option<Ch
 /// crust (ties to the lower one). `None` only when the stack has no crust at all.
 pub fn character_near(seed: WorldSeed, l0: I64Vec3, local_m: I64Vec3) -> Option<Character> {
     let st = stack(seed, l0);
-    let u = u_units(st.geometry, local_m, None).rem_euclid(UNITS);
+    let u = u_units(st.geometry, local_m, st.well).rem_euclid(UNITS);
     let i = st.segments.partition_point(|s| i64::from(s.end) <= u);
     let i = i.min(st.segments.len() - 1);
     let crust = |s: &Segment| match s.stratum {

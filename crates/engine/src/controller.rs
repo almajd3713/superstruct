@@ -40,6 +40,10 @@ pub struct MoveInput {
     pub run: bool,
     /// On a ladder: -1 down to 1 up (forward moves where you look, `docs/spec/climbing.md`).
     pub climb: f32,
+    /// The view direction (unit, or zero), for the drift push where there is no ground.
+    pub look: Vec3,
+    /// Forward (1) or back (-1) on the keys, pushing along `look` when drifting.
+    pub thrust: f32,
 }
 
 /// A ladder the player is on: its corridor, in the world.
@@ -103,6 +107,15 @@ const TURN_RATE: f32 = std::f32::consts::FRAC_PI_2;
 const TURN_EASE: f32 = 0.15;
 /// Under this fraction of standard gravity a field has no direction (a lull).
 const LULL: f32 = 4.0 / 256.0;
+/// Free drift (`gravity.md` §5.1): velocity decays with this time constant, the push is
+/// `DRIFT_PUSH` m/s² along the view up to `DRIFT_TOP` m/s. In low gravity the air push is
+/// `AIR_PUSH`.
+const DRIFT_DECAY: f32 = 4.0;
+const DRIFT_PUSH: f32 = 0.5;
+const DRIFT_TOP: f32 = 1.0;
+const AIR_PUSH: f32 = 0.25;
+/// Below this strength fraction gravity is low enough for the air push (64/256).
+const LOW_GRAVITY: f32 = 0.25;
 
 impl Controller {
     pub fn new(pos: WorldPos) -> Self {
@@ -228,6 +241,10 @@ impl Controller {
             return;
         }
         self.orient(dt, field);
+        if field.strength < LULL {
+            self.drift_step(dt, input, src);
+            return;
+        }
         if let Some(c) = self.climb {
             self.climb_step(dt, input, c, src);
             return;
@@ -261,6 +278,9 @@ impl Controller {
             self.vel.dot(up) - GRAVITY * field.strength * dt
         };
         self.vel = vh + up * vy;
+        if !self.grounded && field.strength < LOW_GRAVITY {
+            self.vel += input.look * (input.thrust.clamp(-1.0, 1.0) * AIR_PUSH * dt);
+        }
 
         let travel = self.vel.length() * dt;
         self.solids.clear();
@@ -284,6 +304,34 @@ impl Controller {
             self.substep(&mut p, sub);
         }
         self.settle(&mut p, dt);
+        self.pos = self.pos.offset(p).unwrap_or(self.pos);
+    }
+
+    /// Free drift in a lull (GRV-14): no gravity, velocity decays over 4 s, the forward key pushes
+    /// along the view at 0.5 m/s² up to 1 m/s, and a surface takes the speed into it away
+    /// without damage.
+    fn drift_step(&mut self, dt: f32, input: MoveInput, src: &dyn SolidSource) {
+        self.grounded = false;
+        self.grounded_time = 0.0;
+        self.platform = None;
+        self.climb = None;
+        self.vel *= (1.0 - dt / DRIFT_DECAY).max(0.0);
+        let thrust = input.thrust.clamp(-1.0, 1.0);
+        let along = self.vel.dot(input.look);
+        if thrust != 0.0
+            && ((thrust > 0.0 && along < DRIFT_TOP) || (thrust < 0.0 && along > -DRIFT_TOP))
+        {
+            self.vel += input.look * (thrust * DRIFT_PUSH * dt);
+        }
+        self.solids.clear();
+        src.gather(&self.pos, 3.0 + self.vel.length() * dt, &mut self.solids);
+        let mut p = Vec3::ZERO;
+        let disp = self.vel * dt;
+        let substeps = (disp.length() / MAX_SUBSTEP).ceil().max(1.0) as u32;
+        let sub = disp / substeps as f32;
+        for _ in 0..substeps {
+            self.substep(&mut p, sub);
+        }
         self.pos = self.pos.offset(p).unwrap_or(self.pos);
     }
 
@@ -758,6 +806,64 @@ pub(crate) mod tests {
         assert!(turned > 0.5, "{turned}");
         run_in(&mut c, &w, 4.0, Vec3::ZERO, flip);
         assert!(c.up().dot(Vec3::NEG_Y) > 0.999, "{:?}", c.up());
+    }
+
+    fn drift_input(thrust: f32, look: Vec3) -> MoveInput {
+        MoveInput {
+            look,
+            thrust,
+            ..Default::default()
+        }
+    }
+
+    /// GRV-14: in a lull nothing pulls, the forward key pushes along the view up to 1 m/s, and
+    /// letting go lets the speed decay with a 4 s time constant.
+    #[test]
+    fn free_drift_in_a_lull() {
+        let w = Flat(vec![]);
+        let lull = Field {
+            up: Vec3::ZERO,
+            strength: 0.0,
+        };
+        let mut c = at(100.0, 100.0, 100.0);
+        let look = Vec3::new(1.0, 0.0, 0.0);
+        for _ in 0..240 {
+            c.step_in(1.0 / 120.0, drift_input(1.0, look), &w, lull);
+        }
+        // 2 s at 0.5 m/s² with the decay: 2 (1 - e^-0.5) = 0.79 m/s.
+        assert!(c.vel.x > 0.75 && c.vel.x < 0.83, "{}", c.vel);
+        assert!(c.vel.y.abs() < 1e-4, "gravity acted: {}", c.vel);
+        assert!(!c.grounded);
+        for _ in 0..240 {
+            c.step_in(1.0 / 120.0, drift_input(1.0, look), &w, lull);
+        }
+        assert!(c.vel.x > 0.95 && c.vel.x <= 1.02, "cap: {}", c.vel);
+        let v0 = c.vel.x;
+        for _ in 0..480 {
+            c.step_in(1.0 / 120.0, drift_input(0.0, look), &w, lull);
+        }
+        // 4 s of decay leaves about 1/e of the speed.
+        let ratio = c.vel.x / v0;
+        assert!((ratio - (-1.0f32).exp()).abs() < 0.03, "{ratio}");
+        // The frame did not turn.
+        assert!(c.up().dot(Vec3::Y) > 0.9999);
+    }
+
+    #[test]
+    fn a_surface_stops_a_drifter_without_a_bounce() {
+        let wall = floor_box([1700, 1000, 1000], [1760, 3000, 3000]);
+        let w = Flat(vec![wall]);
+        let lull = Field {
+            up: Vec3::ZERO,
+            strength: 0.0,
+        };
+        let mut c = at(100.0, 100.0, 100.0);
+        for _ in 0..1200 {
+            c.step_in(1.0 / 120.0, drift_input(1.0, Vec3::X), &w, lull);
+        }
+        // The wall's face is at x = 106.25; the capsule stays outside it and is not moving in.
+        assert!(local(&c).x < 106.25 - RADIUS + 0.01, "{:?}", local(&c));
+        assert!(c.vel.x <= 0.05, "{}", c.vel);
     }
 
     #[test]

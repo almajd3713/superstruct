@@ -514,7 +514,7 @@ impl Gen {
         let (a0, o0) = (comp(self.origin, a_axis), comp(self.origin, other));
         let crust = |st: &Stack, l0: I64Vec3, geo, p: I64Vec3| {
             let local = p - l0 * L0_M;
-            let u = crate::stack::u_units(geo, local, None);
+            let u = crate::stack::u_units(geo, local, st.well);
             matches!(st.segment_at(u).stratum, Stratum::Crust(_))
         };
         let point = |f: i64, a: i64, o: i64| {
@@ -991,7 +991,7 @@ mod tests {
                         let outside = I64Vec3::new(face, y, z);
                         let is_crust = |s: &Stack, l0: I64Vec3, g, p: I64Vec3| {
                             matches!(
-                                s.segment_at(u_units(g, p - l0 * L0_M, None)).stratum,
+                                s.segment_at(u_units(g, p - l0 * L0_M, s.well)).stratum,
                                 Stratum::Crust(_)
                             )
                         };

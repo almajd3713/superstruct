@@ -284,6 +284,7 @@ pub struct Segment {
 
 #[derive(Debug, Clone)]
 pub struct Tissue {
+    pub seed: WorldSeed,
     pub cell: CellKey,
     pub lattice: Lattice,
     pub anchors: Vec<Anchor>,
@@ -493,6 +494,7 @@ fn build(seed: WorldSeed, cache: &TissueCache, cell: CellKey, grown: bool) -> Ti
                 .then_some([x, y, z])
         });
     let mut t = Tissue {
+        seed,
         cell,
         lattice: lat,
         anchors,

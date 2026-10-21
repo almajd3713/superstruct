@@ -622,6 +622,19 @@ pub(crate) enum Overlap {
     Built,
 }
 
+/// The table pose that puts a structure on `b` normal to the field at its centre, if a well
+/// bends the field there (GRV-01).
+fn field_pose(t: &Tissue, b: SlotBox, size: [i32; 3]) -> Option<(u8, u8)> {
+    let pitch = t.lattice.pitch as f64;
+    let cell = t.cell.coords * 512;
+    let at = |k: usize| {
+        let mid = f64::from(b.lo[k]) * pitch + f64::from(size[k]) * pitch / 2.0;
+        cell[k] + mid.floor() as i64
+    };
+    let g = crate::gravity::field_at_metres(t.seed, [at(0), at(1), at(2)]);
+    crate::gravity::pose_for_up(g.up)
+}
+
 /// Places the bounding size `size` (slots, `[w, d, h]` with `h` the form's long axis) on
 /// `support`, using `words` for every choice.
 #[allow(clippy::too_many_lines)] // one arm per support
@@ -691,6 +704,12 @@ pub(crate) fn place(
         let mut out = out;
         for &m in &muts {
             out = crate::mutations::apply(out, sz, m, &mut rng);
+        }
+        // GRV-01: where a well bends the field, floors stand normal to it.
+        if t.lattice.frame.is_axis_aligned()
+            && let Some((yaw, tilt)) = field_pose(t, b, sz)
+        {
+            out = crate::mutations::pose(out, sz, yaw, tilt);
         }
         let out = out.shifted(b.lo);
         let mut placed = Placed::boxes(out.boxes, overlap);
@@ -985,8 +1004,13 @@ fn access_path(t: &Tissue, in_route: &[bool], from: usize) -> Option<Vec<usize>>
 /// The weights of the supports for this cell: the character's, or the regime's palette.
 fn support_weights(t: &Tissue) -> [u32; 11] {
     let mut w = t.character.map_or([4u8; 11], |c| c.supports).map(u32::from);
-    // Radial needs a gravity well (PW.6); until then it is never drawn.
-    w[RADIAL] = 0;
+    // Radial stands on the surface of a gravity well (SUP-11): drawn only where a well bends
+    // the field at the cell's centre.
+    let c = t.cell.coords * 512 + 256;
+    let g = crate::gravity::field_at_metres(t.seed, [c.x, c.y, c.z]);
+    if g == crate::gravity::Gravity::DEFAULT || g.is_lull() {
+        w[RADIAL] = 0;
+    }
     w
 }
 
@@ -2632,5 +2656,41 @@ mod tests {
         );
         assert!(tiles > 1000 && cladding > 0);
         assert!(share >= 0.90, "{share}");
+    }
+
+    /// GRV-01: near a Point well structures stand on turned floors, nowhere else.
+    #[test]
+    fn structures_near_a_well_stand_normal_to_the_field() {
+        use crate::gravity::{WellKind, find_well, gravity_at_metres, pose_for_up};
+        let (_, w) = find_well(seed(), WellKind::Point, 8).expect("a point well");
+        let cache = crate::tissue::TissueCache::default();
+        let mut turned = 0;
+        let mut checked = 0;
+        for k in 0..200i64 {
+            // Cells on a ring at half the reach, where the field leans by tens of degrees.
+            let r = w.reach / 2;
+            let p = [
+                w.centre[0] + r * (k % 5 - 2) / 2,
+                w.centre[1] + r / 2 + (k / 5 % 4) * 128,
+                w.centre[2] + r * (k / 20 % 5 - 2) / 2,
+            ];
+            let g = gravity_at_metres(seed(), p);
+            if pose_for_up(g.up).is_none() {
+                continue;
+            }
+            let l2 = glam::I64Vec3::new(p[0] / 512, p[1] / 512, p[2] / 512);
+            let t = crate::tissue::tissue_cell(seed(), &cache, CellKey::new(Level::L2, l2));
+            checked += 1;
+            turned += t
+                .structures
+                .iter()
+                .filter(|s| !s.oriented.is_empty())
+                .count();
+        }
+        assert!(checked > 20, "{checked}");
+        assert!(
+            turned > 0,
+            "no turned structure in {checked} cells near a well"
+        );
     }
 }

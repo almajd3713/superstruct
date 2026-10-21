@@ -106,11 +106,31 @@ The regime changes the kind weights: Hollow Expanse doubles Shell and Plane, Pip
 
 ### 3.3 The furnace (knot) and what stands on it
 
+**Built in PW.6.4 (2026-10-21, `GEN_VERSION` 20).** GRV-01: a structure whose centre is in a bent field is posed with `Frame::table(yaw, tilt)` whose up is nearest to the field's up (`gravity::pose_for_up`, brute force over the 7 × 64 table, ties to the lowest), at most 30° from the world up; it applies where the lattice frame is axis-aligned and the field's up has a positive Y part. Fields turned 90° or more (floors on walls and ceilings) are **not** posed: that needs a lattice rotated by quarter turns, the same problem as PW.4.20, and is recorded there. GRV-02: `Stack.well` holds the nearest Point or Shell well centre (metres from the L0 origin, from the 27 neighbouring cells) for `Curved` stacks, and every `u_units` caller uses it, so crusts wrap into shells where a well exists and stay flat elsewhere. Line and Tube wells do not bend `Curved` stacks yet (the radial distance would be `oct2(r_perp)`). Voids of a Curved stack are still drawn in flat bands. GRV-03: `l1_artery::radial_factor` triples the weight of a walk move within 30° of the local up or of perpendicular to it; it applies only in L1 cells whose centre field differs from the default. GRV-09: the coverage taper of §2.2 is the gradient; `taper_turns_at_most_one_step_per_metre` is its test. SUP-11 (Radial support) is drawn where the field at the cell centre is bent; it places like a standing support, and the pose turns its floors.
+
 - A well's centre lies in one live L1 cell. That cell's **knot** is forced to the L2 cell of the centre, with the hub kind **gravity furnace** (HUB-10) (`levels.md` §4W.2.2). The furnace is the source of the field; for Line and Tube wells it is a machine along the axis; for Plane, Seam and Fold wells it is a plant along the region's edge.
 - GRV-01: a structure's up is the field direction at its anchor: `Frame::from_up(up(anchor))`, with the heading drawn from the grain (`regimes.md` §7.4, `Radial` policy). Forms are placed with their floors normal to it (`levels.md` §5W.4.1).
 - GRV-02: strata in a regime with `StackGeometry::Curved` use the octagonal radial distance from the nearest Point or Shell well as `u` (`regimes.md` §8.1), so crusts wrap into concentric shells. For Line and Tube wells the same applies to `oct2(r_perp)`.
 - GRV-03: arteries in a well's region run radially or along shells. In the artery walk (`levels.md` §4W.5.2) the weight of a move is multiplied by 3 if the move is within 30° of the local up (radial) or within 30° of perpendicular to it (along a shell), tested with integer dot products against `up`.
 - A lull cell (§5) carries no crust, no fill and no tissue (fill 0), only lull arteries.
+
+### 3.4 What a well builds (PW.6.5–6.10, `worldgen::wellgeom`, `GEN_VERSION` 20)
+
+`cell_pieces(seed, l2)` adds pieces to the L2 cells round every well (cell-local, appended after the gate rings; `l2_web.rs`). Plane and Seam normals are coordinate axes (drawn that way); Line and Tube may be on any table direction.
+
+| Kind | Pieces |
+|---|---|
+| Point (WELL-01) | a **hollow cube planetoid**: six slabs of 24 m, half size `reach/8` (128–1024 m, 16 m step); the furnace (HUB-10, forced knot of the centre's L1 cell) is in the hollow; outside, structures are posed normal to the field and `Curved` stacks wrap crusts round the well |
+| Shell (WELL-02) | a hollow cube of half size `reach/4` (512–4096 m) with the same slabs: you stand on the inside, the opposite wall overhead; the field is a lull at the exact centre |
+| Line (WELL-03), Tube (WELL-04) | an emissive axis cable of 0.5 m radius, no collision, along the axis for its full length, and on axis-aligned wells rings of light every 128 m (radius 12 m for a line, 48 m for a tube) |
+| Plane (WELL-05) | a deck of 4 m under the plane coordinate over the box region: walk on the wall |
+| Twin (WELL-06) | two small planetoids (half the core size of the Point), one per partner; the lull between them is the field's sum |
+| Seam (WELL-07) | a **2 m plate** at the plane coordinate (not the 16–64 m wall of §2.1: the gate zone of §4 is 2 m so the walker is through in a second), with a hole for each gate of the cell; the plate has up `+n` on its + face and `−n` on its − face |
+| Fold (WELL-08) | per segment a square corridor of 12 m clear width, 2 m walls, floor on the `−up` side of the centre line; the field in it is the segment's up |
+| Damaged (WELL-09) | per L2 cell inside the reach 3–6 boxes of 2–10 m at hashed places (frozen debris, collidable); keyed by the L2 cell with `WELL_PATCH` |
+| Tidal (WELL-10) | no pieces: its effect is the strength that falls linearly with the distance (the furnace is its only structure) |
+
+Not built: the wall faces of these pieces have no far LOD yet (PW.7), the wells of Line and Tube do not make `Curved` strata round the axis, and a Fold's bends are plain overlaps of corridors with the field switching to the nearest segment.
 
 ## 4. Gates
 
@@ -152,6 +172,8 @@ A **lull** is a region where `strength < 4/256` (§1.2). Rules:
 - **Gravity rivers** (WGT-04): a long drift lane between two wells, marked by lights and dust, 1–10 km long.
 
 ### 5.1 Free drift (GRV-14)
+
+**Built in PW.6.8 (2026-10-21).** `Controller::step_in` with a field under 4/256 runs `drift_step`: no gravity, velocity times `1 − dt/4` each step, the forward and back keys push along the view at 0.5 m/s² until the speed along the view is 1 m/s, no strafe, no walking, no ladder; a surface removes the speed into it through the ordinary contact response (no damage: the fall energy is scaled by the strength, which is about zero). The frame does not turn in a lull. In low gravity (below 64/256, outside the grounded state) the air push is 0.25 m/s². `Survival` ends a lull only after 90 s of drifting with no surface within 100 m. **Not built:** the handrail pull and the lull tubes and drift lanes (`current_at`), which come with PW.10.14 (WGT-03, 04, 09); L1 fill is 0 in lull cells (L2 cell centres).
 
 In a lull (strength < 4/256) the player **floats**:
 - the capsule is not pulled; the velocity decays with a time constant of 4 s *(provisional)*, so a stopped player almost stops;

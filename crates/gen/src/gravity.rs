@@ -339,8 +339,8 @@ fn draw_wells(seed: WorldSeed, l0: I64Vec3) -> Vec<Well> {
         strength
     };
     let axis = rng.below(DIR_COUNT as u64) as usize;
-    // A seam's membrane is a wall of boxes, so its normal is a coordinate axis.
-    let axis = if kind == WellKind::Seam {
+    // A seam's membrane and a plane's deck are boxes, so their normal is a coordinate axis.
+    let axis = if matches!(kind, WellKind::Seam | WellKind::Plane) {
         const AXES: [[i8; 3]; 3] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
         DIRS.iter()
             .position(|d| *d == AXES[axis % 3])
@@ -488,6 +488,30 @@ pub fn field_at_metres(seed: WorldSeed, p: [i64; 3]) -> Gravity {
     }
 }
 
+/// The centre of the Point or Shell well nearest to the middle of L0 cell `l0`, in metres from
+/// the cell's origin, for the radial crusts of a `Curved` stack (spec §3.3, GRV-02).
+pub fn radial_well(seed: WorldSeed, l0: I64Vec3) -> Option<I64Vec3> {
+    let o = l0_origin(l0);
+    let mid = [o[0] + L0_SIZE / 2, o[1] + L0_SIZE / 2, o[2] + L0_SIZE / 2];
+    let mut best: Option<(i64, [i64; 3])> = None;
+    for dz in -1..=1 {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                for w in wells_of(seed, l0 + I64Vec3::new(dx, dy, dz)).iter() {
+                    if !matches!(w.kind, WellKind::Point | WellKind::Shell) {
+                        continue;
+                    }
+                    let d = oct3(sub(mid, w.centre));
+                    if best.is_none_or(|(bd, _)| d < bd) {
+                        best = Some((d, w.centre));
+                    }
+                }
+            }
+        }
+    }
+    best.map(|(_, c)| I64Vec3::new(c[0] - o[0], c[1] - o[1], c[2] - o[2]))
+}
+
 /// Gravity at an absolute integer metre position, with the gate zones of its L2 cell applied.
 pub fn gravity_at_metres(seed: WorldSeed, p: [i64; 3]) -> Gravity {
     let base = field_at_metres(seed, p);
@@ -500,6 +524,51 @@ pub fn gravity_at(seed: WorldSeed, sector: I64Vec3, local: Vec3) -> Gravity {
     let s = SECTOR_SIZE as i64;
     let p = [0, 1, 2].map(|i| sector[i] * s + local[i].floor() as i64);
     gravity_at_metres(seed, p)
+}
+
+/// The centre (metres) of a well whose furnace is in L1 cell `l1`, if any (spec §3.3).
+pub fn well_centre_in_l1(seed: WorldSeed, l1: I64Vec3) -> Option<[i64; 3]> {
+    let l0 = I64Vec3::new(l1.x.div_euclid(8), l1.y.div_euclid(8), l1.z.div_euclid(8));
+    for dz in -1..=1 {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let found = wells_of(seed, l0 + I64Vec3::new(dx, dy, dz))
+                    .iter()
+                    .find(|w| w.l1 == l1)
+                    .map(|w| w.centre);
+                if found.is_some() {
+                    return found;
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The `(yaw, tilt)` of the table frame whose up is nearest to the field direction `up`, for a
+/// tilt of at most 30° (the table's range). `None` when the field is a lull, the default, or
+/// turned further than 90° from the world up, where no table frame has its floor under you.
+pub fn pose_for_up(up: [i8; 3]) -> Option<(u8, u8)> {
+    use crate::orient::{Frame, TILTS};
+    if up == [0, 0, 0] || up == [0, 8, 0] || up[1] <= 0 {
+        return None;
+    }
+    let len = up
+        .iter()
+        .map(|&v| f64::from(v) * f64::from(v))
+        .sum::<f64>()
+        .sqrt();
+    let u = glam::DVec3::new(f64::from(up[0]), f64::from(up[1]), f64::from(up[2])) / len;
+    let mut best: Option<(f64, u8, u8)> = None;
+    for tilt in 0..TILTS {
+        for yaw in 0..64u8 {
+            let d = Frame::table(yaw, tilt).axes()[1].dot(u);
+            if best.is_none_or(|(bd, _, _)| d > bd + 1e-12) {
+                best = Some((d, yaw, tilt));
+            }
+        }
+    }
+    best.map(|(_, yaw, tilt)| (yaw, tilt))
 }
 
 /// The first well of any L0 cell around `l0` within `radius` cells, for tests and tools.
@@ -640,5 +709,58 @@ mod tests {
             }
         }
         assert!((60..=140).contains(&n), "{n} of 400");
+    }
+
+    #[test]
+    fn pose_follows_the_field_up() {
+        use crate::orient::Frame;
+        assert_eq!(pose_for_up([0, 8, 0]), None);
+        assert_eq!(pose_for_up([0, 0, 0]), None);
+        assert_eq!(pose_for_up([8, 0, 0]), None);
+        let (yaw, tilt) = pose_for_up([2, 8, 0]).unwrap();
+        assert!(tilt > 0);
+        let y = Frame::table(yaw, tilt).axes()[1];
+        let want = glam::DVec3::new(2.0, 8.0, 0.0).normalize();
+        assert!(y.dot(want) > 0.999, "{y:?}");
+    }
+
+    #[test]
+    fn a_curved_stack_wraps_the_nearest_radial_well() {
+        use crate::regime::regime;
+        use crate::regime_web::StackGeometry;
+        let mut found = 0;
+        for x in -30..30 {
+            for z in -30..30 {
+                let l0 = I64Vec3::new(x, 0, z);
+                if !matches!(regime(SEED, l0).web.stack, StackGeometry::Curved) {
+                    continue;
+                }
+                if let Some(w) = radial_well(SEED, l0) {
+                    assert_eq!(crate::stack::stack(SEED, l0).well, Some(w));
+                    found += 1;
+                }
+            }
+        }
+        assert!(found > 0, "no curved stack has a radial well in 3600 cells");
+    }
+
+    /// Spec §3.3: the cell that holds a well's centre has the gravity furnace as its knot hub.
+    #[test]
+    fn a_well_cell_has_a_furnace_knot() {
+        let mut checked = 0;
+        for kind in [
+            WellKind::Point,
+            WellKind::Line,
+            WellKind::Shell,
+            WellKind::Plane,
+        ] {
+            let (_, w) = find_well(SEED, kind, 8).expect("a well");
+            assert_eq!(well_centre_in_l1(SEED, w.l1), Some(w.centre));
+            if let Some(sk) = crate::l1_artery::skeleton(SEED, w.l1) {
+                assert_eq!(sk.knot_hub, crate::l1_frame::FURNACE_HUB);
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
     }
 }

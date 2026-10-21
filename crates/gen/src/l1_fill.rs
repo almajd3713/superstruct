@@ -77,7 +77,13 @@ pub fn fill_field(seed: WorldSeed, l1: I64Vec3) -> Vec<u8> {
                 }
                 let base = u64::from(total / 8);
                 let n = noise_at(seed, l1, ix, iy, iz);
-                let f = (base * (192 + 2 * n) / 256).min(255);
+                let mut f = (base * (192 + 2 * n) / 256).min(255);
+                // A lull has no crust, no fill and no tissue (`gravity.md` §5): nothing may
+                // float there by accident.
+                let c = origin + I64Vec3::new(ix * 512 + 256, iy * 512 + 256, iz * 512 + 256);
+                if crate::gravity::field_at_metres(seed, [c.x, c.y, c.z]).is_lull() {
+                    f = 0;
+                }
                 out[((iz * 8 + iy) * 8 + ix) as usize] = f as u8;
             }
         }
@@ -250,5 +256,43 @@ mod tests {
             }
         }
         assert!(checked > 0, "no shaft cell found");
+    }
+
+    /// A lull has no fill: the middle of two equal twin wells is empty space.
+    #[test]
+    fn a_lull_has_no_fill() {
+        use crate::gravity::{WellKind, wells_of};
+        let seed = WorldSeed(0);
+        let mut checked = 0;
+        for x in -8..=8 {
+            for z in -8..=8 {
+                for y in -4..=4 {
+                    let ws = wells_of(seed, I64Vec3::new(x, y, z));
+                    if ws.len() != 2
+                        || ws[0].kind != WellKind::Twin
+                        || ws[0].strength != ws[1].strength
+                    {
+                        continue;
+                    }
+                    let mid = [0, 1, 2].map(|i| i64::midpoint(ws[0].centre[i], ws[1].centre[i]));
+                    if !crate::gravity::field_at_metres(seed, mid).is_lull() {
+                        continue;
+                    }
+                    let l2 = I64Vec3::new(
+                        mid[0].div_euclid(512),
+                        mid[1].div_euclid(512),
+                        mid[2].div_euclid(512),
+                    );
+                    // The cell is a lull at its centre only if the pair is symmetric about it;
+                    // check the cell whose centre is the lull.
+                    let c = [0, 1, 2].map(|i| [l2.x, l2.y, l2.z][i] * 512 + 256);
+                    if crate::gravity::field_at_metres(seed, c).is_lull() {
+                        assert_eq!(fill_l2(seed, l2), 0);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 0, "no lull cell found between twins");
     }
 }

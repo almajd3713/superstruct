@@ -121,6 +121,7 @@ pub fn l2_cell_web_edges(
     primitives.retain(|p| seen.insert((p.shape, p.material, p.kind, p.flags)));
     // The rings of light that mark gravity gates (GRV-04).
     primitives.extend(crate::gates::cell_markers(seed, cell.coords));
+    primitives.extend(crate::wellgeom::cell_pieces(seed, cell.coords));
     let child_constraints = t
         .paths
         .bores

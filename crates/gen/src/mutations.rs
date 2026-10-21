@@ -67,6 +67,35 @@ pub fn size_before(id: u8, size: [i32; 3], rng: &mut Rng) -> [i32; 3] {
     }
 }
 
+/// The whole form turned about the centre of its base by `Frame::table(yaw, tilt)`: MUT-02, and
+/// the pose that puts a structure's floors normal to the local gravity (GRV-01).
+pub fn pose(mut out: FormOut, size: [i32; 3], yaw: u8, tilt: u8) -> FormOut {
+    let [w, _, d] = size;
+    let pivot = Some([f64::from(w) / 2.0, f64::from(d) / 2.0]);
+    let mut turned = out.turned.clone();
+    for b in out
+        .boxes
+        .drain(..)
+        .chain(out.shaped.drain(..).map(|(_, b)| b))
+    {
+        turned.push(Turned {
+            bx: b,
+            yaw,
+            tilt,
+            pivot,
+        });
+    }
+    for t in &mut turned {
+        if t.pivot.is_none() {
+            t.pivot = pivot;
+        }
+        t.tilt = tilt;
+        t.yaw = yaw;
+    }
+    out.turned = turned;
+    out
+}
+
 /// Applies mutation `id` to `out`, built for `size` (the size `size_before` gave, scaled back
 /// up by `stretch` for MUT-07). `size` is the bounding box the structure will occupy.
 #[allow(clippy::too_many_lines)] // one arm per mutation
@@ -92,29 +121,7 @@ pub fn apply(mut out: FormOut, size: [i32; 3], id: u8, rng: &mut Rng) -> FormOut
         2 => {
             let tilt = 1 + rng.below(3) as u8;
             let yaw = [0u8, 16, 32, 48][rng.below(4) as usize];
-            let pivot = Some([f64::from(w) / 2.0, f64::from(d) / 2.0]);
-            let mut turned = out.turned.clone();
-            for b in out
-                .boxes
-                .drain(..)
-                .chain(out.shaped.drain(..).map(|(_, b)| b))
-            {
-                turned.push(Turned {
-                    bx: b,
-                    yaw,
-                    tilt,
-                    pivot,
-                });
-            }
-            for t in &mut turned {
-                if t.pivot.is_none() {
-                    t.pivot = pivot;
-                }
-                t.tilt = tilt;
-                t.yaw = yaw;
-            }
-            out.turned = turned;
-            out
+            pose(out, size, yaw, tilt)
         }
         // Twisted: each box turned about the vertical axis by more the higher it stands.
         3 => {

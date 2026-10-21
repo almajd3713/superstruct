@@ -13,6 +13,11 @@ pub const FALL_DEATH_HEIGHT: f32 = 15.0;
 pub const VOID_TIMEOUT: f32 = 3.0;
 /// The void timeout never grows beyond this, however weak gravity gets (`gravity.md` §7).
 pub const VOID_TIMEOUT_MAX: f32 = 12.0;
+/// Under this strength fraction the field is a lull.
+const LULL_STRENGTH: f32 = 4.0 / 256.0;
+/// Drifting this long with no surface within `DRIFT_SURFACE` metres counts as lost.
+pub const DRIFT_TIMEOUT: f32 = 90.0;
+const DRIFT_SURFACE: f32 = 100.0;
 pub const VOID_PROBE: f32 = 200.0;
 /// Seconds grounded before a spot counts as safe.
 pub const SAFE_GROUNDED_TIME: f32 = 1.0;
@@ -166,9 +171,10 @@ impl Survival {
         if self.energy > FALL_DEATH_HEIGHT {
             return true;
         }
-        // Weaker gravity makes a fall longer; with none there is no void to time out.
-        if ctl.strength <= 0.0 {
-            return false;
+        // In a lull there is no fall: only 90 s of drifting with no surface within 100 m ends it
+        // (`gravity.md` §5.1).
+        if ctl.strength < LULL_STRENGTH {
+            return self.airtime >= DRIFT_TIMEOUT && !self.surface_near(ctl, src);
         }
         let timeout = (VOID_TIMEOUT / ctl.strength.sqrt()).min(VOID_TIMEOUT_MAX);
         self.airtime >= timeout && ctl.vel.dot(ctl.up()) < 0.0 && !self.ground_below(ctl, src)
@@ -187,6 +193,12 @@ impl Survival {
             let start = (tx * a.cos() + tz * a.sin()) * EDGE_RADIUS + up * EDGE_LIFT;
             ray_along(&self.scratch, start, -up, EDGE_LIFT + EDGE_REACH).is_some()
         })
+    }
+
+    fn surface_near(&mut self, ctl: &Controller, src: &dyn SolidSource) -> bool {
+        self.scratch.clear();
+        src.gather(&ctl.pos, DRIFT_SURFACE, &mut self.scratch);
+        crate::collision::sdf(&self.scratch, Vec3::ZERO) < DRIFT_SURFACE
     }
 
     fn ground_below(&mut self, ctl: &Controller, src: &dyn SolidSource) -> bool {

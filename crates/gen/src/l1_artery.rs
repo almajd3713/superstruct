@@ -321,6 +321,7 @@ enum Goal {
 fn walk(
     rng: &mut Rng,
     weave: u8,
+    radial: Option<[i64; 3]>,
     start: L2c,
     goal: Goal,
     tree: &[bool; CELLS],
@@ -366,6 +367,9 @@ fn walk(
                     let mut w = w_by_axes[axes];
                     if cheb(n, target) < cheb(cur, target) {
                         w *= tuning::TOWARD_BIAS;
+                    }
+                    if let Some(up) = radial {
+                        w *= radial_factor([dx, dy, dz], up);
                     }
                     moves.push(n);
                     weights.push(w as u32);
@@ -450,9 +454,31 @@ fn expand(landings: &[L2c]) -> Vec<L2c> {
     out
 }
 
+/// GRV-03: three times the weight for a move within 30° of the local up (radial) or within
+/// 30° of perpendicular to it (along a shell), by integer dot products.
+fn radial_factor(d: [i64; 3], up: [i64; 3]) -> i64 {
+    let dd: i64 = d.iter().map(|v| v * v).sum();
+    let uu: i64 = up.iter().map(|v| v * v).sum();
+    let du: i64 = d.iter().zip(up).map(|(a, b)| a * b).sum();
+    let c2 = 4 * du * du;
+    if c2 >= 3 * dd * uu || c2 <= dd * uu {
+        3
+    } else {
+        1
+    }
+}
+
+/// The local up at the centre of L1 cell `l1` when a well bends the field there.
+fn well_up(seed: WorldSeed, l1: I64Vec3) -> Option<[i64; 3]> {
+    let c = [0, 1, 2].map(|i| l1[i] * 4096 + 2048);
+    let g = crate::gravity::field_at_metres(seed, c);
+    (g != crate::gravity::Gravity::DEFAULT && !g.is_lull()).then(|| g.up.map(i64::from))
+}
+
 struct Builder {
     rng: Rng,
     weave: u8,
+    radial: Option<[i64; 3]>,
     tree: [bool; CELLS],
     list: Vec<u16>,
     arteries: Vec<Artery>,
@@ -470,6 +496,7 @@ impl Builder {
         let path = walk(
             &mut self.rng,
             self.weave,
+            self.radial,
             start,
             goal,
             &self.tree,
@@ -512,6 +539,7 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
     let mut b = Builder {
         rng: Rng::new(hash(seed.0, Level::L1, l1, salt::ARTERY)),
         weave,
+        radial: well_up(seed, l1),
         tree: [false; CELLS],
         list: Vec::new(),
         arteries: Vec::new(),
@@ -806,6 +834,7 @@ mod tests {
                 let path = walk(
                     &mut rng,
                     weave,
+                    None,
                     start,
                     Goal::Tree,
                     &tree,
@@ -879,5 +908,18 @@ mod tests {
             by[3] / n
         );
         assert!((16..=400).contains(&(t / n)));
+    }
+
+    /// GRV-03: radial and along-shell moves weigh three times as much; diagonals do not.
+    #[test]
+    fn radial_moves_weigh_more_near_a_well() {
+        let up = [0, 8, 0];
+        assert_eq!(radial_factor([0, 1, 0], up), 3);
+        assert_eq!(radial_factor([1, 0, 0], up), 3);
+        assert_eq!(radial_factor([1, 1, 0], up), 1);
+        let tilted = [8, 8, 0];
+        assert_eq!(radial_factor([1, 1, 0], tilted), 3);
+        assert_eq!(radial_factor([1, -1, 0], tilted), 3);
+        assert_eq!(radial_factor([1, 0, 0], tilted), 1);
     }
 }

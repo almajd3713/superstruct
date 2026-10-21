@@ -103,6 +103,9 @@ pub struct Stack {
     pub geometry: StackGeometry,
     /// Contiguous, covering `0..512`, starting and ending with a Between.
     pub segments: Vec<Segment>,
+    /// The centre of the nearest Point or Shell well (metres inside the L0 cell, possibly
+    /// outside it) that a `Curved` stack wraps its crusts around (GRV-02).
+    pub well: Option<I64Vec3>,
 }
 
 /// The seam Between on one stack face: its kind, its even depth in units and whether it is
@@ -223,9 +226,15 @@ fn build(seed: WorldSeed, cell: I64Vec3, web: &WebFields) -> Stack {
         push(&mut segs, bd, false, kind, flooded);
         pos += bd;
     }
+    let well = if matches!(web.stack, StackGeometry::Curved) {
+        crate::gravity::radial_well(seed, cell)
+    } else {
+        None
+    };
     Stack {
         geometry: web.stack,
         segments: segs,
+        well,
     }
 }
 
@@ -241,7 +250,7 @@ impl Stack {
     /// `Crust(k)` or `Between(j)` at metre position `local_m` inside the L0 cell (`0 ≤ c < 32768`).
     /// `well` is the centre of the nearest gravity well, used only by `Curved` stacks.
     pub fn stratum_at(&self, local_m: I64Vec3, well: Option<I64Vec3>) -> Stratum {
-        self.segment_at(u_units(self.geometry, local_m, well))
+        self.segment_at(u_units(self.geometry, local_m, well.or(self.well)))
             .stratum
     }
 
