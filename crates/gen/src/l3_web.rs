@@ -458,6 +458,16 @@ pub fn parent_of(seed: WorldSeed, cell: CellKey, t: &crate::tissue::Tissue) -> P
     Parent::new(plans, Vec::new())
 }
 
+/// The L4 modules of one block and where the block stands (`WebL3::cell_modules`).
+#[derive(Debug, Clone)]
+pub struct BlockModules {
+    pub modules: Vec<crate::l4::Module>,
+    /// Cell-local metres of the block's origin.
+    pub corner: [f64; 3],
+    /// The horizontal part of the frame's x axis: where the block's +x points.
+    pub ex: [f64; 2],
+}
+
 /// An L2 cell's interiors: the plans of its masses, its lattice frame and the blocks solved so
 /// far. Build it once per L2 cell and reuse it for every world L3 cell in it.
 pub struct WebL3 {
@@ -552,6 +562,44 @@ impl WebL3 {
         self.blocks
             .entry(idx)
             .or_insert_with(|| l3_block_with(seed, parent, key))
+    }
+
+    /// The L4 modules of the blocks that world L3 cell `w` meets (panels, door frames, lamps,
+    /// benches, plants, pipes and cables), block by block, for a lattice with level floors (a
+    /// yaw only, any heading); none for a tilted lattice, whose interiors stay bare until they
+    /// stand upright (PW.4.20). Positions are block-local quanta: the engine places each block
+    /// with its `corner` (cell-local metres of the block's origin) and the frame's horizontal
+    /// x axis `ex` (the block's z axis is `(-ex.z, ex.x)`), and keeps what lies in `w`.
+    pub fn cell_modules(&mut self, seed: WorldSeed, w: CellKey) -> Vec<BlockModules> {
+        if !crate::plumb::is_upright(self.frame) {
+            return Vec::new();
+        }
+        let o = w.coords.map(|v| floor_mod_pow2(v, 3));
+        let o = DVec3::new(o.x as f64 * 64.0, o.y as f64 * 64.0, o.z as f64 * 64.0);
+        let ex = self.frame.axes()[0];
+        let mut out = Vec::new();
+        for idx in self.blocks_of(w) {
+            let corner = self.to_world([
+                f64::from(idx[0]) * 64.0,
+                f64::from(idx[1]) * 64.0,
+                f64::from(idx[2]) * 64.0,
+            ]) - o;
+            let key = CellKey::new(
+                Level::L3,
+                self.cell.coords * 8
+                    + glam::I64Vec3::new(i64::from(idx[0]), i64::from(idx[1]), i64::from(idx[2])),
+            );
+            let block = self.block(seed, idx);
+            let modules = crate::l4::block_modules(seed, key, block);
+            if !modules.is_empty() {
+                out.push(BlockModules {
+                    modules,
+                    corner: corner.to_array(),
+                    ex: [ex.x, ex.z],
+                });
+            }
+        }
+        out
     }
 
     /// The interior pieces in world L3 cell `w`, in its local quanta: every block it meets,
@@ -1042,5 +1090,49 @@ mod tests {
                 "INT-{kind:02} never occurs: {kinds:?}"
             );
         }
+    }
+
+    /// PW.4.21: the interiors of upright lattices carry L4 modules, with lamps (a light a block),
+    /// and a tilted lattice has none.
+    #[test]
+    fn upright_interiors_are_furnished_and_lit() {
+        use crate::l4::ModuleKind;
+        let seed = WorldSeed(0x5eed);
+        let cache = L1Cache::default();
+        let (mut blocks, mut lamps, mut panels, mut tilted) = (0usize, 0usize, 0usize, 0usize);
+        for key in cells(40) {
+            let mut ctx = web_context(seed, &cache, key);
+            for k in 0..512i64 {
+                let w = CellKey::new(
+                    Level::L3,
+                    key.coords * 8 + I64Vec3::new(k % 8, k / 8 % 8, k / 64),
+                );
+                if !ctx.is_active(w) {
+                    continue;
+                }
+                let m = ctx.cell_modules(seed, w);
+                if !crate::plumb::is_upright(ctx.frame) {
+                    tilted += usize::from(m.is_empty());
+                    continue;
+                }
+                for b in &m {
+                    blocks += 1;
+                    lamps += b
+                        .modules
+                        .iter()
+                        .filter(|x| x.kind == ModuleKind::Lamp)
+                        .count();
+                    panels += b
+                        .modules
+                        .iter()
+                        .filter(|x| x.kind == ModuleKind::WallPanel)
+                        .count();
+                }
+            }
+        }
+        eprintln!(
+            "{blocks} block placements, {lamps} lamps, {panels} panels, {tilted} tilted cells bare"
+        );
+        assert!(blocks > 20 && lamps >= blocks && panels > blocks);
     }
 }

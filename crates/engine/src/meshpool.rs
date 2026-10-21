@@ -537,6 +537,14 @@ fn build(
             if ctx.is_active(id.key) {
                 let prims = ctx.cell_primitives(seed, id.key);
                 ao_boxes = local_boxes(&prims);
+                // Lamps, panels, door frames and the rest of the kit (PW.4.21).
+                let blocks = ctx.cell_modules(seed, id.key);
+                if !blocks.is_empty() {
+                    let batch = crate::kit::expand_blocks(&blocks);
+                    if !batch.is_empty() {
+                        modules = Some(batch);
+                    }
+                }
                 (prims, None)
             } else {
                 (Vec::new(), None)

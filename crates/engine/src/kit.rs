@@ -515,6 +515,10 @@ pub struct ModuleBatch {
 /// Bits of `ModuleInstance::packed` that carry the brightness.
 pub const GLOW_SHIFT: u32 = 18;
 pub const GLOW_MASK: u32 = 0xf << GLOW_SHIFT;
+/// Bits 22 to 31 of `ModuleInstance::packed`: the heading of the block the module stands in, in
+/// 1024ths of a turn about +Y, applied after the quarter turns (Web interiors, PW.4.21).
+pub const YAW_SHIFT: u32 = 22;
+pub const YAW_MASK: u32 = 0x3ff << YAW_SHIFT;
 
 impl ModuleBatch {
     pub fn new() -> Self {
@@ -562,6 +566,53 @@ impl ModuleBatch {
         let r = (hi - lo).length() * 0.5 + reach;
         [c.x, c.y, c.z, r]
     }
+}
+
+/// The modules of the blocks of one world L3 cell, placed: each block's instances are turned by
+/// its heading and moved to its corner, and only those whose base lies in the cell (a 64 m
+/// chunk) are kept, so a module that stands on a boundary is drawn once.
+pub fn expand_blocks(blocks: &[worldgen::l3_web::BlockModules]) -> ModuleBatch {
+    let mut batch = ModuleBatch::new();
+    for b in blocks {
+        let local = expand(&b.modules);
+        let (ex, ez) = (
+            [b.ex[0] as f32, b.ex[1] as f32],
+            [-b.ex[1] as f32, b.ex[0] as f32],
+        );
+        let corner = b.corner.map(|v| v as f32);
+        // The block's +x points along `ex`: a turn about +Y of atan2(-ex.z, ex.x).
+        let turn = (-b.ex[1]).atan2(b.ex[0]) / std::f64::consts::TAU;
+        let yaw = ((turn * 1024.0).round() as i32)
+            .rem_euclid(1024)
+            .cast_unsigned()
+            << YAW_SHIFT;
+        let place = |p: [f32; 3]| -> [f32; 3] {
+            [
+                corner[0] + ex[0] * p[0] + ez[0] * p[2],
+                corner[1] + p[1],
+                corner[2] + ex[1] * p[0] + ez[1] * p[2],
+            ]
+        };
+        let inside = |p: [f32; 3]| p.iter().all(|&v| (0.0..64.0).contains(&v));
+        for (k, list) in local.by_piece.iter().enumerate() {
+            for i in list {
+                let pos = place(i.pos);
+                if inside(pos) {
+                    batch.by_piece[k].push(ModuleInstance {
+                        pos,
+                        packed: (i.packed & !YAW_MASK) | yaw,
+                    });
+                }
+            }
+        }
+        for (pos, glow, warm) in &local.lamps {
+            let pos = place(*pos);
+            if inside(pos) {
+                batch.lamps.push((pos, *glow, *warm));
+            }
+        }
+    }
+    batch
 }
 
 /// Turns placements into instances. Long railings, pipes and cables are tiled with their fixed

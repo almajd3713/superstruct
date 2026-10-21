@@ -158,7 +158,7 @@ impl ModuleState {
             });
             all.extend(list.iter().map(|i| ModuleInstance {
                 pos: i.pos,
-                packed: (i.packed & (3 | GLOW_MASK)) | (slot << SLOT_SHIFT),
+                packed: (i.packed & (3 | GLOW_MASK | crate::kit::YAW_MASK)) | (slot << SLOT_SHIFT),
             }));
         }
         queue.write_buffer(

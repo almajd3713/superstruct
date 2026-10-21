@@ -165,6 +165,15 @@ fn vs_module(in: VsIn) -> VsOut {
         p = vec3<f32>(-p.z, p.y, p.x);
         n = vec3<f32>(-n.z, n.y, n.x);
     }
+    // The heading of the block a module stands in (bits 22 to 31, 1024ths of a turn): a rotation
+    // about +Y after the quarter turns.
+    let turn = f32(inst.packed >> 22u) * (6.2831853 / 1024.0);
+    if (turn != 0.0) {
+        let c = cos(turn);
+        let s = sin(turn);
+        p = vec3<f32>(p.x * c + p.z * s, p.y, -p.x * s + p.z * c);
+        n = vec3<f32>(n.x * c + n.z * s, n.y, -n.x * s + n.z * c);
+    }
     let slot = (inst.packed >> 2u) & 0xffffu;
     let cell = mod_cells[slot * 2u];
     let glow = mod_cells[slot * 2u + 1u];
