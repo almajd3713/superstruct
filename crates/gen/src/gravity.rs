@@ -764,3 +764,33 @@ mod tests {
         assert!(checked > 0);
     }
 }
+
+#[cfg(test)]
+mod viewpoints {
+    use super::*;
+
+    /// `cargo test -p gen --lib print_well_viewpoints -- --ignored --nocapture`: the first well
+    /// of each kind and a spot to view it from, as `SUPERSTRUCT_SECTOR` / `SUPERSTRUCT_LOCAL`.
+    #[test]
+    #[ignore = "prints viewpoints for screenshots"]
+    fn print_well_viewpoints() {
+        let seed = WorldSeed(0);
+        for kind in KINDS {
+            let Some((_, w)) = find_well(seed, kind, 12) else {
+                continue;
+            };
+            let off = match kind {
+                WellKind::Point | WellKind::Twin => crate::wellgeom::core_half(&w) + 160,
+                WellKind::Shell => crate::wellgeom::shell_half(&w) / 2,
+                _ => 160,
+            };
+            let p = [w.centre[0] + off, w.centre[1] + 40, w.centre[2] + off];
+            let s = [0, 1, 2].map(|i| p[i].div_euclid(1024));
+            let l = [0, 1, 2].map(|i| p[i].rem_euclid(1024));
+            println!(
+                "{kind:?}: centre {:?} reach {} strength {} axis {:?} SECTOR={},{},{} LOCAL={},{},{}",
+                w.centre, w.reach, w.strength, DIRS[w.axis], s[0], s[1], s[2], l[0], l[1], l[2]
+            );
+        }
+    }
+}
