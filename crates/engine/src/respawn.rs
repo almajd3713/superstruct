@@ -1,16 +1,18 @@
 //! Safe ground, fall detection and the death sequence (`docs/spec/traversal.md` §3 and §4).
 //! Pure logic driven by the controller each fixed step.
 
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use worldgen::coord::WorldPos;
 
-use crate::collision::{Solid, SolidSource, ray_down};
+use crate::collision::{Solid, SolidSource, ray_along};
 use crate::controller::Controller;
 
 /// A fall of more than this many metres from the last ground contact kills.
 pub const FALL_DEATH_HEIGHT: f32 = 15.0;
 /// Continuous airtime after which a missing floor below counts as a void.
 pub const VOID_TIMEOUT: f32 = 3.0;
+/// The void timeout never grows beyond this, however weak gravity gets (`gravity.md` §7).
+pub const VOID_TIMEOUT_MAX: f32 = 12.0;
 pub const VOID_PROBE: f32 = 200.0;
 /// Seconds grounded before a spot counts as safe.
 pub const SAFE_GROUNDED_TIME: f32 = 1.0;
@@ -29,6 +31,8 @@ pub const FADE_IN: f32 = 1.5;
 pub struct SafeSpot {
     pub pos: WorldPos,
     pub yaw: f32,
+    /// The local frame at the spot (`gravity.md` §6): `frame * Y` is up.
+    pub frame: Quat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,7 +60,10 @@ pub enum Event {
 pub struct Survival {
     pub safe: Option<SafeSpot>,
     pub phase: Phase,
-    last_ground: WorldPos,
+    /// Where the controller was at the last update, for the fall energy.
+    prev_pos: WorldPos,
+    /// Metres of standard fall since the last ground contact (`gravity.md` §7).
+    energy: f32,
     airtime: f32,
     scratch: Vec<Solid>,
 }
@@ -66,7 +73,8 @@ impl Survival {
         Self {
             safe: None,
             phase: Phase::Alive,
-            last_ground: start,
+            prev_pos: start,
+            energy: 0.0,
             airtime: 0.0,
             scratch: Vec::new(),
         }
@@ -74,7 +82,8 @@ impl Survival {
 
     /// Where to respawn when no safe ground was ever recorded: where walking began.
     pub fn set_fallback(&mut self, spot: SafeSpot) {
-        self.last_ground = spot.pos;
+        self.prev_pos = spot.pos;
+        self.energy = 0.0;
         self.airtime = 0.0;
         if self.safe.is_none() {
             self.safe = Some(spot);
@@ -110,8 +119,9 @@ impl Survival {
                 if t >= FALL_ON + FADE_OUT {
                     self.phase = Phase::FadingIn { t: 0.0 };
                     self.airtime = 0.0;
+                    self.energy = 0.0;
                     if let Some(spot) = self.safe {
-                        self.last_ground = spot.pos;
+                        self.prev_pos = spot.pos;
                         return Event::Respawn(spot);
                     }
                     return Event::None;
@@ -133,23 +143,35 @@ impl Survival {
 
     /// Updates safe ground and the fall counters; true when the player should die.
     fn track(&mut self, dt: f32, ctl: &Controller, yaw: f32, src: &dyn SolidSource) -> bool {
+        let moved = ctl.pos.delta(&self.prev_pos).as_vec3();
+        self.prev_pos = ctl.pos;
         if ctl.grounded {
-            self.last_ground = ctl.pos;
+            self.energy = 0.0;
             self.airtime = 0.0;
             if ctl.grounded_time >= SAFE_GROUNDED_TIME
                 && !ctl.on_platform()
                 && self.edge_clear(ctl, src)
             {
-                self.safe = Some(SafeSpot { pos: ctl.pos, yaw });
+                self.safe = Some(SafeSpot {
+                    pos: ctl.pos,
+                    yaw,
+                    frame: ctl.frame,
+                });
             }
             return false;
         }
         self.airtime += dt;
-        let fallen = -ctl.pos.delta(&self.last_ground).y as f32;
-        if fallen > FALL_DEATH_HEIGHT {
+        // Metres of standard fall: the drop along the local down, scaled by the strength.
+        self.energy += ctl.strength * moved.dot(-ctl.up()).max(0.0);
+        if self.energy > FALL_DEATH_HEIGHT {
             return true;
         }
-        self.airtime >= VOID_TIMEOUT && ctl.vel.y < 0.0 && !self.ground_below(ctl, src)
+        // Weaker gravity makes a fall longer; with none there is no void to time out.
+        if ctl.strength <= 0.0 {
+            return false;
+        }
+        let timeout = (VOID_TIMEOUT / ctl.strength.sqrt()).min(VOID_TIMEOUT_MAX);
+        self.airtime >= timeout && ctl.vel.dot(ctl.up()) < 0.0 && !self.ground_below(ctl, src)
     }
 
     /// Eight rays around the feet at 1 m must all find ground within the step-down distance.
@@ -158,17 +180,19 @@ impl Survival {
         src.gather(&ctl.pos, EDGE_RADIUS + 1.0, &mut self.scratch);
         // A parked lift car must not make the spot beside its opening look like firm ground.
         self.scratch.retain(|s| s.platform.is_none());
+        let up = ctl.up();
+        let (tx, tz) = up.any_orthonormal_pair();
         (0..EDGE_RAYS).all(|k| {
             let a = std::f32::consts::TAU * k as f32 / EDGE_RAYS as f32;
-            let start = Vec3::new(a.cos() * EDGE_RADIUS, EDGE_LIFT, a.sin() * EDGE_RADIUS);
-            ray_down(&self.scratch, start, EDGE_LIFT + EDGE_REACH).is_some()
+            let start = (tx * a.cos() + tz * a.sin()) * EDGE_RADIUS + up * EDGE_LIFT;
+            ray_along(&self.scratch, start, -up, EDGE_LIFT + EDGE_REACH).is_some()
         })
     }
 
     fn ground_below(&mut self, ctl: &Controller, src: &dyn SolidSource) -> bool {
         self.scratch.clear();
         src.gather(&ctl.pos, VOID_PROBE, &mut self.scratch);
-        ray_down(&self.scratch, Vec3::ZERO, VOID_PROBE).is_some()
+        ray_along(&self.scratch, Vec3::ZERO, -ctl.up(), VOID_PROBE).is_some()
     }
 }
 
@@ -351,5 +375,37 @@ mod tests {
         assert!((max_fade - 1.0).abs() < 1e-3);
         assert_eq!(s.phase, Phase::Alive);
         assert!(s.controllable() && s.fade() == 0.0);
+    }
+
+    /// GRV-11: the fatal drop is 15 m in standard gravity and 15 / strength in a constant
+    /// weaker field, because the energy is the drop scaled by the strength.
+    fn fatal_drop(strength: f32) -> f32 {
+        use crate::controller::Field;
+        // Ground far below, so the void timeout never decides.
+        let w = Flat(vec![floor_box([320, 12000, 320], [2880, 12160, 2880])]);
+        let mut c = at(100.0, 900.0, 100.0);
+        let mut s = Survival::new(c.pos);
+        let field = Field {
+            up: Vec3::Y,
+            strength,
+        };
+        let top = local(&c).y;
+        for _ in 0..(20.0 / DT) as u32 {
+            c.step_in(DT, MoveInput::default(), &w, field);
+            if s.update(DT, &c, 0.0, &w) == Event::Died {
+                return top - local(&c).y;
+            }
+        }
+        panic!("never died at strength {strength}");
+    }
+
+    #[test]
+    fn the_fatal_drop_scales_with_the_inverse_of_the_strength() {
+        let standard = fatal_drop(1.0);
+        assert!((standard - 15.0).abs() < 0.3, "{standard}");
+        let half = fatal_drop(0.5);
+        assert!((half - 30.0).abs() < 0.6, "{half}");
+        let low = fatal_drop(0.25);
+        assert!((low - 60.0).abs() < 1.2, "{low}");
     }
 }

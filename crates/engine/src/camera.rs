@@ -15,6 +15,8 @@ pub struct Camera {
     pub pitch: f32,
     /// Vertical field of view in radians.
     pub fov_y: f32,
+    /// The local frame: `frame * Y` is up, and yaw and pitch are about it (`gravity.md` §6).
+    pub frame: Quat,
 }
 
 impl Camera {
@@ -24,6 +26,7 @@ impl Camera {
             yaw: 0.0,
             pitch: 0.0,
             fov_y: fov_y_deg.to_radians(),
+            frame: Quat::IDENTITY,
         }
     }
 
@@ -33,7 +36,12 @@ impl Camera {
     }
 
     pub fn rotation(&self) -> Quat {
-        Quat::from_rotation_y(self.yaw) * Quat::from_rotation_x(self.pitch)
+        self.frame * Quat::from_rotation_y(self.yaw) * Quat::from_rotation_x(self.pitch)
+    }
+
+    /// The local up.
+    pub fn up(&self) -> Vec3 {
+        self.frame * Vec3::Y
     }
 
     pub fn forward(&self) -> Vec3 {
@@ -42,11 +50,11 @@ impl Camera {
 
     /// Forward on the horizontal plane, for walking and flying level.
     pub fn forward_flat(&self) -> Vec3 {
-        Quat::from_rotation_y(self.yaw) * Vec3::NEG_Z
+        self.frame * Quat::from_rotation_y(self.yaw) * Vec3::NEG_Z
     }
 
     pub fn right_flat(&self) -> Vec3 {
-        Quat::from_rotation_y(self.yaw) * Vec3::X
+        self.frame * Quat::from_rotation_y(self.yaw) * Vec3::X
     }
 
     /// World → eye rotation. Translation is absent: everything the GPU sees is camera-relative.

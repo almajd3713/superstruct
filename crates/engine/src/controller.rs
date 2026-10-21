@@ -7,7 +7,7 @@
 // Substep and frame counts are small non-negative floats.
 #![allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 
-use glam::Vec3;
+use glam::{Quat, Vec3};
 use worldgen::coord::WorldPos;
 
 use crate::collision::{LadderVol, Solid, SolidSource, gradient, sdf};
@@ -68,7 +68,41 @@ pub struct Controller {
     ladders: Vec<LadderVol>,
     /// Crouched in a low duct: the capsule is 1.2 m (CLB-07).
     pub crouched: bool,
+    /// Rotation of the local frame: `frame * Y` is the capsule's up (`docs/spec/gravity.md` §6).
+    pub frame: Quat,
+    /// Gravity strength of the last step as a fraction of standard (0 in a lull).
+    pub strength: f32,
 }
+
+/// The gravity a step runs in: a unit `up` (zero in a lull, where the frame keeps its turn) and
+/// a strength as a fraction of standard gravity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Field {
+    pub up: Vec3,
+    pub strength: f32,
+}
+
+impl Field {
+    pub const STANDARD: Field = Field {
+        up: Vec3::Y,
+        strength: 1.0,
+    };
+
+    pub fn from_gravity(g: worldgen::gravity::Gravity) -> Self {
+        let v = Vec3::new(f32::from(g.up[0]), f32::from(g.up[1]), f32::from(g.up[2]));
+        Field {
+            up: v.normalize_or_zero(),
+            strength: f32::from(g.strength) / 256.0,
+        }
+    }
+}
+
+/// Fastest the frame turns when `up` changes, in radians per second (`gravity.md` §6).
+const TURN_RATE: f32 = std::f32::consts::FRAC_PI_2;
+/// Time constant of the ease at the end of a turn.
+const TURN_EASE: f32 = 0.15;
+/// Under this fraction of standard gravity a field has no direction (a lull).
+const LULL: f32 = 4.0 / 256.0;
 
 impl Controller {
     pub fn new(pos: WorldPos) -> Self {
@@ -83,7 +117,42 @@ impl Controller {
             climb: None,
             ladders: Vec::new(),
             crouched: false,
+            frame: Quat::IDENTITY,
+            strength: 1.0,
         }
+    }
+
+    /// The capsule's up in the world.
+    pub fn up(&self) -> Vec3 {
+        self.frame * Vec3::Y
+    }
+
+    /// Removes the up component.
+    fn flat(&self, v: Vec3) -> Vec3 {
+        v - self.up() * v.dot(self.up())
+    }
+
+    /// Turns the frame towards the field's up by the shortest rotation at a capped rate.
+    fn orient(&mut self, dt: f32, field: Field) {
+        self.strength = field.strength;
+        if field.strength < LULL || field.up == Vec3::ZERO {
+            return;
+        }
+        let up = self.up();
+        let angle = up.dot(field.up).clamp(-1.0, 1.0).acos();
+        if angle < 1e-4 {
+            return;
+        }
+        let step = (angle * (dt / TURN_EASE).min(1.0))
+            .min(TURN_RATE * dt)
+            .max(1e-4_f32.min(angle));
+        let axis = up.cross(field.up);
+        let axis = if axis.length_squared() < 1e-10 {
+            self.frame * Vec3::X
+        } else {
+            axis.normalize()
+        };
+        self.frame = (Quat::from_axis_angle(axis, step.min(angle)) * self.frame).normalize();
     }
 
     /// Whether the ground underfoot belongs to a moving platform. Such spots never count as safe
@@ -117,12 +186,13 @@ impl Controller {
     /// Crouches where the ceiling is lower than the standing capsule and stands up again once
     /// there is room, here and half a metre ahead (CLB-07).
     fn update_crouch(&mut self, wish: Vec3) {
-        let ahead = Vec3::new(wish.x, 0.0, wish.z).normalize_or_zero() * 0.5;
-        let tight = |at: Vec3| penetration(&self.solids, at, SPHERES) > 0.02;
+        let up = self.up();
+        let ahead = self.flat(wish).normalize_or_zero() * 0.5;
+        let tight = |at: Vec3| penetration(&self.solids, at, SPHERES, up) > 0.02;
         let (here, next) = (tight(Vec3::ZERO), tight(ahead));
         if !self.crouched {
             let at = if here { Vec3::ZERO } else { ahead };
-            if (here || next) && penetration(&self.solids, at, CROUCH_SPHERES) <= 0.02 {
+            if (here || next) && penetration(&self.solids, at, CROUCH_SPHERES, up) <= 0.02 {
                 self.crouched = true;
             }
         } else if !here && !next {
@@ -132,13 +202,13 @@ impl Controller {
 
     pub fn eye(&self) -> WorldPos {
         self.pos
-            .offset(Vec3::Y * self.eye_height())
+            .offset(self.up() * self.eye_height())
             .unwrap_or(self.pos)
     }
 
     /// Moves the controller so its eye is at `eye`.
     pub fn set_eye(&mut self, eye: WorldPos) {
-        self.pos = eye.offset(Vec3::NEG_Y * self.eye_height()).unwrap_or(eye);
+        self.pos = eye.offset(-self.up() * self.eye_height()).unwrap_or(eye);
         self.vel = Vec3::ZERO;
         self.grounded = false;
         self.grounded_time = 0.0;
@@ -147,15 +217,24 @@ impl Controller {
 
     /// Advances by `dt` seconds. Does nothing until collision data exists around the player.
     pub fn step(&mut self, dt: f32, input: MoveInput, src: &dyn SolidSource) {
+        self.step_in(dt, input, src, Field::STANDARD);
+    }
+
+    /// `step` in an arbitrary gravity field: the frame turns to the field's up, gravity is
+    /// scaled by its strength, and everything vertical runs along the local up.
+    pub fn step_in(&mut self, dt: f32, input: MoveInput, src: &dyn SolidSource, field: Field) {
         crate::zone!("controller step");
         if !src.ready(&self.pos) {
             return;
         }
+        self.orient(dt, field);
         if let Some(c) = self.climb {
             self.climb_step(dt, input, c, src);
             return;
         }
-        if let Some(c) = self.try_attach(input, src) {
+        if self.up().y > 0.98
+            && let Some(c) = self.try_attach(input, src)
+        {
             self.climb = Some(c);
             self.vel = Vec3::ZERO;
             self.grounded = false;
@@ -164,7 +243,8 @@ impl Controller {
             return;
         }
         let top_speed = if input.run { RUN_SPEED } else { WALK_SPEED };
-        let wish = Vec3::new(input.wish.x, 0.0, input.wish.z).clamp_length_max(1.0);
+        let up = self.up();
+        let wish = self.flat(input.wish).clamp_length_max(1.0);
         let target = wish * top_speed;
         let mut rate = if wish == Vec3::ZERO {
             RUN_SPEED / DECEL_TIME
@@ -174,13 +254,13 @@ impl Controller {
         if !self.grounded {
             rate *= AIR_CONTROL;
         }
-        let vh = approach(Vec3::new(self.vel.x, 0.0, self.vel.z), target, rate * dt);
+        let vh = approach(self.flat(self.vel), target, rate * dt);
         let vy = if self.grounded {
             0.0
         } else {
-            self.vel.y - GRAVITY * dt
+            self.vel.dot(up) - GRAVITY * field.strength * dt
         };
-        self.vel = vh + Vec3::Y * vy;
+        self.vel = vh + up * vy;
 
         let travel = self.vel.length() * dt;
         self.solids.clear();
@@ -192,11 +272,11 @@ impl Controller {
         if self.grounded {
             // Follow the ground plane so slopes are climbed at walking speed.
             let n = self.ground_normal;
-            disp = Vec3::new(disp.x, 0.0, disp.z);
+            disp = self.flat(disp);
             disp -= n * disp.dot(n) * 1.0;
             disp = disp.clamp_length_max(vh.length() * dt * 1.5 + 1e-6);
         } else {
-            disp.y = vy * dt;
+            disp = vh * dt + up * (vy * dt);
         }
         let substeps = (disp.length() / MAX_SUBSTEP).ceil().max(1.0) as u32;
         let sub = disp / substeps as f32;
@@ -260,9 +340,9 @@ impl Controller {
             src.gather(&self.pos, 3.0, &mut self.solids);
             for dir in [c.toward, -c.toward] {
                 let q = dir * 0.7 + Vec3::Y * 0.05;
-                if penetration(&self.solids, q, self.spheres()) <= SKIN
-                    && let Some((drop, n)) = probe_down(&self.solids, q, 1.0)
-                    && walkable(&self.solids, q - Vec3::Y * drop, n)
+                if penetration(&self.solids, q, self.spheres(), Vec3::Y) <= SKIN
+                    && let Some((drop, n)) = probe_down(&self.solids, q, 1.0, Vec3::Y)
+                    && walkable(&self.solids, q - Vec3::Y * drop, n, Vec3::Y)
                 {
                     self.pos = self.pos.offset(q - Vec3::Y * drop).unwrap_or(self.pos);
                     self.climb = None;
@@ -286,11 +366,10 @@ impl Controller {
         let before = *p;
         *p += sub;
         let mut contacts = Contacts::default();
-        depenetrate(&self.solids, p, &mut contacts, self.spheres());
-        let sub_h = Vec3::new(sub.x, 0.0, sub.z);
+        depenetrate(&self.solids, p, &mut contacts, self.spheres(), self.up());
+        let sub_h = self.flat(sub);
         let blocked = sub_h.length() > 1e-6
-            && Vec3::new(p.x - before.x, 0.0, p.z - before.z).dot(sub_h.normalize())
-                < sub_h.length() * 0.5;
+            && self.flat(*p - before).dot(sub_h.normalize()) < sub_h.length() * 0.5;
         if let Some(q) = (blocked && self.grounded)
             .then(|| self.try_step_up(before, sub_h))
             .flatten()
@@ -307,37 +386,41 @@ impl Controller {
     /// goes at least a capsule radius past the edge, so the lowest sphere lands on the top of the
     /// step instead of resting on its corner, which matters for steps near `STEP_UP`.
     fn try_step_up(&self, from: Vec3, sub_h: Vec3) -> Option<Vec3> {
-        let mut q = from + Vec3::Y * STEP_UP;
-        if penetration(&self.solids, q, self.spheres()) > SKIN {
+        let up = self.up();
+        let mut q = from + up * STEP_UP;
+        if penetration(&self.solids, q, self.spheres(), up) > SKIN {
             return None;
         }
         let dir = sub_h.normalize();
         q += dir * (RADIUS + 0.05).max(sub_h.length());
         let mut contacts = Contacts::default();
-        depenetrate(&self.solids, &mut q, &mut contacts, self.spheres());
-        let moved = Vec3::new(q.x - from.x, 0.0, q.z - from.z).dot(dir);
+        depenetrate(&self.solids, &mut q, &mut contacts, self.spheres(), up);
+        let moved = self.flat(q - from).dot(dir);
         if moved < sub_h.length() * 0.5 {
             return None;
         }
-        let (drop, n) = probe_down(&self.solids, q, STEP_UP + 0.05)?;
-        walkable(&self.solids, q - Vec3::Y * drop, n).then(|| q - Vec3::Y * drop)
+        let (drop, n) = probe_down(&self.solids, q, STEP_UP + 0.05, up)?;
+        walkable(&self.solids, q - up * drop, n, up).then(|| q - up * drop)
     }
 
     /// Ground contact after the move: snap down onto walkable ground, else stay airborne.
     fn settle(&mut self, p: &mut Vec3, dt: f32) {
-        let reach = if self.grounded && self.vel.y <= 0.0 {
+        let up = self.up();
+        // A little slack: a frame off the axes leaves rounding noise in the normal velocity.
+        let vy = self.vel.dot(up);
+        let rising = vy > 0.01;
+        let reach = if self.grounded && !rising {
             STEP_UP
         } else {
             0.03
         };
-        match probe_down(&self.solids, *p, reach) {
+        match probe_down(&self.solids, *p, reach, up) {
             Some((drop, n))
-                if self.vel.y <= 0.0
-                    && walkable_normal(&self.solids, *p - Vec3::Y * drop, n).is_some() =>
+                if !rising && walkable_normal(&self.solids, *p - up * drop, n, up).is_some() =>
             {
-                let n = walkable_normal(&self.solids, *p - Vec3::Y * drop, n).unwrap_or(n);
-                p.y -= drop;
-                self.vel.y = 0.0;
+                let n = walkable_normal(&self.solids, *p - up * drop, n, up).unwrap_or(n);
+                *p -= up * drop;
+                self.vel -= up * vy;
                 self.ground_normal = n;
                 self.grounded_time = if self.grounded {
                     self.grounded_time + dt
@@ -345,7 +428,7 @@ impl Controller {
                     0.0
                 };
                 self.grounded = true;
-                self.platform = platform_under(&self.solids, *p);
+                self.platform = platform_under(&self.solids, *p, up);
             }
             _ => {
                 // Leaving a platform keeps its momentum.
@@ -364,8 +447,8 @@ impl Controller {
 
 /// Velocity of the moving platform just below the capsule's feet at `p`, if the ground there is
 /// one: the platform flag of the nearest solid.
-fn platform_under(solids: &[Solid], p: Vec3) -> Option<Vec3> {
-    let at = p - Vec3::Y * 0.01;
+fn platform_under(solids: &[Solid], p: Vec3, up: Vec3) -> Option<Vec3> {
+    let at = p - up * 0.01;
     solids
         .iter()
         .map(|s| (s.shape.sdf(at - s.offset), s.platform))
@@ -387,13 +470,13 @@ fn approach(v: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
     }
 }
 
-fn centres(p: Vec3, n: usize) -> impl Iterator<Item = Vec3> {
-    (0..n).map(move |k| p + Vec3::Y * (RADIUS + k as f32 * RADIUS))
+fn centres(p: Vec3, n: usize, up: Vec3) -> impl Iterator<Item = Vec3> {
+    (0..n).map(move |k| p + up * (RADIUS + k as f32 * RADIUS))
 }
 
 /// Deepest overlap of any capsule sphere with a solid, in metres (0 when clear).
-fn penetration(solids: &[Solid], p: Vec3, n: usize) -> f32 {
-    centres(p, n)
+fn penetration(solids: &[Solid], p: Vec3, n: usize, up: Vec3) -> f32 {
+    centres(p, n, up)
         .map(|c| RADIUS - sdf(solids, c))
         .fold(0.0, f32::max)
 }
@@ -417,10 +500,10 @@ impl Contacts {
     }
 }
 
-fn depenetrate(solids: &[Solid], p: &mut Vec3, contacts: &mut Contacts, spheres: usize) {
+fn depenetrate(solids: &[Solid], p: &mut Vec3, contacts: &mut Contacts, spheres: usize, up: Vec3) {
     for _ in 0..6 {
         let mut moved = false;
-        for c in centres(*p, spheres) {
+        for c in centres(*p, spheres, up) {
             let d = sdf(solids, c);
             if d < RADIUS - SKIN {
                 let n = gradient(solids, c);
@@ -438,25 +521,25 @@ fn depenetrate(solids: &[Solid], p: &mut Vec3, contacts: &mut Contacts, spheres:
 /// Whether the capsule resting at `p` on a contact with normal `n` stands on walkable ground.
 /// A sphere rolling over a stair edge has a tilted contact normal, so a flat surface just under
 /// the capsule axis counts too.
-fn walkable(solids: &[Solid], p: Vec3, n: Vec3) -> bool {
-    walkable_normal(solids, p, n).is_some()
+fn walkable(solids: &[Solid], p: Vec3, n: Vec3, up: Vec3) -> bool {
+    walkable_normal(solids, p, n, up).is_some()
 }
 
 /// The walkable surface normal under `p`: `n` when it is walkable, else the normal found by
 /// tracing further down. A sphere touching the side of a step first reports the side's normal,
 /// which must not become the ground normal or the walk direction is projected away.
-fn walkable_normal(solids: &[Solid], p: Vec3, n: Vec3) -> Option<Vec3> {
-    if n.y >= max_slope_cos() {
+fn walkable_normal(solids: &[Solid], p: Vec3, n: Vec3, up: Vec3) -> Option<Vec3> {
+    if n.dot(up) >= max_slope_cos() {
         return Some(n);
     }
-    let start = p + Vec3::Y * RADIUS;
+    let start = p + up * RADIUS;
     let mut t = 0.0;
     for _ in 0..16 {
-        let at = start - Vec3::Y * t;
+        let at = start - up * t;
         let d = sdf(solids, at);
         if d <= 0.002 {
             let g = gradient(solids, at);
-            return (g.y >= max_slope_cos()).then_some(g);
+            return (g.dot(up) >= max_slope_cos()).then_some(g);
         }
         t += d;
         if t > RADIUS + 0.25 {
@@ -468,11 +551,11 @@ fn walkable_normal(solids: &[Solid], p: Vec3, n: Vec3) -> Option<Vec3> {
 
 /// Sphere-traces the lowest sphere straight down. Returns how far the capsule can drop before
 /// touching and the surface normal there.
-fn probe_down(solids: &[Solid], p: Vec3, max: f32) -> Option<(f32, Vec3)> {
-    let start = p + Vec3::Y * RADIUS;
+fn probe_down(solids: &[Solid], p: Vec3, max: f32, up: Vec3) -> Option<(f32, Vec3)> {
+    let start = p + up * RADIUS;
     let mut t = 0.0;
     for _ in 0..24 {
-        let at = start - Vec3::Y * t;
+        let at = start - up * t;
         let d = sdf(solids, at) - RADIUS;
         if d <= 0.002 {
             return Some((t.max(0.0), gradient(solids, at)));
@@ -606,6 +689,87 @@ pub(crate) mod tests {
 
     pub(crate) fn local(c: &Controller) -> Vec3 {
         c.pos.local()
+    }
+
+    fn run_in(c: &mut Controller, w: &Flat, secs: f32, wish: Vec3, field: Field) {
+        let dt = 1.0 / 120.0;
+        for _ in 0..(secs / dt) as u32 {
+            let input = MoveInput {
+                wish,
+                ..Default::default()
+            };
+            c.step_in(dt, input, w, field);
+        }
+    }
+
+    /// GRV-13: a 20 m block with the field pointing away from its centre is walkable on all six
+    /// faces, with the same speed and ground contact as on a floor.
+    #[test]
+    fn walking_on_all_six_faces_of_a_block() {
+        let block = floor_box([1600, 1600, 1600], [1920, 1920, 1920]);
+        let w = Flat(vec![block]);
+        let centre = Vec3::splat(110.0);
+        for n in [
+            Vec3::X,
+            Vec3::NEG_X,
+            Vec3::Y,
+            Vec3::NEG_Y,
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ] {
+            let field = Field {
+                up: n,
+                strength: 1.0,
+            };
+            let start = centre + n * 10.05;
+            let mut c = at(start.x, start.y, start.z);
+            c.frame = Quat::from_rotation_arc(Vec3::Y, n);
+            run_in(&mut c, &w, 1.0, Vec3::ZERO, field);
+            assert!(c.grounded, "face {n}: not grounded at {:?}", local(&c));
+            let off = |c: &Controller| (local(c) - centre).dot(n) - 10.0;
+            assert!(off(&c).abs() < 0.02, "face {n}: {}", off(&c));
+            let t = n.any_orthonormal_vector();
+            let from = local(&c);
+            run_in(&mut c, &w, 3.0, t, field);
+            assert!(
+                c.grounded,
+                "face {n}: fell while walking t={t} at {:?} vel {} up {}",
+                local(&c),
+                c.vel,
+                c.up()
+            );
+            assert!(off(&c).abs() < 0.05, "face {n}: {}", off(&c));
+            let moved = (local(&c) - from).dot(t);
+            assert!(moved > 3.0, "face {n}: moved {moved}");
+        }
+    }
+
+    #[test]
+    fn the_frame_turns_to_a_flipped_field_at_the_capped_rate() {
+        let w = Flat(vec![]);
+        let mut c = at(100.0, 100.0, 100.0);
+        let flip = Field {
+            up: Vec3::NEG_Y,
+            strength: 1.0,
+        };
+        run_in(&mut c, &w, 1.0, Vec3::ZERO, flip);
+        let turned = c.up().dot(Vec3::Y).clamp(-1.0, 1.0).acos();
+        assert!(turned <= 90f32.to_radians() + 0.02, "{turned}");
+        assert!(turned > 0.5, "{turned}");
+        run_in(&mut c, &w, 4.0, Vec3::ZERO, flip);
+        assert!(c.up().dot(Vec3::NEG_Y) > 0.999, "{:?}", c.up());
+    }
+
+    #[test]
+    fn weaker_gravity_falls_proportionally_slower() {
+        let w = Flat(vec![]);
+        let half = Field {
+            up: Vec3::Y,
+            strength: 0.5,
+        };
+        let mut c = at(100.0, 100.0, 100.0);
+        run_in(&mut c, &w, 1.0, Vec3::ZERO, half);
+        assert!((c.vel.y + GRAVITY * 0.5).abs() < 0.1, "{}", c.vel.y);
     }
 
     #[test]

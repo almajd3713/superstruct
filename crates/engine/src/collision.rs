@@ -57,9 +57,14 @@ pub fn gradient(solids: &[Solid], p: Vec3) -> Vec3 {
 
 /// Distance from `start` straight down to the first solid, if within `max`. Point trace, no radius.
 pub fn ray_down(solids: &[Solid], start: Vec3, max: f32) -> Option<f32> {
+    ray_along(solids, start, Vec3::NEG_Y, max)
+}
+
+/// Distance from `start` along the unit vector `dir` to the first solid, if within `max`.
+pub fn ray_along(solids: &[Solid], start: Vec3, dir: Vec3, max: f32) -> Option<f32> {
     let mut t = 0.0;
     for _ in 0..64 {
-        let d = sdf(solids, start - Vec3::Y * t);
+        let d = sdf(solids, start + dir * t);
         if d <= 0.002 {
             return Some(t);
         }

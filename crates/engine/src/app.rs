@@ -15,12 +15,13 @@ use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 use glam::{I64Vec3, Vec3};
 use worldgen::cell::{CellKey, Level};
 use worldgen::coord::WorldPos;
+use worldgen::gravity::gravity_at;
 use worldgen::seed::WorldSeed;
 
 use crate::beacon::BeaconDraw;
 use crate::camera::Camera;
 use crate::cellscene::{busiest_l2_cell, knot_spawn};
-use crate::controller::{Controller, EYE_HEIGHT, MoveInput};
+use crate::controller::{Controller, EYE_HEIGHT, Field, MoveInput};
 use crate::debugcmd::Command;
 use crate::fartram::FarTrams;
 use crate::gpu::{Gpu, GpuError};
@@ -195,11 +196,13 @@ impl App {
 
     /// Starts walking from the camera: respawn falls back to here until safe ground is found.
     fn enter_walk_mode(&mut self) {
+        self.walker.frame = self.camera.frame;
         self.walker.set_eye(self.camera.pos);
         self.survival = Survival::new(self.walker.pos);
         self.survival.set_fallback(SafeSpot {
             pos: self.walker.pos,
             yaw: self.camera.yaw,
+            frame: self.walker.frame,
         });
     }
 
@@ -214,7 +217,7 @@ impl App {
         let flat = self.camera.forward_flat() * axis(Action::MoveForward, Action::MoveBack)
             + self.camera.right_flat() * axis(Action::MoveRight, Action::MoveLeft);
         if let Some(photo) = &self.photo {
-            let dir = flat + Vec3::Y * axis(Action::MoveUp, Action::MoveDown);
+            let dir = flat + self.camera.up() * axis(Action::MoveUp, Action::MoveDown);
             let boost = if grabbed && self.input.held(Action::Sprint) {
                 4.0
             } else {
@@ -245,7 +248,7 @@ impl App {
                 self.camera.pos = p;
             }
         } else if self.fly_mode {
-            let dir = flat + Vec3::Y * axis(Action::MoveUp, Action::MoveDown);
+            let dir = flat + self.camera.up() * axis(Action::MoveUp, Action::MoveDown);
             let boost = if grabbed && self.input.held(Action::Sprint) {
                 4.0
             } else {
@@ -263,6 +266,8 @@ impl App {
                 if let Some(feet) = cmd.teleport
                     && let Ok(eye) = feet.offset(Vec3::Y * (EYE_HEIGHT + 0.05))
                 {
+                    self.walker.frame = glam::Quat::IDENTITY;
+                    self.camera.frame = glam::Quat::IDENTITY;
                     self.walker.set_eye(eye);
                     self.camera.pos = eye;
                     self.prev_cam_pos = eye;
@@ -283,7 +288,7 @@ impl App {
                 // On a ladder forward moves where you look: up unless you look down.
                 climb: if steer {
                     axis(Action::MoveForward, Action::MoveBack)
-                        * if self.camera.forward().y < -0.15 {
+                        * if self.camera.forward().dot(self.camera.up()) < -0.15 {
                             -1.0
                         } else {
                             1.0
@@ -299,13 +304,17 @@ impl App {
                 force_ready: aboard,
             };
             if aboard || !self.lifts.holds_controller(&self.walker.pos) {
-                self.walker.step(dt, input, &world);
+                let seed = WorldSeed(self.settings.seed);
+                let at = &self.walker.pos;
+                let field = Field::from_gravity(gravity_at(seed, at.sector(), at.local()));
+                self.walker.step_in(dt, input, &world, field);
             }
             if let Event::Respawn(spot) =
                 self.survival
                     .update(dt, &self.walker, self.camera.yaw, self.streamer.collision())
-                && let Ok(eye) = spot.pos.offset(Vec3::Y * (EYE_HEIGHT + 0.05))
+                && let Ok(eye) = spot.pos.offset(spot.frame * Vec3::Y * (EYE_HEIGHT + 0.05))
             {
+                self.walker.frame = spot.frame;
                 self.walker.set_eye(eye);
                 self.lifts.drop_all();
                 self.trams.drop_all();
@@ -314,6 +323,7 @@ impl App {
                 self.prev_cam_pos = eye;
             }
             self.camera.pos = self.walker.eye();
+            self.camera.frame = self.walker.frame;
         }
     }
 
