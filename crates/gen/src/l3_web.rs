@@ -1135,4 +1135,38 @@ mod tests {
         );
         assert!(blocks > 20 && lamps >= blocks && panels > blocks);
     }
+
+    /// PW.5.1: ladder wells (L3-20 and the roof hatches) carry a climbing corridor.
+    #[test]
+    fn ladder_corridors_occur_in_interiors() {
+        let seed = WorldSeed(0x5eed);
+        let cache = L1Cache::default();
+        let (mut with, mut total, mut upright) = (0usize, 0usize, 0usize);
+        for key in cells(60) {
+            let mut ctx = web_context(seed, &cache, key);
+            let up = crate::plumb::is_upright(ctx.frame);
+            for k in 0..512i64 {
+                let w = CellKey::new(
+                    Level::L3,
+                    key.coords * 8 + I64Vec3::new(k % 8, k / 8 % 8, k / 64),
+                );
+                if !ctx.is_active(w) {
+                    continue;
+                }
+                let n = ctx
+                    .cell_primitives(seed, w)
+                    .iter()
+                    .filter(|p| p.kind == crate::prim::FeatureKind::LADDER)
+                    .count();
+                total += n;
+                with += usize::from(n > 0);
+                upright += usize::from(n > 0 && up);
+            }
+        }
+        eprintln!("{total} corridors in {with} L3 cells ({upright} in upright lattices)");
+        assert!(
+            upright > 0,
+            "{total} corridors in {with} cells, none upright"
+        );
+    }
 }

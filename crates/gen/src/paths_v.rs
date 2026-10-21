@@ -12,6 +12,8 @@
     clippy::cast_sign_loss
 )]
 
+mod ladders;
+
 use crate::orient::{Frame, HelixStair, LocalShape, helix_stair};
 use crate::paths::Clear;
 use crate::prim::{Dir4, FeatureKind, MaterialId, PrimFlags, Primitive, QAabb, QVec3, Shape};
@@ -21,6 +23,7 @@ use crate::tissue_grow::{Emitter, quanta};
 pub const VIDS: [u8; 19] = [
     21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
 ];
+pub use ladders::{LADDER_IDS, MAX_RUN, lad_number};
 
 /// Rise and tread of a stair step, in metres (3 Q and 5 Q).
 const RISE: f64 = 0.1875;
@@ -78,6 +81,7 @@ pub fn width_range(id: u8) -> (f64, f64) {
         24 | 25 => (2.5, 4.0),
         26 => (4.0, 6.0),
         27 | 36 | 37 => (1.0, 1.2),
+        41..=53 => (3.0, 3.0),
         28 => (7.0, 9.0),
         29 => (2.0, 2.5),
         30 => (9.0, 10.0),
@@ -888,6 +892,7 @@ pub(crate) fn build_rise(e: &mut Emitter<'_>, id: u8, col: Column, p: &VParams) 
         hi: [f64::MIN; 3],
     };
     match id {
+        41..=53 => ladders::build(&mut m, id, col.height),
         24 => ring(&mut m, false, units, 12.0, false),
         26 => ring(&mut m, true, units, 13.0 - p.w / 2.0, false),
         33 => ring(&mut m, false, units, 8.0, true),

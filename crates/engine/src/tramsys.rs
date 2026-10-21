@@ -509,6 +509,10 @@ impl SolidSource for Riding<'_> {
     fn ready(&self, pos: &WorldPos) -> bool {
         self.force_ready || self.world.ready(pos)
     }
+
+    fn ladders(&self, centre: &WorldPos, half: f32, out: &mut Vec<crate::collision::LadderVol>) {
+        self.world.ladders(centre, half, out);
+    }
 }
 
 #[cfg(test)]
@@ -597,7 +601,15 @@ mod tests {
                 world: &self.world,
                 force_ready: self.trams.aboard(),
             };
-            self.ctl.step(DT, MoveInput { wish, run: false }, &src);
+            self.ctl.step(
+                DT,
+                MoveInput {
+                    wish,
+                    run: false,
+                    ..Default::default()
+                },
+                &src,
+            );
         }
 
         fn frame(&self) -> LineFrame {

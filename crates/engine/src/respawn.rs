@@ -189,7 +189,15 @@ mod tests {
     fn drive(c: &mut Controller, s: &mut Survival, w: &Flat, secs: f32, wish: Vec3) -> Vec<Event> {
         let mut events = Vec::new();
         for _ in 0..(secs / DT) as u32 {
-            c.step(DT, MoveInput { wish, run: false }, w);
+            c.step(
+                DT,
+                MoveInput {
+                    wish,
+                    run: false,
+                    ..Default::default()
+                },
+                w,
+            );
             match s.update(DT, c, 0.0, w) {
                 Event::None => {}
                 e => events.push(e),
@@ -310,7 +318,15 @@ mod tests {
             } else {
                 Vec3::ZERO
             };
-            c.step(DT, MoveInput { wish, run: false }, &w);
+            c.step(
+                DT,
+                MoveInput {
+                    wish,
+                    run: false,
+                    ..Default::default()
+                },
+                &w,
+            );
             if let Event::Respawn(spot) = s.update(DT, &c, 1.25, &w) {
                 {
                     assert!(

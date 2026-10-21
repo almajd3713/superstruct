@@ -462,6 +462,16 @@ fn ladder(o: [Q; 3], out: &mut Vec<Added>) {
             PrimFlags::NO_COLLIDE,
         ));
     }
+    // The corridor in front of the rungs, which are on its +x side (L3-20, CLB-01).
+    out.push(bx(
+        o,
+        (x.0 - 14, x.0),
+        (FLOOR, STOREY + 12),
+        (98, 110),
+        MaterialId(1),
+        FeatureKind::LADDER,
+        PrimFlags::NO_COLLIDE,
+    ));
     let mut y = FLOOR + 6;
     while y < STOREY + 12 {
         out.push(bx(

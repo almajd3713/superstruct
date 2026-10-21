@@ -22,6 +22,18 @@ pub struct Solid {
     pub platform: Option<Vec3>,
 }
 
+/// A ladder's climbing corridor in a query frame (`docs/spec/traversal.md`): an oriented box
+/// whose frame is upright, and the side its rungs are on (the way a climber faces).
+#[derive(Debug, Clone, Copy)]
+pub struct LadderVol {
+    pub centre: Vec3,
+    /// The box's unit axes, with `axes[1]` plumb.
+    pub axes: [Vec3; 3],
+    pub half: Vec3,
+    /// Horizontal unit vector from the open side to the rungs.
+    pub toward: Vec3,
+}
+
 /// Signed distance to the nearest solid at `p` (query frame). `+inf` when there are none.
 pub fn sdf(solids: &[Solid], p: Vec3) -> f32 {
     solids
@@ -66,6 +78,9 @@ pub trait SolidSource {
 
     /// Whether collision data exists around `pos`. The controller holds still until it does.
     fn ready(&self, pos: &WorldPos) -> bool;
+
+    /// Appends every ladder corridor within `half` metres of `centre`, in the frame of `centre`.
+    fn ladders(&self, _centre: &WorldPos, _half: f32, _out: &mut Vec<LadderVol>) {}
 }
 
 /// Extra distance, metres, within which a dynamic solid still counts as near.
@@ -84,6 +99,8 @@ pub struct CollisionChunk {
     items: Vec<Item>,
     /// Every drawn primitive, kept for the pick key; empty unless debug views are on.
     picks: Vec<Primitive>,
+    /// The ladder corridors of the chunk, in chunk-local metres.
+    ladders: Vec<LadderVol>,
 }
 
 /// What the pick key found.
@@ -121,13 +138,55 @@ impl CollisionChunk {
         } else {
             Vec::new()
         };
+        let ladders = prims.iter().filter_map(ladder_of).collect();
         Self {
             origin,
             size_m,
             items,
             picks,
+            ladders,
         }
     }
+}
+
+/// The corridor of a `FeatureKind::LADDER` box, in the cell's own metres.
+fn ladder_of(p: &Primitive) -> Option<LadderVol> {
+    if p.kind != worldgen::prim::FeatureKind::LADDER {
+        return None;
+    }
+    let (frame, origin, local) = match p.shape {
+        Shape::Box { aabb } => (
+            worldgen::orient::Frame::Id,
+            worldgen::prim::QVec3::default(),
+            aabb,
+        ),
+        Shape::Oriented(o) => match o.local {
+            worldgen::orient::LocalShape::Box { aabb } => (o.frame, o.origin, aabb),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let v = |d: glam::DVec3| Vec3::new(d.x as f32, d.y as f32, d.z as f32);
+    let [ex, ey, ez] = frame.axes();
+    let axes = [v(ex), v(ey), v(ez)];
+    if axes[1].y < 0.999 {
+        return None;
+    }
+    let (lo, hi) = (local.min_m(), local.max_m());
+    let mid = (lo + hi) * 0.5;
+    let centre = origin.to_metres() + axes[0] * mid.x + axes[1] * mid.y + axes[2] * mid.z;
+    let toward = match p.material.0 & 3 {
+        0 => -axes[2],
+        1 => axes[0],
+        2 => axes[2],
+        _ => -axes[0],
+    };
+    Some(LadderVol {
+        centre,
+        axes,
+        half: (hi - lo) * 0.5,
+        toward,
+    })
 }
 
 /// A solid owned by the game rather than by a chunk (a lift car, a gate, a tram): a shape with
@@ -260,6 +319,24 @@ impl SolidSource for CollisionWorld {
         }
     }
 
+    fn ladders(&self, centre: &WorldPos, half: f32, out: &mut Vec<LadderVol>) {
+        for chunk in self.chunks.values() {
+            if chunk.ladders.is_empty() {
+                continue;
+            }
+            let local = centre.delta(&chunk.origin).as_vec3();
+            if local.cmplt(Vec3::splat(-half)).any()
+                || local.cmpgt(Vec3::splat(chunk.size_m + half)).any()
+            {
+                continue;
+            }
+            out.extend(chunk.ladders.iter().map(|l| LadderVol {
+                centre: l.centre - local,
+                ..*l
+            }));
+        }
+    }
+
     fn ready(&self, pos: &WorldPos) -> bool {
         use worldgen::cell::{CellKey, Level};
         let l2 = ChunkId::l2(CellKey::containing(Level::L2, pos).coords);
@@ -365,5 +442,68 @@ pub(crate) mod tests {
         out.clear();
         world.gather(&centre, 3.0, &mut out);
         assert!(out.is_empty());
+    }
+
+    /// PW.5.1: the ladder wells of generated interiors carry a climbing corridor that the
+    /// collision chunk finds, upright and facing the rungs.
+    #[test]
+    fn generated_ladder_wells_give_climbing_corridors() {
+        use worldgen::cell::{CellKey, Level};
+        use worldgen::l2_port::L1Cache;
+        let seed = worldgen::seed::WorldSeed(0x5eed);
+        let cache = L1Cache::default();
+        let mut found = 0;
+        'cells: for k in 0..60i64 {
+            let l1 = I64Vec3::new(k % 7 - 3, k / 7 % 3, k / 21 % 9 - 4);
+            let l2 = CellKey::new(
+                Level::L2,
+                l1 * 8 + I64Vec3::new(k % 8, k / 8 % 8, (k * 7 + k / 5) % 8),
+            );
+            let mut ctx = worldgen::l3_web::web_context(seed, &cache, l2);
+            for j in 0..512i64 {
+                let w = CellKey::new(
+                    Level::L3,
+                    l2.coords * 8 + I64Vec3::new(j % 8, j / 8 % 8, j / 64),
+                );
+                if !ctx.is_active(w) {
+                    continue;
+                }
+                let prims = ctx.cell_primitives(seed, w);
+                if prims
+                    .iter()
+                    .all(|p| p.kind != worldgen::prim::FeatureKind::LADDER)
+                {
+                    continue;
+                }
+                let origin = WorldPos::new(I64Vec3::ZERO, Vec3::ZERO).unwrap();
+                let chunk = CollisionChunk::new(origin, 64.0, &prims);
+                let upright = prims
+                    .iter()
+                    .filter(|p| p.kind == worldgen::prim::FeatureKind::LADDER)
+                    .filter(|p| match p.shape {
+                        Shape::Oriented(o) => worldgen::plumb::is_upright(o.frame),
+                        _ => true,
+                    })
+                    .count();
+                assert_eq!(
+                    chunk.ladders.len(),
+                    upright,
+                    "every upright corridor is found"
+                );
+                if upright == 0 {
+                    continue;
+                }
+                for l in &chunk.ladders {
+                    assert!(l.axes[1].y > 0.999 && l.toward.y.abs() < 1e-6);
+                    assert!((l.toward.length() - 1.0).abs() < 1e-4);
+                    assert!(l.half.y > 1.5, "tall: {:?}", l.half);
+                }
+                found += 1;
+                if found >= 3 {
+                    break 'cells;
+                }
+            }
+        }
+        assert!(found >= 1, "no generated ladder well in 60 cells");
     }
 }

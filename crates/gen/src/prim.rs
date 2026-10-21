@@ -239,6 +239,10 @@ impl FeatureKind {
     pub const SKIN: Self = Self(16);
     /// A void: a region kept free of tissue and fill, not matter (VOID-01..13).
     pub const VOID: Self = Self(17);
+    /// The climbing corridor of a ladder (CLB-01..06, `docs/spec/traversal.md`): a box in front
+    /// of the rungs that the controller climbs in; not drawn, not collidable. Its material id
+    /// is the side the rungs are on, in the frame of the box: 0 -z, 1 +x, 2 +z, 3 -x.
+    pub const LADDER: Self = Self(18);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

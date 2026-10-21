@@ -537,6 +537,17 @@ pub fn vestibule_pieces(
                 MaterialId::METAL,
             );
         }
+        // The climbing corridor in front of the rungs (they are on its +x side), from the floor
+        // up through the opening.
+        out.kind = FeatureKind::LADDER;
+        out.add(
+            b(
+                (hole.1 - 4 - 14, hole.1 - 4),
+                (hole.0 + 8, hole.1 - 8),
+                (FLOOR, STOREY),
+            ),
+            MaterialId(1),
+        );
         out.kind = FeatureKind::MASS;
     }
     for (side, &inner) in inner_doors.iter().enumerate() {

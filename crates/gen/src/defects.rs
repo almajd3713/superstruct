@@ -464,6 +464,7 @@ fn scan_cell(
             && !matches!(p.kind, FeatureKind::VOID | FeatureKind::MISC)
             && !p.flags.contains(PrimFlags::ENVELOPE)
             && !p.flags.contains(PrimFlags::MID_ONLY)
+            && p.kind != FeatureKind::LADDER
             && !matches!(p.shape, Shape::LiftShaft { .. })
         {
             r.base("c dressing", 1);
@@ -912,7 +913,10 @@ mod tests {
     #[ignore = "prints viewpoints"]
     fn print_stair_viewpoints() {
         let cache = L1Cache::default();
-        let mut want = vec![21u8, 31, 38, 39, 25];
+        let mut want: Vec<u8> = std::env::var("PV_IDS").map_or_else(
+            |_| vec![21, 31, 38, 39, 25],
+            |v| v.split(',').filter_map(|x| x.parse().ok()).collect(),
+        );
         for c in block(I64Vec3::new(-6, 4, -6), I64Vec3::new(14, 4, 14)) {
             if want.is_empty() {
                 break;

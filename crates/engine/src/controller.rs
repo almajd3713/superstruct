@@ -10,7 +10,7 @@
 use glam::Vec3;
 use worldgen::coord::WorldPos;
 
-use crate::collision::{Solid, SolidSource, gradient, sdf};
+use crate::collision::{LadderVol, Solid, SolidSource, gradient, sdf};
 
 pub const RADIUS: f32 = 0.3;
 pub const HEIGHT: f32 = 1.8;
@@ -19,6 +19,8 @@ pub const STEP_UP: f32 = 0.45;
 pub const WALK_SPEED: f32 = 1.4;
 pub const RUN_SPEED: f32 = 4.0;
 pub const GRAVITY: f32 = 9.81;
+/// Climbing speed on a ladder (CLB-05).
+pub const LADDER_SPEED: f32 = 0.8;
 const MAX_SLOPE_DEG: f32 = 40.0;
 const ACCEL_TIME: f32 = 0.35;
 const DECEL_TIME: f32 = 0.25;
@@ -26,6 +28,9 @@ const AIR_CONTROL: f32 = 0.1;
 /// Largest move between collision resolutions, well under the capsule radius.
 const MAX_SUBSTEP: f32 = 0.1;
 const SPHERES: usize = 5;
+/// Spheres of the crouched capsule: 1.2 m high, for the low ducts of the Web (CLB-07).
+const CROUCH_SPHERES: usize = 3;
+const CROUCH_EYE: f32 = 1.05;
 const SKIN: f32 = 1e-3;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -33,6 +38,18 @@ pub struct MoveInput {
     /// Desired horizontal direction in the world, length at most 1.
     pub wish: Vec3,
     pub run: bool,
+    /// On a ladder: -1 down to 1 up (forward moves where you look, `docs/spec/climbing.md`).
+    pub climb: f32,
+}
+
+/// A ladder the player is on: its corridor, in the world.
+#[derive(Debug, Clone, Copy)]
+struct Climb {
+    centre: WorldPos,
+    half_y: f32,
+    /// Half the corridor's depth along `toward`.
+    half_toward: f32,
+    toward: Vec3,
 }
 
 #[derive(Debug)]
@@ -47,6 +64,10 @@ pub struct Controller {
     /// Velocity of the moving platform the player stands on, if any.
     platform: Option<Vec3>,
     solids: Vec<Solid>,
+    climb: Option<Climb>,
+    ladders: Vec<LadderVol>,
+    /// Crouched in a low duct: the capsule is 1.2 m (CLB-07).
+    pub crouched: bool,
 }
 
 impl Controller {
@@ -59,6 +80,9 @@ impl Controller {
             grounded_time: 0.0,
             platform: None,
             solids: Vec::new(),
+            climb: None,
+            ladders: Vec::new(),
+            crouched: false,
         }
     }
 
@@ -68,13 +92,53 @@ impl Controller {
         self.grounded && self.platform.is_some()
     }
 
+    /// Whether the player is on a ladder.
+    pub fn on_ladder(&self) -> bool {
+        self.climb.is_some()
+    }
+
+    fn spheres(&self) -> usize {
+        if self.crouched {
+            CROUCH_SPHERES
+        } else {
+            SPHERES
+        }
+    }
+
+    /// Eye height above the feet.
+    pub fn eye_height(&self) -> f32 {
+        if self.crouched {
+            CROUCH_EYE
+        } else {
+            EYE_HEIGHT
+        }
+    }
+
+    /// Crouches where the ceiling is lower than the standing capsule and stands up again once
+    /// there is room, here and half a metre ahead (CLB-07).
+    fn update_crouch(&mut self, wish: Vec3) {
+        let ahead = Vec3::new(wish.x, 0.0, wish.z).normalize_or_zero() * 0.5;
+        let tight = |at: Vec3| penetration(&self.solids, at, SPHERES) > 0.02;
+        let (here, next) = (tight(Vec3::ZERO), tight(ahead));
+        if !self.crouched {
+            let at = if here { Vec3::ZERO } else { ahead };
+            if (here || next) && penetration(&self.solids, at, CROUCH_SPHERES) <= 0.02 {
+                self.crouched = true;
+            }
+        } else if !here && !next {
+            self.crouched = false;
+        }
+    }
+
     pub fn eye(&self) -> WorldPos {
-        self.pos.offset(Vec3::Y * EYE_HEIGHT).unwrap_or(self.pos)
+        self.pos
+            .offset(Vec3::Y * self.eye_height())
+            .unwrap_or(self.pos)
     }
 
     /// Moves the controller so its eye is at `eye`.
     pub fn set_eye(&mut self, eye: WorldPos) {
-        self.pos = eye.offset(Vec3::NEG_Y * EYE_HEIGHT).unwrap_or(eye);
+        self.pos = eye.offset(Vec3::NEG_Y * self.eye_height()).unwrap_or(eye);
         self.vel = Vec3::ZERO;
         self.grounded = false;
         self.grounded_time = 0.0;
@@ -85,6 +149,18 @@ impl Controller {
     pub fn step(&mut self, dt: f32, input: MoveInput, src: &dyn SolidSource) {
         crate::zone!("controller step");
         if !src.ready(&self.pos) {
+            return;
+        }
+        if let Some(c) = self.climb {
+            self.climb_step(dt, input, c, src);
+            return;
+        }
+        if let Some(c) = self.try_attach(input, src) {
+            self.climb = Some(c);
+            self.vel = Vec3::ZERO;
+            self.grounded = false;
+            self.grounded_time = 0.0;
+            self.platform = None;
             return;
         }
         let top_speed = if input.run { RUN_SPEED } else { WALK_SPEED };
@@ -109,6 +185,7 @@ impl Controller {
         let travel = self.vel.length() * dt;
         self.solids.clear();
         src.gather(&self.pos, 3.0 + travel, &mut self.solids);
+        self.update_crouch(input.wish);
         // The platform underfoot has already moved to its new place; ride along with it.
         let mut p = self.platform.map_or(Vec3::ZERO, |v| v * dt);
         let mut disp = self.vel * dt;
@@ -130,11 +207,86 @@ impl Controller {
         self.pos = self.pos.offset(p).unwrap_or(self.pos);
     }
 
+    /// Walking into a ladder's corridor while facing the rungs puts you on it (CLB-01).
+    fn try_attach(&mut self, input: MoveInput, src: &dyn SolidSource) -> Option<Climb> {
+        let wish = Vec3::new(input.wish.x, 0.0, input.wish.z).normalize_or_zero();
+        if wish == Vec3::ZERO {
+            return None;
+        }
+        self.ladders.clear();
+        src.ladders(&self.pos, 2.0, &mut self.ladders);
+        let mid = Vec3::Y * (HEIGHT * 0.5);
+        for l in &self.ladders {
+            if wish.dot(l.toward) < 0.5 {
+                continue;
+            }
+            let d = mid - l.centre;
+            let local = [d.dot(l.axes[0]), d.dot(l.axes[1]), d.dot(l.axes[2])];
+            let half_toward =
+                l.toward.dot(l.axes[0]).abs() * l.half.x + l.toward.dot(l.axes[2]).abs() * l.half.z;
+            let in_front = d.dot(l.toward) <= half_toward + 0.2;
+            let feet = local[1] - HEIGHT * 0.5;
+            if local[0].abs() <= l.half.x + 0.2
+                && local[2].abs() <= l.half.z + 0.2
+                && in_front
+                && feet >= -l.half.y - 0.1
+                && feet <= l.half.y - 0.1
+            {
+                let centre = self.pos.offset(l.centre).ok()?;
+                return Some(Climb {
+                    centre,
+                    half_y: l.half.y,
+                    half_toward,
+                    toward: l.toward,
+                });
+            }
+        }
+        None
+    }
+
+    /// On a ladder: no gravity, no walking off; the climb input moves you up or down at
+    /// `LADDER_SPEED`, and only the ends let go (CLB-02..05).
+    fn climb_step(&mut self, dt: f32, input: MoveInput, c: Climb, src: &dyn SolidSource) {
+        let rel = c.centre.delta(&self.pos).as_vec3();
+        // Hold against the rungs: the corridor's middle line, shifted to the open side.
+        let hold = Vec3::new(rel.x, 0.0, rel.z) - c.toward * (c.half_toward - 0.35).max(0.0);
+        let side = hold * (dt * 10.0).min(1.0);
+        let dy = input.climb.clamp(-1.0, 1.0) * LADDER_SPEED * dt;
+        let top = rel.y + c.half_y;
+        let bottom = rel.y - c.half_y;
+        if dy >= 0.0 && top <= 0.05 {
+            // The top: step forward over the edge onto what is there, or stay on the last rung.
+            self.solids.clear();
+            src.gather(&self.pos, 3.0, &mut self.solids);
+            for dir in [c.toward, -c.toward] {
+                let q = dir * 0.7 + Vec3::Y * 0.05;
+                if penetration(&self.solids, q, self.spheres()) <= SKIN
+                    && let Some((drop, n)) = probe_down(&self.solids, q, 1.0)
+                    && walkable(&self.solids, q - Vec3::Y * drop, n)
+                {
+                    self.pos = self.pos.offset(q - Vec3::Y * drop).unwrap_or(self.pos);
+                    self.climb = None;
+                    self.vel = Vec3::ZERO;
+                    return;
+                }
+            }
+        } else if dy <= 0.0 && bottom >= -0.02 {
+            // The bottom: step back off, onto the floor you came from.
+            self.pos = self.pos.offset(-c.toward * 0.5).unwrap_or(self.pos);
+            self.climb = None;
+            self.vel = Vec3::ZERO;
+            return;
+        }
+        let step = side + Vec3::Y * dy;
+        self.pos = self.pos.offset(step).unwrap_or(self.pos);
+        self.vel = Vec3::ZERO;
+    }
+
     fn substep(&mut self, p: &mut Vec3, sub: Vec3) {
         let before = *p;
         *p += sub;
         let mut contacts = Contacts::default();
-        depenetrate(&self.solids, p, &mut contacts);
+        depenetrate(&self.solids, p, &mut contacts, self.spheres());
         let sub_h = Vec3::new(sub.x, 0.0, sub.z);
         let blocked = sub_h.length() > 1e-6
             && Vec3::new(p.x - before.x, 0.0, p.z - before.z).dot(sub_h.normalize())
@@ -156,13 +308,13 @@ impl Controller {
     /// step instead of resting on its corner, which matters for steps near `STEP_UP`.
     fn try_step_up(&self, from: Vec3, sub_h: Vec3) -> Option<Vec3> {
         let mut q = from + Vec3::Y * STEP_UP;
-        if penetration(&self.solids, q) > SKIN {
+        if penetration(&self.solids, q, self.spheres()) > SKIN {
             return None;
         }
         let dir = sub_h.normalize();
         q += dir * (RADIUS + 0.05).max(sub_h.length());
         let mut contacts = Contacts::default();
-        depenetrate(&self.solids, &mut q, &mut contacts);
+        depenetrate(&self.solids, &mut q, &mut contacts, self.spheres());
         let moved = Vec3::new(q.x - from.x, 0.0, q.z - from.z).dot(dir);
         if moved < sub_h.length() * 0.5 {
             return None;
@@ -235,13 +387,13 @@ fn approach(v: Vec3, target: Vec3, max_delta: f32) -> Vec3 {
     }
 }
 
-fn centres(p: Vec3) -> impl Iterator<Item = Vec3> {
-    (0..SPHERES).map(move |k| p + Vec3::Y * (RADIUS + k as f32 * RADIUS))
+fn centres(p: Vec3, n: usize) -> impl Iterator<Item = Vec3> {
+    (0..n).map(move |k| p + Vec3::Y * (RADIUS + k as f32 * RADIUS))
 }
 
 /// Deepest overlap of any capsule sphere with a solid, in metres (0 when clear).
-fn penetration(solids: &[Solid], p: Vec3) -> f32 {
-    centres(p)
+fn penetration(solids: &[Solid], p: Vec3, n: usize) -> f32 {
+    centres(p, n)
         .map(|c| RADIUS - sdf(solids, c))
         .fold(0.0, f32::max)
 }
@@ -265,10 +417,10 @@ impl Contacts {
     }
 }
 
-fn depenetrate(solids: &[Solid], p: &mut Vec3, contacts: &mut Contacts) {
+fn depenetrate(solids: &[Solid], p: &mut Vec3, contacts: &mut Contacts, spheres: usize) {
     for _ in 0..6 {
         let mut moved = false;
-        for c in centres(*p) {
+        for c in centres(*p, spheres) {
             let d = sdf(solids, c);
             if d < RADIUS - SKIN {
                 let n = gradient(solids, c);
@@ -440,7 +592,15 @@ pub(crate) mod tests {
     fn run(c: &mut Controller, w: &Flat, secs: f32, wish: Vec3, run: bool) {
         let dt = 1.0 / 120.0;
         for _ in 0..(secs / dt) as u32 {
-            c.step(dt, MoveInput { wish, run }, w);
+            c.step(
+                dt,
+                MoveInput {
+                    wish,
+                    run,
+                    ..Default::default()
+                },
+                w,
+            );
         }
     }
 
@@ -516,6 +676,7 @@ pub(crate) mod tests {
                 MoveInput {
                     wish: Vec3::NEG_X,
                     run: false,
+                    ..Default::default()
                 },
                 &w,
             );
@@ -764,6 +925,7 @@ pub(crate) mod tests {
                     MoveInput {
                         wish: Vec3::X,
                         run: false,
+                        ..Default::default()
                     },
                     &world,
                 );
@@ -799,6 +961,7 @@ pub(crate) mod tests {
                     MoveInput {
                         wish: Vec3::X,
                         run: false,
+                        ..Default::default()
                     },
                     &world,
                 );
@@ -866,6 +1029,7 @@ pub(crate) mod tests {
                 MoveInput {
                     wish: Vec3::X,
                     run: false,
+                    ..Default::default()
                 },
             );
         }
@@ -884,6 +1048,7 @@ pub(crate) mod tests {
         let wish = MoveInput {
             wish: Vec3::X,
             run: false,
+            ..Default::default()
         };
         let mut left_at = None;
         for _ in 0..(3.0 / DT) as u32 {
@@ -911,5 +1076,183 @@ pub(crate) mod tests {
         }
         let rel = local(&c) - w.shift();
         assert!((rel.x - 100.0).abs() < 0.05, "{rel:?}");
+    }
+
+    /// A ladder in sector-0 coordinates over a floor and a roof, for the climbing tests.
+    struct LadderWorld {
+        solids: Vec<Primitive>,
+        ladder: LadderVol,
+    }
+
+    impl SolidSource for LadderWorld {
+        fn gather(&self, centre: &WorldPos, _half: f32, out: &mut Vec<Solid>) {
+            let offset = -centre.local();
+            out.extend(self.solids.iter().map(|p| Solid {
+                shape: p.shape,
+                offset,
+                platform: None,
+            }));
+        }
+
+        fn ready(&self, _pos: &WorldPos) -> bool {
+            true
+        }
+
+        fn ladders(&self, centre: &WorldPos, _half: f32, out: &mut Vec<LadderVol>) {
+            out.push(LadderVol {
+                centre: self.ladder.centre - centre.local(),
+                ..self.ladder
+            });
+        }
+    }
+
+    /// A 10 m wall at x 12..13 with a ladder on its -x face, a floor below and a roof on top.
+    fn ladder_world() -> LadderWorld {
+        LadderWorld {
+            solids: vec![
+                floor_box([0, 0, 0], [16 * 24, 16, 16 * 24]),
+                floor_box([16 * 12, 0, 16 * 8], [16 * 13, 16 * 10, 16 * 16]),
+                floor_box([16 * 12, 16 * 10 - 16, 16 * 8], [16 * 20, 16 * 10, 16 * 16]),
+            ],
+            // Corridor 0.9 wide, 0.9 deep, y 1 to 10 m, in front of the wall (rungs at +x).
+            ladder: LadderVol {
+                centre: Vec3::new(11.55, 5.5, 12.0),
+                axes: [Vec3::X, Vec3::Y, Vec3::Z],
+                half: Vec3::new(0.45, 4.5, 0.45),
+                toward: Vec3::X,
+            },
+        }
+    }
+
+    fn at_sector0(x: f32, y: f32, z: f32) -> WorldPos {
+        WorldPos::new(glam::I64Vec3::ZERO, Vec3::new(x, y, z)).unwrap()
+    }
+
+    /// CLB-01 to CLB-05: walking into the rungs grabs the ladder, forward climbs at 0.8 m/s, you
+    /// cannot step off in the middle, and the top puts you on the roof.
+    #[test]
+    fn a_ladder_is_grabbed_climbed_and_left_at_the_top() {
+        let world = ladder_world();
+        let mut c = Controller::new(at_sector0(10.0, 1.0, 12.0));
+        // Walk to the ladder.
+        for _ in 0..300 {
+            c.step(
+                1.0 / 60.0,
+                MoveInput {
+                    wish: Vec3::X,
+                    ..Default::default()
+                },
+                &world,
+            );
+            if c.on_ladder() {
+                break;
+            }
+        }
+        assert!(c.on_ladder(), "not grabbed at {:?}", c.pos.local());
+        let y0 = c.pos.local().y;
+        for _ in 0..60 {
+            c.step(
+                1.0 / 60.0,
+                MoveInput {
+                    climb: 1.0,
+                    wish: Vec3::NEG_X,
+                    ..Default::default()
+                },
+                &world,
+            );
+        }
+        let rise = c.pos.local().y - y0;
+        assert!(
+            (rise - LADDER_SPEED).abs() < 0.05,
+            "rose {rise} m in a second"
+        );
+        assert!(c.on_ladder(), "stepping back must not let go");
+        assert!(
+            c.pos.local().x > 11.0,
+            "held against the rungs: {:?}",
+            c.pos.local()
+        );
+        for _ in 0..60 * 15 {
+            c.step(
+                1.0 / 60.0,
+                MoveInput {
+                    climb: 1.0,
+                    ..Default::default()
+                },
+                &world,
+            );
+            if !c.on_ladder() {
+                break;
+            }
+        }
+        assert!(!c.on_ladder());
+        let p = c.pos.local();
+        assert!(p.x > 12.0 && (p.y - 10.0).abs() < 0.2, "on the roof: {p:?}");
+    }
+
+    /// Down the ladder and off at the bottom.
+    #[test]
+    fn climbing_down_ends_on_the_floor() {
+        let world = ladder_world();
+        let mut c = Controller::new(at_sector0(11.4, 6.0, 12.0));
+        c.climb = Some(Climb {
+            centre: at_sector0(11.55, 5.5, 12.0),
+            half_y: 4.5,
+            half_toward: 0.45,
+            toward: Vec3::X,
+        });
+        for _ in 0..60 * 12 {
+            c.step(
+                1.0 / 60.0,
+                MoveInput {
+                    climb: -1.0,
+                    ..Default::default()
+                },
+                &world,
+            );
+            if !c.on_ladder() {
+                break;
+            }
+        }
+        assert!(!c.on_ladder());
+        assert!(c.pos.local().y < 1.6, "{:?}", c.pos.local());
+    }
+
+    /// CLB-07: a duct with a 1.4 m ceiling is entered crouched and left standing.
+    #[test]
+    fn a_low_duct_makes_you_crouch_and_standing_resumes_after() {
+        let world = Flat(vec![
+            floor_box([0, 0, 0], [16 * 30, 16, 16 * 10]),
+            // The duct: ceiling at 1.4 m from x 8 to 14.
+            floor_box([16 * 8, 38, 0], [16 * 14, 16 * 4, 16 * 10]),
+        ]);
+        let mut c = Controller::new(at_sector0(4.0, 1.0, 5.0));
+        let (mut saw_crouch, mut inside) = (false, false);
+        for _ in 0..60 * 14 {
+            c.step(
+                1.0 / 60.0,
+                MoveInput {
+                    wish: Vec3::X,
+                    ..Default::default()
+                },
+                &world,
+            );
+            let x = c.pos.local().x;
+            if (9.0..13.0).contains(&x) {
+                saw_crouch |= c.crouched;
+                inside = true;
+                assert!(c.eye_height() < 1.2);
+            }
+            if x > 18.0 {
+                break;
+            }
+        }
+        assert!(
+            inside && saw_crouch,
+            "inside {inside} crouch {saw_crouch} at {:?}",
+            c.pos.local()
+        );
+        assert!(c.pos.local().x > 14.5, "went through: {:?}", c.pos.local());
+        assert!(!c.crouched, "standing again in the open");
     }
 }

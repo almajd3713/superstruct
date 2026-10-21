@@ -204,6 +204,7 @@ impl App {
     }
 
     /// Moves the player by one fixed step: noclip fly, or the walking controller.
+    #[allow(clippy::too_many_lines)] // fly, photo, tram auto-walk and the walker
     fn move_player(&mut self, dt: f32) {
         // Without the cursor grabbed there is no input, but gravity still applies when walking.
         let grabbed = self.cursor_grabbed;
@@ -279,6 +280,17 @@ impl App {
                     Vec3::ZERO
                 },
                 run: steer && grabbed && self.input.held(Action::Sprint),
+                // On a ladder forward moves where you look: up unless you look down.
+                climb: if steer {
+                    axis(Action::MoveForward, Action::MoveBack)
+                        * if self.camera.forward().y < -0.15 {
+                            -1.0
+                        } else {
+                            1.0
+                        }
+                } else {
+                    0.0
+                },
             };
             self.step_lifts(dt);
             let aboard = self.trams.aboard();

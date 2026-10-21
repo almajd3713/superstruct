@@ -351,7 +351,12 @@ fn bx_prim(b: [Q; 6], material: MaterialId, kind: FeatureKind) -> Primitive {
         },
         material,
         kind,
-        flags: PrimFlags::NONE,
+        // Ladder rails and rungs, and the corridor a climber stands in, are not solid.
+        flags: if kind == FeatureKind::MISC || kind == FeatureKind::LADDER {
+            PrimFlags::NO_COLLIDE
+        } else {
+            PrimFlags::NONE
+        },
     }
 }
 

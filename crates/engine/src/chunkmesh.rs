@@ -263,6 +263,10 @@ pub fn mesh_primitives(prims: &[Primitive]) -> (Mesh, ChunkMeshStats) {
         } else {
             0
         };
+        // A ladder's climbing corridor is not drawn.
+        if p.kind == worldgen::prim::FeatureKind::LADDER {
+            continue;
+        }
         if p.kind == worldgen::prim::FeatureKind::RAILING {
             primmesh::add_primitive(&mut mesh, p);
             continue;

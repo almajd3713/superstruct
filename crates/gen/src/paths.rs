@@ -31,6 +31,8 @@ const PATH_STREET: usize = 2;
 const PATH_STAIR_FAMILY: usize = 3;
 /// Index of the LIFTSLOPE family (PV-11..19).
 const PATH_LIFTSLOPE: usize = 4;
+/// The ladder families (PW.5.3, `paths_v::ladders`).
+const PATH_LADDER: usize = 5;
 
 /// The ids of this module, PH-01..PH-20.
 pub const IDS: [u8; 20] = [
@@ -1344,6 +1346,9 @@ fn vertical_legal(t: &Tissue, cs: &[[i64; 3]], kind: Kind, height: f64) -> Vec<u
     if helix {
         v.push(25);
     }
+    if kind == Kind::Open {
+        v.extend(paths_v::LADDER_IDS);
+    }
     v
 }
 
@@ -1366,12 +1371,16 @@ fn place_rise(
     let ws: Vec<u32> = cands
         .iter()
         .map(|&id| {
-            let fam = if id >= 31 {
+            let fam = if id >= 41 {
+                PATH_LADDER
+            } else if id >= 31 {
                 PATH_LIFTSLOPE
             } else {
                 PATH_STAIR_FAMILY
             };
-            u32::from(weights[fam]).max(u32::from(id == 21))
+            // Thirteen ladder families against the stairs: each ladder id counts a quarter.
+            let w = u32::from(weights[fam]).max(u32::from(id == 21));
+            if fam == PATH_LADDER { w } else { 4 * w }
         })
         .collect();
     let mut id = Rng::new(words[0])

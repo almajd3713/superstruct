@@ -960,8 +960,15 @@ mod tests {
                 }
             }
             self.world.set_dynamic(self.sys.solids().to_vec());
-            self.ctl
-                .step(DT, MoveInput { wish, run: false }, &self.world);
+            self.ctl.step(
+                DT,
+                MoveInput {
+                    wish,
+                    run: false,
+                    ..Default::default()
+                },
+                &self.world,
+            );
         }
 
         fn walk(&mut self, secs: f32, wish: Vec3) {
