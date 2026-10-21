@@ -29,6 +29,8 @@ pub struct OverlayInfo<'a> {
     pub timer: &'a GpuTimer,
     /// Band radii in force.
     pub bands: StreamConfig,
+    /// The walker's tool lines: pinned marks, the atlas, a heard direction.
+    pub tool_lines: &'a [String],
 }
 
 pub struct Overlay {
@@ -39,6 +41,7 @@ pub struct Overlay {
     /// The quiet altimeter and coordinates readout, independent of the debug overlay.
     pub readout: bool,
     readout_id: egui::Id,
+    tools_id: egui::Id,
     frame_ms: VecDeque<f32>,
     prepared: Option<Prepared>,
     teleport_text: String,
@@ -77,6 +80,7 @@ impl Overlay {
             visible: false,
             readout: false,
             readout_id: egui::Id::unique("readout"),
+            tools_id: egui::Id::unique("tools"),
             frame_ms: VecDeque::with_capacity(HISTORY),
             prepared: None,
             teleport_text: String::new(),
@@ -110,14 +114,18 @@ impl Overlay {
         info: &OverlayInfo<'_>,
     ) {
         self.prepared = None;
-        if !self.visible && !self.readout {
+        if !self.visible && !self.readout && info.tool_lines.is_empty() {
             return;
         }
         let input = self.state.take_egui_input(window);
         let frame_ms = &self.frame_ms;
         let (text, requests, status) = (&mut self.teleport_text, &mut self.requests, &self.status);
         let bands = (&mut self.band_request, &mut self.band_commit);
-        let shown = (self.visible, self.readout.then_some(self.readout_id));
+        let shown = (
+            self.visible,
+            self.readout.then_some(self.readout_id),
+            self.tools_id,
+        );
         let mut output = self.ctx.run_ui(input, |ui| {
             draw(
                 ui,
@@ -220,12 +228,26 @@ fn group(v: i64) -> String {
 
 fn draw(
     ui: &mut egui::Ui,
-    (visible, readout): (bool, Option<egui::Id>),
+    (visible, readout, tools_id): (bool, Option<egui::Id>, egui::Id),
     frame_ms: &VecDeque<f32>,
     info: &OverlayInfo<'_>,
     (text, requests, status): (&mut String, &mut Vec<Command>, &str),
     bands: (&mut Option<StreamConfig>, &mut bool),
 ) {
+    if !info.tool_lines.is_empty() {
+        egui::Area::new(tools_id)
+            .anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -16.0])
+            .interactable(false)
+            .show(ui.ctx(), |ui| {
+                for line in info.tool_lines {
+                    ui.label(
+                        egui::RichText::new(line)
+                            .monospace()
+                            .color(egui::Color32::from_white_alpha(170)),
+                    );
+                }
+            });
+    }
     if let Some(id) = readout {
         egui::Area::new(id)
             .anchor(egui::Align2::LEFT_BOTTOM, [16.0, -16.0])

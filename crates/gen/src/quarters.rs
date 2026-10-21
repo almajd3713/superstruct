@@ -62,6 +62,14 @@ pub fn quarter_of(seed: WorldSeed, l1: I64Vec3, chr: &Character) -> u8 {
     dominant[rng.below(dominant.len() as u64) as usize]
 }
 
+/// The quarter name index at the middle of L1 cell `l1`, or `None` in a Between.
+pub fn quarter_at_l1(seed: WorldSeed, l1: I64Vec3) -> Option<u8> {
+    let l0 = l1.div_euclid(I64Vec3::splat(8));
+    let local = (l1 - l0 * 8) * 4096 + I64Vec3::splat(2048);
+    let chr = crate::character::character_at(seed, l0, local)?;
+    Some(quarter_of(seed, l1, &chr))
+}
+
 /// One recipe of the quarter `q` on `f` (a face of the part from `lo` to `hi`, in metres).
 fn recipe(m: &mut M<'_>, q: usize, rng: &mut Rng, f: &Face, lo: [f64; 3], hi: [f64; 3]) {
     let (t0, t1) = f.t;

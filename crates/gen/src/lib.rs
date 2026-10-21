@@ -54,6 +54,7 @@ pub mod l3_solver;
 pub mod l3_tiles;
 pub mod l3_web;
 pub mod l4;
+pub mod landmarks;
 pub mod locals;
 pub mod modifiers;
 pub mod movers;

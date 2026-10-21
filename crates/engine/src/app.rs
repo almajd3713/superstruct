@@ -30,6 +30,7 @@ use crate::input::{Action, Bindings, InputState};
 use crate::liftdraw::LiftDraw;
 use crate::liftplan::plan_cell;
 use crate::liftsys::{LiftInput, LiftSystem, PlanResult, PlayerView};
+use crate::marks::{MarkDraw, Shape};
 use crate::meshpool::MeshPool;
 use crate::moversys::{MoverSystem, WithMovers};
 use crate::overlay::{Overlay, OverlayInfo};
@@ -41,6 +42,7 @@ use crate::settings::{Settings, VsyncMode};
 use crate::shaders::{ShaderSources, ShaderWatcher};
 use crate::shot::{AutoShot, Bands, Readings, Shot};
 use crate::streamer::{RendererSink, Streamer, StreamerConfig};
+use crate::tools::{self, Tools};
 use crate::tramauto::TramAuto;
 use crate::tramdraw::TramDraw;
 use crate::tramsys::{Riding, TramSystem};
@@ -94,6 +96,14 @@ struct App {
     save: Save,
     beacons: Vec<WorldPos>,
     beacon_draw: BeaconDraw,
+    /// Held zoom, gaze-marks, atlas, trail and chalk (`tools.rs`).
+    tools: Tools,
+    tools_t: Instant,
+    tool_zoom: f32,
+    trail: Vec<WorldPos>,
+    chalk: Vec<WorldPos>,
+    trail_draw: MarkDraw,
+    chalk_draw: MarkDraw,
     trams: TramSystem,
     tram_draw: TramDraw,
     /// World-clock movers near the player (`moversys.rs`).
@@ -544,6 +554,58 @@ impl App {
         false
     }
 
+    /// The walker's tools for this frame: zoom, marks, atlas, trail and chalk.
+    fn run_tools(&mut self) {
+        let now = Instant::now();
+        let dt = now.duration_since(self.tools_t).as_secs_f32().min(0.25);
+        self.tools_t = now;
+        let moving = [
+            Action::MoveForward,
+            Action::MoveBack,
+            Action::MoveLeft,
+            Action::MoveRight,
+            Action::MoveUp,
+            Action::MoveDown,
+        ]
+        .iter()
+        .any(|a| self.input.held(*a));
+        let forward = self.camera.forward();
+        let hit_m = self
+            .input
+            .pressed(Action::Chalk)
+            .then(|| {
+                self.streamer
+                    .collision()
+                    .pick(&self.camera.pos, forward, 300.0)
+            })
+            .flatten()
+            .map(|h| h.distance);
+        let frame = tools::Frame {
+            eye: self.camera.pos,
+            forward,
+            dt,
+            zoom: self.input.held(Action::Zoom),
+            mark: self.input.pressed(Action::GazeMark),
+            chalk: self.input.pressed(Action::Chalk),
+            moving,
+            hit_m,
+        };
+        let out = self
+            .tools
+            .update(&frame, &mut self.save, self.input.pressed(Action::Atlas));
+        self.tool_zoom = out.zoom;
+        if out.dirty {
+            self.trail = self.save.trail.iter().filter_map(BeaconPos::pos).collect();
+            self.chalk = self.save.chalk.iter().filter_map(BeaconPos::pos).collect();
+        }
+        if out.dirty
+            && (self.save.trail.len().is_multiple_of(8) || frame.mark || frame.chalk)
+            && let Err(err) = self.save.save(&save_path())
+        {
+            tracing::warn!(%err, "could not write the save file");
+        }
+    }
+
     fn handle_actions(&mut self) {
         if self.input.pressed(Action::ReleaseCursor) && self.cursor_grabbed {
             self.set_cursor_grab(false);
@@ -563,6 +625,7 @@ impl App {
         if self.photo_actions() {
             return;
         }
+        self.run_tools();
         let Some(running) = &mut self.running else {
             return;
         };
@@ -726,6 +789,7 @@ impl App {
                 .reload_shaders(&running.gpu.device, &ShaderSources::load());
         }
         let mut render_camera = self.camera;
+        render_camera.fov_y = tools::zoomed_fov(render_camera.fov_y, self.tool_zoom);
         let step = self.camera.pos.delta(&self.prev_cam_pos).as_vec3();
         if let Ok(p) = self.prev_cam_pos.offset(step * alpha) {
             render_camera.pos = p;
@@ -770,6 +834,18 @@ impl App {
             &running.gpu.device,
             &running.gpu.queue,
             &self.beacons,
+        );
+        self.trail_draw.update(
+            &mut running.renderer,
+            &running.gpu.device,
+            &running.gpu.queue,
+            &self.trail,
+        );
+        self.chalk_draw.update(
+            &mut running.renderer,
+            &running.gpu.device,
+            &running.gpu.queue,
+            &self.chalk,
         );
         self.tram_draw.update(
             &mut running.renderer,
@@ -867,6 +943,7 @@ impl App {
                 shader_error: running.renderer.shader_error(),
                 timer: &running.timer,
                 bands: self.streamer.config().stream,
+                tool_lines: &self.tools.lines,
             };
             crate::zone!("overlay prepare");
             running.overlay.prepare(
@@ -1126,8 +1203,15 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         lift_draw: LiftDraw::default(),
         photo: None,
         beacons: save.beacons.iter().filter_map(BeaconPos::pos).collect(),
+        trail: save.trail.iter().filter_map(BeaconPos::pos).collect(),
+        chalk: save.chalk.iter().filter_map(BeaconPos::pos).collect(),
         save,
         beacon_draw: BeaconDraw::default(),
+        tools: Tools::new(WorldSeed(settings_seed)),
+        tools_t: now,
+        tool_zoom: 1.0,
+        trail_draw: MarkDraw::new(Shape::Lamp),
+        chalk_draw: MarkDraw::new(Shape::Chalk),
         trams: TramSystem::new(WorldSeed(settings_seed)),
         tram_draw: TramDraw::default(),
         movers: MoverSystem::default(),

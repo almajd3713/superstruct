@@ -1355,6 +1355,29 @@ At a dead end the payoff pass (`payoffs.rs`) now tries, after a set piece and be
 
 SAN-01..13 are set pieces: `sets.rs` appends them to `SETS` as indices 16 to 28 (tags `SAN-nn`), they are placed like SET-01..16 (against a dead end by the payoff pass and early in step 3 by context, in the free slots), and each is lit. Weights: SAN-03, 04, 05, 09, 10 and 13 anywhere (1); SAN-02 and 11 where the fill is at least 128 (1); SAN-01 (2), 06, 07, 08 and 12 beside a void (1). **SAN-01 tea room over a Between:** a slab with a room set back on it and a terrace. **SAN-02 greenhouse under a small lamp sun:** a low hall with a dome. **SAN-03 library nook:** a small room with shelving walls. **SAN-04 lamp chapel:** a nave with a lit spire. **SAN-05 bunk room:** a low room with three tiers of bunks (the murmuring radio is PW.11). **SAN-06 observatory:** a room with a dome (the telescope is PW.10.17). **SAN-07 needle top:** a thin shaft with a room at its top. **SAN-08 gondola cabin parked at a tower:** a tower with a small cabin hung beside it (the gondola itself is a mover, not built). **SAN-09 pool room:** a hall round a sunk pool (the water is not drawn). **SAN-10 bell room:** a room with the bell's drum. **SAN-11 garden in a light well:** a ring wall with vines. **SAN-12 hanging pod:** a capsule under a slab. **SAN-13 reached only by a long ladder or a featherfall:** a room on a pillar of 6 to 10 slots with a cage up its side for the ladder; a shaft of the featherfall kind in the same column is the other way. **Earned sanctuaries:** not built as a rule. A sanctuary at a dead end is a payoff of that route, but its chance does not grow with the length of the route to it; the weights above are all there is. This is recorded in PW.10.36.
 
+### 5W.44 The walker's tools (PW.10.16–PW.10.18, `engine::tools`, `worldgen::landmarks`; no `GEN_VERSION` change)
+
+Engine-side, saved in `save.toml` (`marks`, `places`, `trail`, `chalk`). `landmarks::near` lists the
+wonder, rare, mover and spine sites of the L0 cells around a position, a function of the seed.
+
+- **TOOL-01 zoom.** Hold Z: the view narrows 4× (`tan(fov/2)/4`). **TOOL-03:** in the Observatory
+  quarter (index 11, `quarters::quarter_at_l1`) the same key gives 16×. *Deviation:* the
+  Observatory quarter as a whole is the telescope room; no separate eyepiece fixture.
+- **TOOL-02 gaze-mark.** M pins the landmark best aligned with the view (cos ≥ 0.995, within 400 L1
+  cells), or releases it if it is already pinned. At most 8; the oldest is dropped. Each pin is a
+  line at the lower right: its name, its distance and its bearing (ahead, left 40°, behind).
+- **TOOL-04, TOOL-06 atlas.** Staying 4 s in an L1 cell records it as a place (up to 4096). N opens
+  the atlas: the 12 latest places as their transliterated names (`glyphs::transliterate`, 32
+  syllables), their quarter and their cell.
+- **TOOL-07 listening.** Standing still 2.5 s, outside a Silent region, gives the direction of
+  the nearest landmark within its hearing (spine 16 cells, wonder 12, machine 10, oddity 8):
+  "you hear a slow grinding, right 128°".
+- **WAKE-01..02 trail.** A lamp (a slim warm post 6 m tall with a signal lamp on top) wakes every
+  25 m of the walker's path and stays, up to 6000; drawn in chunks of 16 anchored at their first
+  lamp. *Deviation:* WAKE-01 is realised as the lamps along your own way, not as the world's
+  dead lamps lighting.
+- **TOOL-08 chalk.** C draws a bright mark on the surface in view within 6 m.
+
 ## 6. L3: Blocks (64 m)
 
 > **Web redesign.** From version 7 the plan, entrances and skeleton are those of §6W. The rest of this section (tiles, solver, sockets, fallback, validator) is reused.

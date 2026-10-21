@@ -35,6 +35,14 @@ impl BeaconPos {
 #[serde(default)]
 pub struct Save {
     pub beacons: Vec<BeaconPos>,
+    /// Pinned far landmarks (TOOL-02): the L1 cell of each.
+    pub marks: Vec<[i64; 3]>,
+    /// L1 cells arrived in, in order (TOOL-04).
+    pub places: Vec<[i64; 3]>,
+    /// The walked trail (WAKE-02), a point every 25 m.
+    pub trail: Vec<BeaconPos>,
+    /// Marks drawn on walls (TOOL-08).
+    pub chalk: Vec<BeaconPos>,
 }
 
 impl Save {
@@ -75,6 +83,9 @@ mod tests {
         .unwrap();
         let save = Save {
             beacons: vec![BeaconPos::of(&at)],
+            trail: vec![BeaconPos::of(&at)],
+            places: vec![[1, 2, 3]],
+            ..Save::default()
         };
         save.save(&path).unwrap();
         let back = Save::load(&path).unwrap();

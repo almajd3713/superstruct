@@ -46,6 +46,11 @@ pub enum Action {
     /// Debug colour modes and the primitive pick (PW.4.7).
     CycleDebugView,
     PickPrimitive,
+    /// Held zoom, gaze-mark, chalk and the atlas (PW.10.16..18).
+    Zoom,
+    GazeMark,
+    Chalk,
+    Atlas,
 }
 
 /// A physical key or mouse button.
@@ -98,6 +103,10 @@ impl Default for Bindings {
             (K::Comma, A::ExposureDown),
             (K::KeyV, A::CycleDebugView),
             (K::KeyX, A::PickPrimitive),
+            (K::KeyZ, A::Zoom),
+            (K::KeyM, A::GazeMark),
+            (K::KeyC, A::Chalk),
+            (K::KeyN, A::Atlas),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),

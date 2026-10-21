@@ -100,6 +100,17 @@ pub fn name_of(seed: WorldSeed, l1: I64Vec3) -> [u8; 3] {
     [(n >> 10) as u8 & 31, (n >> 5) as u8 & 31, n as u8 & 31]
 }
 
+/// The syllables a glyph is read as (TOOL-05): the transliteration of a name.
+const SYLLABLES: [&str; ALPHABET] = [
+    "ka", "ro", "ne", "ti", "su", "vo", "mi", "da", "le", "pa", "zu", "ha", "ni", "ko", "ra", "se",
+    "to", "bi", "ga", "lu", "me", "fo", "ya", "ze", "wi", "do", "an", "or", "el", "ix", "um", "ys",
+];
+
+/// A name read aloud: `ka-ro-ne`.
+pub fn transliterate(name: [u8; 3]) -> String {
+    name.map(|g| SYLLABLES[usize::from(g) & 31]).join("-")
+}
+
 /// A name as one number, for comparing.
 pub fn name_index(name: [u8; 3]) -> u32 {
     (u32::from(name[0]) << 10) | (u32::from(name[1]) << 5) | u32::from(name[2])
@@ -110,6 +121,14 @@ mod tests {
     use super::*;
 
     const SEED: WorldSeed = WorldSeed(11);
+
+    #[test]
+    fn transliterations_are_distinct_per_name() {
+        let a = transliterate(name_of(SEED, I64Vec3::new(0, 1, 0)));
+        let b = transliterate(name_of(SEED, I64Vec3::new(1, 1, 0)));
+        assert_ne!(a, b);
+        assert_eq!(a.matches('-').count(), 2);
+    }
 
     #[test]
     fn the_alphabet_is_thirty_two_distinct_glyphs_that_depend_on_the_seed() {
