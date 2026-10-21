@@ -1,6 +1,6 @@
 # Spec: gravity wells, the field `g(p)`, gates, lulls and drift
 
-**Status: PW.0.6, 2026-10-18.** Numbers marked *(provisional)* are player-feel numbers for the user's playtest (CLAUDE.md §8). Approved by the user on 2026-10-18: wells about every 50 km, a smooth camera roll at gates, lulls with both handrail tubes and free drift. Architecture: `docs/proposals/the-web.md` §8; low gravity: `the-web-ideas.md` §8. Implementation: `worldgen::gravity` (PW.6.1); the controller and engine parts are PW.6.2 and later.
+**Status: PW.0.6, 2026-10-18.** Numbers marked *(provisional)* are player-feel numbers for the user's playtest (CLAUDE.md §8). Approved by the user on 2026-10-18: wells about every 50 km, a smooth camera roll at gates, lulls with both handrail tubes and free drift. Architecture: `docs/proposals/the-web.md` §8; low gravity: `the-web-ideas.md` §8. Implementation: `worldgen::gravity` (PW.6.1, built 2026-10-21); the controller and engine parts are PW.6.2 and later.
 
 **Owners:** WELL-01..10 (PW.6.5–PW.6.10), GRV-01..03, GRV-09 (PW.6.4), GRV-04..08 (PW.6.3), GRV-10, GRV-14 (PW.6.8), GRV-11, GRV-13 (PW.6.2), GRV-12 (PW.6.1), WGT-01..09 (their items in PW.6.x and PW.11).
 
@@ -211,4 +211,4 @@ Only `gravity_at(p)` is a function of position alone. `Tumbler`, `Orbiters` and 
 |---|---|---|---|
 | `WELL` | `0x0122` | cell (L0) | well presence and draws (§3.1) |
 | `WELL_PATCH` | `0x0123` | patch cell (L0, 256 m patches via absorb) | Damaged well patches |
-| `GATE` | `0x0314` | cell (L2) | gate placement and kind |
+| `GATE` | `0x0317` | cell (L2) | gate placement and kind |

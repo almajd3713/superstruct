@@ -23,6 +23,10 @@ salts! {
     /// Per L1 cell, used by the L0 cavity voxelization.
     CAVITY_NOISE = 0x0105;
     /// Keyed by the L0 cell: the Web fields (`regimes.md` §7.5).
+    /// Keyed by the L0 cell: well presence and draws (`gravity.md` §3.1).
+    WELL = 0x0122;
+    /// Keyed by a 256 m patch cell: Damaged well patches.
+    WELL_PATCH = 0x0123;
     REGIME_WEB = 0x0110;
     /// Keyed by the L0 cell: the interior stack sequence (`regimes.md` §8.2).
     STACK = 0x0111;
@@ -118,6 +122,8 @@ salts! {
     /// Keyed by `ColumnSpanKey(L2)`.
     LIFT_SHAFT = 0x0303;
     WALKWAY = 0x0304;
+    /// Keyed by the L2 cell: gate placement and kind (`gravity.md` §4).
+    GATE = 0x0317;
     RAMP = 0x0305;
     EDGE_GUARD = 0x0306;
     VISTA = 0x0307;

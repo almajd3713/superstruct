@@ -11,6 +11,7 @@ pub mod coord;
 pub mod defects;
 pub mod edges;
 pub mod forms;
+pub mod gravity;
 pub mod hash;
 pub mod hubs;
 pub mod key;
