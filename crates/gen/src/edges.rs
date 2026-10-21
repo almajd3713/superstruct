@@ -733,6 +733,57 @@ pub fn decor_mask(
         .collect()
 }
 
+/// Which of `prims` to keep (PW.4.26 a): a rail that has nothing to stand on is dropped. The edge
+/// pass puts rails on the open edges of decks, but later passes cut, move and remove pieces, so a
+/// rail can be left in the air. Judged on the final geometry: a rail keeps its place when solid
+/// stands under its foot (within 0.5 m, to allow a stair's rise along a run) at two of three
+/// places along it, centred or 0.6 m to either side. A rail within a metre of the cell's side is kept:
+/// what it stands on is the neighbour's.
+pub fn rail_mask(prims: &[Primitive], world: &World<'_>) -> Vec<bool> {
+    let q = |v: Q| v as f32 / M as f32;
+    prims
+        .iter()
+        .map(|p| {
+            if p.kind != FeatureKind::RAILING || p.flags.contains(PrimFlags::NO_COLLIDE) {
+                return true;
+            }
+            let b = p.aabb();
+            let (lo, hi) = (
+                Vec3::new(q(b.min.x), q(b.min.y), q(b.min.z)),
+                Vec3::new(q(b.max.x), q(b.max.y), q(b.max.z)),
+            );
+            if lo.x < 1.0
+                || lo.z < 1.0
+                || hi.x > 511.0
+                || hi.z > 511.0
+                || lo.y < 1.0
+                || hi.y > 511.0
+            {
+                return true;
+            }
+            let size = hi - lo;
+            let long = if size.x >= size.z { 0 } else { 2 };
+            let side = if long == 0 { Vec3::Z } else { Vec3::X };
+            let centre = (lo + hi) * 0.5;
+            let mut along = Vec3::ZERO;
+            along[long] = size[long] * 0.5;
+            // Two of the three places along it must have solid under them, as the census asks.
+            let stands = [Vec3::ZERO, along * 0.75, -along * 0.75]
+                .iter()
+                .filter(|&&a| {
+                    [0.0f32, 0.6, -0.6].iter().any(|&l| {
+                        [0.15f32, 0.5].iter().any(|&d| {
+                            let at = Vec3::new(centre.x, lo.y - d, centre.z) + a + side * l;
+                            world.contains(at)
+                        })
+                    })
+                })
+                .count();
+            stands >= 2
+        })
+        .collect()
+}
+
 /// Which of `prims` to keep: false for the dressing that has no host (PW.4.14): a `NO_COLLIDE` window, lamp or glyph
 /// needs solid (a collidable piece of the cell or the parent's solid that no bore cuts) within
 /// 10 cm of its bounds, and a cable needs it at both ends unless the end is on the cell's side

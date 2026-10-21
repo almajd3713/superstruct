@@ -48,6 +48,11 @@ pub fn add_primitive(mesh: &mut Mesh, prim: &Primitive) {
     if prim.kind == FeatureKind::RAILING && add_rail(mesh, prim) {
     } else if let Shape::Oriented(o) = prim.shape {
         add_oriented(mesh, &o, prim.material.0, nudge(&o, prim.kind));
+    } else if let Shape::Box { aabb } = prim.shape {
+        // Axis-aligned boxes of one level that share a plane (the walls of two blocks, a deck
+        // and its footing) are nudged apart like the turned ones (PW.4.26 b).
+        let g = Vec3::splat(box_nudge(&aabb));
+        mesh.add_box(v3(aabb.min) - g, v3(aabb.max) + g, prim.material.0);
     } else {
         add_shape(mesh, prim.shape, prim.material.0);
     }
@@ -104,6 +109,19 @@ fn nudge(o: &Oriented, kind: FeatureKind) -> f32 {
         0.0
     };
     base + level as f32 * 0.000_15
+}
+
+/// How far an axis-aligned box grows on every side, 0.25 to 4 mm from a hash of its own bounds,
+/// which settles who is in front of whom when two of them share a plane, the same way every time
+/// and in every chunk.
+fn box_nudge(aabb: &QAabb) -> f32 {
+    let mut h = 0xcbf2_9ce4_8422_2325_u64;
+    for v in [
+        aabb.min.x, aabb.min.y, aabb.min.z, aabb.max.x, aabb.max.y, aabb.max.z,
+    ] {
+        h = (h ^ u64::from(v.cast_unsigned())).wrapping_mul(0x0100_0000_01b3);
+    }
+    ((h >> 32) % 16 + 1) as f32 * 0.000_25
 }
 
 fn add_shape(mesh: &mut Mesh, shape: Shape, material: u16) {

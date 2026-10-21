@@ -121,6 +121,20 @@ pub fn l2_cell_web_edges(
     let mut seen = std::collections::HashSet::new();
     primitives.retain(|p| seen.insert((p.shape, p.material, p.kind, p.flags)));
     add_extras(seed, cell, &t, &mut primitives);
+    // A rail with nothing under it goes (PW.4.26 a), judged on what is left.
+    {
+        let hosts: Vec<Primitive> = primitives
+            .iter()
+            .filter(|p| {
+                p.kind != crate::prim::FeatureKind::RAILING
+                    && !p.flags.contains(crate::prim::PrimFlags::NO_COLLIDE)
+            })
+            .copied()
+            .collect();
+        let world = crate::edges::World::new(&hosts, &parent, &clear);
+        let mut keep = crate::edges::rail_mask(&primitives, &world).into_iter();
+        primitives.retain(|_| keep.next().unwrap_or(true));
+    }
     let child_constraints = t
         .paths
         .bores

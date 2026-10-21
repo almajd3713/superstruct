@@ -430,12 +430,16 @@ fn scan_cell(
                     let mut blind = 0;
                     for f in [-0.75f32, 0.0, 0.75] {
                         let at = Vec3::new(c0.x, y, c0.z) + along * half[long] * f;
+                        // A stair's rise along a run puts the floor up to 0.4 m under the foot.
                         let floor = |s: f32| {
-                            ix.near(at + side * s).iter().any(|&j| {
-                                let o = &ix.items[j as usize];
-                                o.solid
-                                    && o.prim.kind != FeatureKind::RAILING
-                                    && o.shape_contains(at + side * s)
+                            [0.0f32, 0.4].iter().any(|&dy| {
+                                let q = at + side * s - Vec3::Y * dy;
+                                ix.near(q).iter().any(|&j| {
+                                    let o = &ix.items[j as usize];
+                                    o.solid
+                                        && o.prim.kind != FeatureKind::RAILING
+                                        && o.shape_contains(q)
+                                })
                             })
                         };
                         if !floor(0.6) && !floor(-0.6) {
@@ -443,7 +447,13 @@ fn scan_cell(
                         }
                     }
                     if blind >= 2 {
-                        r.hit("a", || describe(p, c0));
+                        // Where it comes from: a path's own rail (the walk's type) or the edge pass.
+                        let origin = match me.owner.get(p) {
+                            Some(&w) => format!("a walk {}", me.walks[w].id),
+                            None if nbr_set.contains(p) => "a neighbour".to_string(),
+                            None => "a edge".to_string(),
+                        };
+                        r.hit(&origin, || describe(p, c0));
                     }
                 }
             } else if !matches!(
