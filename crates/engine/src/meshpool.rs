@@ -649,6 +649,23 @@ mod tests {
 
     #[test]
     #[ignore = "prints"]
+    fn l1_chunk_timing() {
+        let key = CellKey::new(Level::L1, I64Vec3::new(0, 1, -1));
+        let cache = L1Cache::default();
+        let t = Instant::now();
+        let _ = cache.get(WorldSeed(0), key);
+        eprintln!("l1 cell {:?}", t.elapsed());
+        let t = Instant::now();
+        let (mut prims, _) = worldgen::l2_web::l1_primitives_carved(WorldSeed(0), &cache, key);
+        eprintln!("carved (cuts + carve) {:?}", t.elapsed());
+        prims.extend(worldgen::tram::tram_pieces(WorldSeed(0), key));
+        let t = Instant::now();
+        let m = mesh_primitives(&prims).0;
+        eprintln!("mesh {:?} ({} verts)", t.elapsed(), m.vertices.len());
+    }
+
+    #[test]
+    #[ignore = "prints"]
     fn l2_mid_anatomy() {
         let cache = L1Cache::default();
         for c in [I64Vec3::new(0, 6, 2), I64Vec3::new(3, 5, 4)] {

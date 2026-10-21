@@ -627,8 +627,15 @@ fn scan_cell(
     for (walk_index, w) in me.walks.iter().enumerate() {
         let up = v(w.up);
         let pts = &w.points;
+        // The ends of a walk are where it meets the stair, deck or door it leads on to: its steps
+        // and landings stand in the headroom there, by design.
+        let junction = w.width as f32 / 2.0 + 1.0;
         let samples: Vec<(Vec3, Vec3)> = if w.rise {
-            pts.iter().map(|&p| (v(p), Vec3::ZERO)).collect()
+            let skip = 4.min(pts.len() / 2);
+            pts[skip..pts.len() - skip]
+                .iter()
+                .map(|&p| (v(p), Vec3::ZERO))
+                .collect()
         } else {
             let (a, z) = (v(pts[0]), v(pts[1]));
             let len = (z - a).length();
@@ -636,6 +643,10 @@ fn scan_cell(
             let lat = dir.cross(up).normalize_or_zero();
             let n = (len as usize).max(1);
             (0..=n)
+                .filter(|&k| {
+                    let s = len * k as f32 / n as f32;
+                    s >= junction && s <= len - junction
+                })
                 .flat_map(|k| {
                     let at = a + dir * (len * k as f32 / n as f32);
                     [-0.3f32, 0.0, 0.3].map(|f| (at + lat * (f * w.width as f32), lat))

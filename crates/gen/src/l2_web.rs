@@ -106,7 +106,17 @@ pub fn l2_cell_web_edges(
         .filter_map(|(k, f)| if k { f } else { None })
         .collect();
     primitives.extend(rails);
-    let mut primitives = crate::edges::cut_rails(primitives, &ways_of(&t));
+    let ways = ways_of(&t);
+    // Lamps, frames and pillars of a path stand clear of the walkways of the others (PW.4.15).
+    let owner: std::collections::HashMap<Primitive, usize> = t
+        .paths
+        .owners
+        .iter()
+        .flat_map(|(r, w)| t.paths.prims[r.clone()].iter().map(move |p| (*p, *w)))
+        .collect();
+    let mut keep = crate::edges::decor_mask(&primitives, &owner, &ways).into_iter();
+    primitives.retain(|_| keep.next().unwrap_or(true));
+    let mut primitives = crate::edges::cut_rails(primitives, &ways);
     let mut seen = std::collections::HashSet::new();
     primitives.retain(|p| seen.insert((p.shape, p.material, p.kind, p.flags)));
     let child_constraints = t
@@ -158,7 +168,7 @@ fn drop_in_tram_volumes(seed: WorldSeed, cell: CellKey, prims: &mut Vec<Primitiv
 /// The ways on of a cell for the edge pass (PW.4.11): every leg and rise, and every doorway.
 fn ways_of(t: &crate::tissue::Tissue) -> Vec<crate::edges::Way> {
     let mut ways = Vec::new();
-    for w in &t.paths.walks {
+    for (walk, w) in t.paths.walks.iter().enumerate() {
         // A rise is sampled every half metre; a way every 1.5 m is enough (a helix bends little
         // over that) and keeps the edge pass fast.
         let mut points: Vec<glam::DVec3> = w.points.iter().step_by(3).copied().collect();
@@ -172,13 +182,19 @@ fn ways_of(t: &crate::tissue::Tissue) -> Vec<crate::edges::Way> {
                 a: pair[0],
                 b: pair[1],
                 half: w.width / 2.0,
+                walk,
             });
         }
     }
     ways.extend(
         crate::l3_web::doors_of(t)
             .into_iter()
-            .map(|(a, b)| crate::edges::Way { a, b, half: 2.0 }),
+            .map(|(a, b)| crate::edges::Way {
+                a,
+                b,
+                half: 2.0,
+                walk: usize::MAX,
+            }),
     );
     ways
 }

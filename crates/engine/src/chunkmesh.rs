@@ -134,12 +134,18 @@ fn stair_boxes(aabb: QAabb, rise: Dir4, steps: u16, mut push: impl FnMut(QAabb))
 /// A face left in at least this many fragments by the boxes beside it is drawn whole.
 const WHOLE_FACE_FRAGMENTS: usize = 3;
 
-/// Broadphase cell edge in quanta (64 m).
-const GRID: Q = 1024;
+/// A face plane and its material: axis, side, plane and material with tag.
+type QuadKey = (u8, bool, Q, u32);
+
+/// Sets of at least this many boxes are culled on the thread pool.
+const PARALLEL_BOXES: usize = 4096;
+
+/// The smallest broadphase cell edge in quanta (8 m); a grid of many small boxes uses more.
+const GRID_MIN: Q = 128;
 
 /// Grid cell of a non-negative offset in quanta; negative offsets clamp to the first cell.
-fn grid_index(q: Q) -> usize {
-    usize::try_from(q.max(0) / GRID).unwrap_or(0)
+fn grid_index(q: Q, edge: Q) -> usize {
+    usize::try_from(q.max(0) / edge).unwrap_or(0)
 }
 
 /// Uniform grid over the boxes so a face only tests nearby occluders. Cells hold ascending box
@@ -148,6 +154,8 @@ fn grid_index(q: Q) -> usize {
 struct BoxGrid {
     origin: [Q; 3],
     dims: [usize; 3],
+    /// Cell edge in quanta: as small as keeps the cells to a few a box.
+    edge: Q,
     cells: Vec<Vec<u32>>,
 }
 
@@ -167,10 +175,18 @@ impl BoxGrid {
                 hi[k] = hi[k].max(b.aabb.max.get(a));
             }
         }
-        let dims = std::array::from_fn(|k| grid_index(hi[k] - lo[k]) + 1);
+        let mut edge = GRID_MIN;
+        let dims_at = |edge: Q| -> [usize; 3] {
+            std::array::from_fn(|k| grid_index(hi[k] - lo[k], edge) + 1)
+        };
+        while dims_at(edge).iter().product::<usize>() > 4 * boxes.len() + 64 && edge < 1 << 20 {
+            edge *= 2;
+        }
+        let dims = dims_at(edge);
         let mut grid = Self {
             origin: lo,
             dims,
+            edge,
             cells: vec![Vec::new(); dims[0] * dims[1] * dims[2]],
         };
         for (i, b) in boxes.iter().enumerate() {
@@ -181,8 +197,9 @@ impl BoxGrid {
 
     fn for_each_cell(&mut self, aabb: &QAabb, mut f: impl FnMut(&mut Vec<u32>)) {
         let range = |k: usize, a: Axis| {
-            let lo = grid_index(aabb.min.get(a) - 1 - self.origin[k]);
-            let hi = grid_index(aabb.max.get(a) + 1 - self.origin[k]).min(self.dims[k] - 1);
+            let lo = grid_index(aabb.min.get(a) - 1 - self.origin[k], self.edge);
+            let hi =
+                grid_index(aabb.max.get(a) + 1 - self.origin[k], self.edge).min(self.dims[k] - 1);
             (lo.min(self.dims[k] - 1), hi)
         };
         let (x, y, z) = (range(0, Axis::X), range(1, Axis::Y), range(2, Axis::Z));
@@ -195,10 +212,27 @@ impl BoxGrid {
         }
     }
 
+    fn for_each_cell_ref(&self, aabb: &QAabb, mut f: impl FnMut(&Vec<u32>)) {
+        let range = |k: usize, a: Axis| {
+            let lo = grid_index(aabb.min.get(a) - 1 - self.origin[k], self.edge);
+            let hi =
+                grid_index(aabb.max.get(a) + 1 - self.origin[k], self.edge).min(self.dims[k] - 1);
+            (lo.min(self.dims[k] - 1), hi)
+        };
+        let (x, y, z) = (range(0, Axis::X), range(1, Axis::Y), range(2, Axis::Z));
+        for iz in z.0..=z.1 {
+            for iy in y.0..=y.1 {
+                for ix in x.0..=x.1 {
+                    f(&self.cells[(iz * self.dims[1] + iy) * self.dims[0] + ix]);
+                }
+            }
+        }
+    }
+
     /// Boxes whose cells touch `aabb` grown by one quantum, into `out`.
-    fn query(&mut self, aabb: &QAabb, out: &mut Vec<u32>) {
+    fn query(&self, aabb: &QAabb, out: &mut Vec<u32>) {
         out.clear();
-        self.for_each_cell(aabb, |c| out.extend_from_slice(c));
+        self.for_each_cell_ref(aabb, |c| out.extend_from_slice(c));
         out.sort_unstable();
         out.dedup();
     }
@@ -322,11 +356,14 @@ fn mesh_boxes(boxes: &[SolidBox], mesh: &mut Mesh) -> ChunkMeshStats {
         tris_unculled: boxes.len() * 12,
     };
     let mut quads: BTreeMap<(u8, bool, Q, u32), Vec<Rect>> = BTreeMap::new();
-    let mut pieces = Vec::new();
-    let mut next = Vec::new();
-    let mut near = Vec::new();
-    let mut grid = BoxGrid::new(boxes);
-    for (i, b) in boxes.iter().enumerate() {
+    let grid = BoxGrid::new(boxes);
+    // The faces of each box, culled against the boxes beside it. Boxes are independent of each
+    // other here, so a big set is done on the thread pool and gathered in box order (the same
+    // result whatever the threads do).
+    let faces_of = |i: usize| -> Vec<(QuadKey, Vec<Rect>)> {
+        let b = &boxes[i];
+        let (mut pieces, mut next, mut near) = (Vec::new(), Vec::new(), Vec::new());
+        let mut out = Vec::new();
         grid.query(&b.aabb, &mut near);
         for axis in [Axis::X, Axis::Y, Axis::Z] {
             let (u, v) = cycle(axis);
@@ -371,19 +408,32 @@ fn mesh_boxes(boxes: &[SolidBox], mesh: &mut Mesh) -> ChunkMeshStats {
                         pieces.clear();
                         pieces.push(rect_of(&b.aabb, u, v));
                     }
-                    quads
-                        .entry((
+                    out.push((
+                        (
                             axis as u8,
                             positive,
                             c,
                             u32::from(b.material) | u32::from(b.tag) << 16,
-                        ))
-                        .or_default()
-                        .extend(pieces.iter().copied());
+                        ),
+                        pieces.clone(),
+                    ));
                 }
             }
         }
+        out
+    };
+    let per_box: Vec<Vec<_>> = if boxes.len() >= PARALLEL_BOXES {
+        use rayon::prelude::*;
+        (0..boxes.len()).into_par_iter().map(faces_of).collect()
+    } else {
+        (0..boxes.len()).map(faces_of).collect()
+    };
+    for faces in per_box {
+        for (key, rects) in faces {
+            quads.entry(key).or_default().extend(rects);
+        }
     }
+    let mut next = Vec::new();
     // Quads of different materials in one plane that overlap would z-fight: the first material
     // (lowest id) keeps the overlap, the others lose it.
     let mut planes: BTreeMap<(u8, bool, Q), Layers> = BTreeMap::new();

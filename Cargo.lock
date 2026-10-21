@@ -795,6 +795,7 @@ dependencies = [
  "image",
  "notify",
  "pollster",
+ "rayon",
  "serde",
  "thiserror 2.0.21",
  "toml",

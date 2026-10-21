@@ -273,6 +273,8 @@ pub struct Way {
     pub a: DVec3,
     pub b: DVec3,
     pub half: f64,
+    /// The walk of `PathPieces::walks` it belongs to; `usize::MAX` for a doorway.
+    pub walk: usize,
 }
 
 /// Rails stop this far short of a way on.
@@ -671,6 +673,64 @@ fn stepped_rail(foot: DVec3, head: DVec3, upright: Frame, out: &mut Vec<Primitiv
             quanta_out(mx.to_array(), true),
         ));
     }
+}
+
+/// Which of `prims` to keep (PW.4.15): a decorative piece of a path (anything that is not a
+/// floor, a wall of the walk it belongs to or a rail: lamps, frames, pillars, pipes) that stands
+/// in the corridor of another walk or a doorway (the walkway's width, 0.3 m to 2.2 m above its
+/// surface) is dropped. `owner` says which walk each path piece was built for.
+#[allow(clippy::implicit_hasher)]
+pub fn decor_mask(
+    prims: &[Primitive],
+    owner: &std::collections::HashMap<Primitive, usize>,
+    ways: &[Way],
+) -> Vec<bool> {
+    let q = |v: Q| v as f32 / M as f32;
+    prims
+        .iter()
+        .map(|p| {
+            let decor = matches!(
+                p.kind,
+                FeatureKind::MASS | FeatureKind::PIPE | FeatureKind::MISC | FeatureKind::TETHER
+            ) && !p.flags.contains(PrimFlags::NO_COLLIDE)
+                && owner.contains_key(p);
+            if !decor {
+                return true;
+            }
+            let b = p.aabb();
+            let (lo, hi) = (
+                Vec3::new(q(b.min.x), q(b.min.y), q(b.min.z)),
+                Vec3::new(q(b.max.x), q(b.max.y), q(b.max.z)),
+            );
+            let mine = owner.get(p).copied();
+            let in_way = |w: &Way| {
+                if Some(w.walk) == mine {
+                    return false;
+                }
+                let (wa, wb) = (v3(w.a), v3(w.b));
+                let g = Vec3::splat(w.half as f32 + 0.5);
+                if (wa.min(wb) - g).cmpgt(hi).any()
+                    || (wa.max(wb) + g + Vec3::Y * 2.5).cmplt(lo).any()
+                {
+                    return false;
+                }
+                let len = (wb - wa).length().max(1e-3);
+                let dir = (wb - wa) / len;
+                let lat = dir.cross(Vec3::Y).normalize_or_zero();
+                let n = (len as usize).max(1);
+                (0..=n).any(|k| {
+                    let at = wa + dir * (len * k as f32 / n as f32);
+                    [-0.6f32, 0.0, 0.6].iter().any(|&f| {
+                        [0.3f32, 1.2, 2.1].iter().any(|&h| {
+                            let pt = at + lat * (f * w.half as f32) + Vec3::Y * h;
+                            pt.cmpge(lo).all() && pt.cmple(hi).all() && p.shape.contains(pt)
+                        })
+                    })
+                })
+            };
+            !ways.iter().any(in_way)
+        })
+        .collect()
 }
 
 /// Which of `prims` to keep: false for the dressing that has no host (PW.4.14): a `NO_COLLIDE` window, lamp or glyph
