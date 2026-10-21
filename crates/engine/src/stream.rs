@@ -125,7 +125,7 @@ impl Default for StreamConfig {
         Self {
             l3_radius_m: 96.0,
             l2_radius_m: 640.0,
-            l2_mid_radius_m: 3072.0,
+            l2_mid_radius_m: 4096.0,
             l1_full_radius_m: 4096.0,
             l1_far_radius_m: 51200.0,
         }

@@ -493,7 +493,8 @@ mod web_tests {
                 let mut far_only = 0;
                 for p in &out.primitives {
                     let own = matches!(p.kind, FeatureKind::STAIR_TOWER | FeatureKind::WINDOW);
-                    if p.flags.contains(PrimFlags::FAR_ONLY) {
+                    // The far mass of the fill (HOR-03) is far-only too, but is not the staircase's.
+                    if p.flags.contains(PrimFlags::FAR_ONLY) && own {
                         far_only += 1;
                     }
                     if !own {

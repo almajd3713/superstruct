@@ -51,6 +51,22 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     }
     add_staircase(seed, l1, &mut out);
     add_features(seed, l1, &mut out);
+    // The far mass stays out of every space the cell keeps clear (voids, the staircase, the
+    // features).
+    let fill = crate::l1_fill::fill_field(seed, l1);
+    let keeps: Vec<_> = out
+        .child_constraints
+        .iter()
+        .filter_map(|c| match c {
+            ChildConstraint::KeepOut { aabb } => Some(*aabb),
+            _ => None,
+        })
+        .collect();
+    out.primitives.extend(
+        crate::l1_fill::far_mass(seed, l1, &fill)
+            .into_iter()
+            .filter(|p| !keeps.iter().any(|k| enters(p, k))),
+    );
     if let Some(s) = skeleton(seed, l1) {
         out.ports = skeleton_ports(l1, &s);
         out.child_constraints

@@ -65,6 +65,28 @@ impl Depths {
     }
 }
 
+/// The silhouette agreement of two views after downsampling by `DOWN` (64 m cells): occupied in
+/// both, over occupied in either (HOR-03 compares silhouettes, not depths).
+fn silhouette(far: &Depths, near: &Depths) -> f64 {
+    const DOWN: usize = 4;
+    let (mut both, mut either) = (0usize, 0usize);
+    for (f, g) in far.0.iter().zip(&near.0) {
+        for cy in 0..SIDE / DOWN {
+            for cx in 0..SIDE / DOWN {
+                let occ = |m: &Vec<i32>| {
+                    (0..DOWN).any(|dy| {
+                        (0..DOWN).any(|dx| m[(cy * DOWN + dy) * SIDE + cx * DOWN + dx] != NONE)
+                    })
+                };
+                let (a, b) = (occ(f), occ(g));
+                both += usize::from(a && b);
+                either += usize::from(a || b);
+            }
+        }
+    }
+    both as f64 / either.max(1) as f64
+}
+
 /// How the near view's pixels relate to the far view's: `[same surface, near only (the far view
 /// has nothing there), different surface, far only]`, as fractions of the pixels either sees.
 fn compare(far: &Depths, near: &Depths) -> [f64; 4] {
@@ -100,8 +122,12 @@ fn the_far_view_matches_the_near_view() {
         let (mut far, mut mid, mut near) = (Depths::new(), Depths::new(), Depths::new());
         for p in &parent.primitives {
             far.add(p, [0; 3]);
-            mid.add(p, [0; 3]);
-            near.add(p, [0; 3]);
+            if !p.flags.contains(PrimFlags::FAR_ONLY) {
+                mid.add(p, [0; 3]);
+            }
+            if !p.flags.contains(PrimFlags::FAR_ONLY) {
+                near.add(p, [0; 3]);
+            }
         }
         for k in 0..512i64 {
             let c = I64Vec3::new(k % 8, k / 64, k / 8 % 8);
@@ -131,10 +157,19 @@ fn the_far_view_matches_the_near_view() {
             n[2] * 100.0,
             n[3] * 100.0
         );
-        worst = worst.min(n[0]);
+        let sil = silhouette(&far, &near);
+        println!(
+            "L1 {l1}: silhouette agreement of the near view with the far view {:.1} %",
+            sil * 100.0
+        );
+        worst = worst.min(sil);
     }
     println!(
-        "worst agreement of the near view with the far view {:.1} %",
+        "worst silhouette agreement of the near view with the far view {:.1} %",
         worst * 100.0
+    );
+    assert!(
+        worst >= 0.85,
+        "the near view's silhouette leaves the far view's (HOR-03)"
     );
 }

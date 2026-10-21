@@ -91,6 +91,64 @@ pub fn fill_field(seed: WorldSeed, l1: I64Vec3) -> Vec<u8> {
     out
 }
 
+/// L2 cells with at least this fill (of 255) show as mass in the far band.
+const MASS_FROM: u8 = 24;
+
+/// HOR-03: the mass of the L2 structures as the far band draws it. One box per run of built
+/// L2 cells along x: as long as the run, as wide and high as the cube root of the run's least
+/// fill allows (a cell of fill `f` out of 255 holds a block of edge `512 (f/255)^(1/3)`),
+/// centred in its cells. Far-only, so the full L1 mesh does not draw it; it is the parent's
+/// answer to what the children will make, never a simplification of them.
+pub fn far_mass(seed: WorldSeed, l1: I64Vec3, fill: &[u8]) -> Vec<crate::prim::Primitive> {
+    use crate::prim::{FeatureKind, MaterialId, PrimFlags, Primitive, QAabb, QVec3, Shape};
+    let _ = seed;
+    let q = |m: i64| (m * 16) as i32;
+    let mut out = Vec::new();
+    for iz in 0..8i64 {
+        for iy in 0..8i64 {
+            let mut ix = 0;
+            while ix < 8 {
+                let at = |x: i64| fill[((iz * 8 + iy) * 8 + x) as usize];
+                if at(ix) < MASS_FROM {
+                    ix += 1;
+                    continue;
+                }
+                let start = ix;
+                let mut least = 255u8;
+                while ix < 8 && at(ix) >= MASS_FROM {
+                    least = least.min(at(ix));
+                    ix += 1;
+                }
+                // The edge in metres from the cube root of the fill, by integer search.
+                let target = i64::from(least) * 512 * 512 * 512 / 255;
+                let mut edge = 0i64;
+                while (edge + 8).pow(3) <= target && edge < 512 {
+                    edge += 8;
+                }
+                let edge = edge.max(32);
+                let (x0, x1) = (
+                    start * 512 + 256 - edge / 2,
+                    (ix - 1) * 512 + 256 + edge / 2,
+                );
+                let (y0, z0) = (iy * 512 + 256 - edge / 2, iz * 512 + 256 - edge / 2);
+                out.push(Primitive {
+                    shape: Shape::Box {
+                        aabb: QAabb::new(
+                            QVec3::new(q(x0), q(y0), q(z0)),
+                            QVec3::new(q(x1), q(y0 + edge), q(z0 + edge)),
+                        ),
+                    },
+                    material: MaterialId::CONCRETE,
+                    kind: FeatureKind::MASS,
+                    flags: PrimFlags::FAR_VISIBLE | PrimFlags::FAR_ONLY | PrimFlags::NO_COLLIDE,
+                });
+            }
+        }
+    }
+    let _ = l1;
+    out
+}
+
 /// The fill of one L2 cell, given its coordinates (`L2` cell index in the world).
 pub fn fill_l2(seed: WorldSeed, l2: I64Vec3) -> u8 {
     let l1 = l2.div_euclid(I64Vec3::splat(8));
