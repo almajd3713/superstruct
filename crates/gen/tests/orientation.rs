@@ -55,7 +55,7 @@ fn tissue_ideas() {
     let cache = TissueCache::default();
     let mut forms = [0usize; 23];
     let mut variants = [0usize; 27];
-    let mut paths = [0usize; 64];
+    let mut paths = [0usize; 100];
     for k in 0..1500i64 {
         let l1 = I64Vec3::new(k % 9 - 4, k / 9 % 3, k / 27 % 20 - 10);
         let key = CellKey::new(

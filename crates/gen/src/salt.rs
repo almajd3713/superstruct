@@ -31,6 +31,27 @@ salts! {
     RARE_SITE = 0x0124;
     /// Keyed by the L1 cell of a rare event: the draws of its geometry.
     RARE_BUILD = 0x0125;
+    /// Keyed by an L0 line `(row, row, axis)`: whether a road runs along it and which (`levels.md` §3W.6).
+    ROAD_LINE = 0x0126;
+    /// Keyed by the L0 column `(x, z)`: whether a spine stands in it (`levels.md` §3W.7).
+    SPINE_COLUMN = 0x0127;
+    /// Keyed by an L0 line: whether a river runs along it and which (`levels.md` §3W.8).
+    RIVER_LINE = 0x0128;
+    /// Keyed by the L0 cell: whether it holds a wonder and which (`levels.md` §3W.9).
+    WONDER_SITE = 0x0129;
+    /// Keyed by the L1 cell of a wonder: the draws of its geometry.
+    WONDER_BUILD = 0x012A;
+    /// Keyed by the L0 cell, or by an L0 column for featherfall shafts: the weightless features
+    /// and low-gravity wells (`gravity.md` §8).
+    WEIGHTLESS = 0x012B;
+    /// Keyed by the L0 cell: whether it holds a mover and which (`levels.md` §3W.10).
+    MOVER_SITE = 0x012C;
+    /// Keyed by the L0 cell: whether it is a strange region and which (`levels.md` §3W.11).
+    STRANGE_SITE = 0x012D;
+    /// Keyed by an L0 line `(row, row, axis)`: whether a Rampart runs along it (`levels.md` §3W.11).
+    RAMPART_LINE = 0x012E;
+    /// Keyed by the L1 cell of a strange region's geometry (`levels.md` §3W.11).
+    STRANGE_BUILD = 0x012F;
     REGIME_WEB = 0x0110;
     /// Keyed by the L0 cell: the interior stack sequence (`regimes.md` §8.2).
     STACK = 0x0111;
@@ -132,6 +153,14 @@ salts! {
     KIT_EXT = 0x0318;
     /// Keyed by the L1 column: the infinite staircase's core and plan (`levels.md` §5W.35).
     STAIR_STYLE = 0x0319;
+    /// Keyed by the L1 cell: which of the stratum's dominant quarters it is (`levels.md` §5W.37).
+    QUARTER = 0x031A;
+    /// Keyed by the glyph index: the strokes of one glyph of the City's alphabet (`levels.md` §5W.38).
+    GLYPH = 0x031B;
+    /// Keyed by the world: the permutation that gives hubs their names (`levels.md` §5W.38).
+    NAME_PERM = 0x031C;
+    /// Keyed by the L2 cell (growth on structures) and by the L1 cell (the tree of pipes): overgrowth (`levels.md` §5W.39).
+    GROWTH = 0x031D;
     RAMP = 0x0305;
     EDGE_GUARD = 0x0306;
     VISTA = 0x0307;

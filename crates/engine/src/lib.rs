@@ -35,6 +35,7 @@ pub mod materials;
 pub mod mesh;
 pub mod meshpool;
 pub mod modsys;
+pub mod moversys;
 pub mod noise;
 pub mod overlay;
 pub mod post;

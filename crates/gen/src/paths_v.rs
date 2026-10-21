@@ -13,6 +13,7 @@
 )]
 
 mod ladders;
+mod p2;
 
 use crate::orient::{Frame, HelixStair, LocalShape, helix_stair};
 use crate::paths::Clear;
@@ -24,6 +25,7 @@ pub const VIDS: [u8; 19] = [
     21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
 ];
 pub use ladders::{LADDER_IDS, MAX_RUN, lad_number};
+pub use p2::P2V_IDS;
 
 /// Rise and tread of a stair step, in metres (3 Q and 5 Q).
 const RISE: f64 = 0.1875;
@@ -76,12 +78,12 @@ pub struct VParams {
 pub fn width_range(id: u8) -> (f64, f64) {
     match id {
         21 => (2.0, 4.0),
-        22 => (2.0, 3.5),
-        23 | 32 | 39 => (2.0, 3.0),
+        22 | 76..=78 | 81..=84 => (2.0, 3.5),
+        23 | 32 | 39 | 80 => (2.0, 3.0),
         24 | 25 => (2.5, 4.0),
         26 => (4.0, 6.0),
         27 | 36 | 37 => (1.0, 1.2),
-        41..=53 => (3.0, 3.0),
+        41..=53 | 73..=75 | 79 | 85 => (3.0, 3.0),
         28 => (7.0, 9.0),
         29 => (2.0, 2.5),
         30 => (9.0, 10.0),
@@ -876,7 +878,7 @@ fn helix(m: &mut M<'_, '_>, total_q: i32, yaw0: u8) {
 pub(crate) fn build_rise(e: &mut Emitter<'_>, id: u8, col: Column, p: &VParams) -> Rise {
     let total_q = (col.height * 16.0).round() as i32;
     let style = match id {
-        32 | 39 => BEAM,
+        32 | 39 | 80 => BEAM,
         35 => SLAB,
         _ => STAIR,
     };
@@ -892,6 +894,22 @@ pub(crate) fn build_rise(e: &mut Emitter<'_>, id: u8, col: Column, p: &VParams) 
         hi: [f64::MIN; 3],
     };
     match id {
+        73..=85 => {
+            let base = p2::base(id);
+            if (41..=53).contains(&base) {
+                ladders::build(&mut m, base, col.height);
+            } else {
+                match base {
+                    26 => ring(&mut m, true, units, 13.0 - p.w / 2.0, false),
+                    25 => match flat_yaw(m.e.lat.frame) {
+                        Some(yaw) => helix(&mut m, total_q, yaw),
+                        None => fold(&mut m, 21, units),
+                    },
+                    b => fold(&mut m, b, units),
+                }
+            }
+            p2::dress(&mut m, id, col.height);
+        }
         41..=53 => ladders::build(&mut m, id, col.height),
         24 => ring(&mut m, false, units, 12.0, false),
         26 => ring(&mut m, true, units, 13.0 - p.w / 2.0, false),
@@ -938,7 +956,12 @@ mod tests {
     #[test]
     fn every_type_climbs_the_column() {
         let lat = Lattice::new(Frame::Id);
-        for id in VIDS {
+        // The ladders (and so P2 ids on a ladder) are walked by climbing, not by floor: their
+        // own tests check them.
+        let on_stairs = P2V_IDS
+            .into_iter()
+            .filter(|&id| !(41..=53).contains(&p2::base(id)));
+        for id in VIDS.into_iter().chain(on_stairs) {
             for slots in [1.0, 2.0, 4.0] {
                 if id == 28 && slots < 3.0 || id == 25 && slots > 4.0 {
                     continue;
@@ -962,7 +985,7 @@ mod tests {
                     };
                     let mut e = Emitter::new(&lat);
                     let r = build_rise(&mut e, id, col, &p);
-                    let tag = format!("PV-{:02} k {slots} v{variant}", id - 20);
+                    let tag = format!("PV/P2 id {id} k {slots} v{variant}");
                     let first = r.walk.first().expect("no route");
                     let last = r.walk.last().expect("no route");
                     assert!((first[1] - 100.0).abs() < 0.3, "{tag}: starts at {first:?}");

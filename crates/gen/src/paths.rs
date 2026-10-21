@@ -35,9 +35,13 @@ const PATH_LIFTSLOPE: usize = 4;
 const PATH_LADDER: usize = 5;
 
 /// The ids of this module, PH-01..PH-20.
-pub const IDS: [u8; 20] = [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+pub const IDS: [u8; 32] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 61, 62, 63, 64, 65, 66,
+    67, 68, 69, 70, 71, 72,
 ];
+
+/// The second batch (P2-01..12) takes ids 60 plus its number.
+pub const P2_IDS: [u8; 12] = [61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72];
 
 /// The path types chosen for a tissue and the pieces they emit.
 #[derive(Debug, Clone, Default)]
@@ -115,8 +119,15 @@ pub fn width_range(id: u8) -> (f64, f64) {
         12 => (1.2, 1.6),
         13 => (10.0, 28.0),
         14 => (2.0, 6.0),
-        15 | 19 | 20 => (2.0, 4.0),
+        15 | 19 | 20 | 61 | 69 => (2.0, 4.0),
         17 => (1.2, 2.4),
+        62 | 63 | 66 | 72 => (1.6, 3.0),
+        64 => (2.4, 3.2),
+        65 => (1.0, 1.6),
+        67 => (0.9, 1.4),
+        68 => (1.6, 2.4),
+        70 => (1.6, 3.5),
+        71 => (6.0, 10.0),
         _ => (1.2, 3.0),
     }
 }
@@ -1003,6 +1014,340 @@ pub(crate) fn build_leg(e: &mut Emitter<'_>, leg: Leg, id: u8, p: &Params) -> Ve
                 (-0.5, 4.5),
             );
         }
+        // P2-01: inside a great pipe: a floor, walls and a roof of pipe, flanges every 6 m.
+        61 => {
+            b.deck((0.0, len), (-h, h), (-0.3, 0.0), MaterialId::GRATING);
+            for side in [-1.0, 1.0] {
+                b.side_solid(
+                    (0.0, len),
+                    (side * h, side * (h + 0.4)),
+                    (0.0, 2.6),
+                    MaterialId::PIPE,
+                );
+            }
+            b.side_solid(
+                (0.0, len),
+                (-h - 0.4, h + 0.4),
+                (2.6, 3.0),
+                MaterialId::PIPE,
+            );
+            let mut s = 3.0;
+            while s < len {
+                for side in [-1.0, 1.0] {
+                    b.side_solid(
+                        (s - 0.15, s + 0.15),
+                        (side * (h + 0.4), side * (h + 0.7)),
+                        (0.0, 3.3),
+                        MaterialId::METAL,
+                    );
+                }
+                b.side_solid(
+                    (s - 0.15, s + 0.15),
+                    (-h - 0.7, h + 0.7),
+                    (3.0, 3.3),
+                    MaterialId::METAL,
+                );
+                s += 6.0;
+            }
+        }
+        // P2-02: a gutter: a channel of walls 1.1 m high with a lip, a floor with a drain strip.
+        62 => {
+            b.deck((0.0, len), (-h, h), (-0.4, 0.0), MaterialId::CONCRETE);
+            for side in [-1.0, 1.0] {
+                b.side_solid(
+                    (0.0, len),
+                    (side * h, side * (h + 0.3)),
+                    (-0.4, 1.1),
+                    MaterialId::CONCRETE,
+                );
+                b.rail((0.0, len), (side * (h - 0.1), side * (h + 0.4)), (1.1, 1.2));
+            }
+            b.bx(
+                (0.0, len),
+                (-0.1, 0.1),
+                (-0.02, 0.0),
+                MaterialId::EMISSIVE,
+                FeatureKind::WINDOW,
+                PrimFlags::NO_COLLIDE,
+            );
+        }
+        // P2-03: a track walk: planks between two rails on sleepers.
+        63 => {
+            b.deck((0.0, len), (-h, h), (-0.3, 0.0), MaterialId::CONCRETE);
+            for t in [-0.7, 0.7] {
+                b.bx(
+                    (0.0, len),
+                    (t - 0.05, t + 0.05),
+                    (0.0, 0.15),
+                    MaterialId::METAL,
+                    FeatureKind::TRAM,
+                    PrimFlags::NO_COLLIDE,
+                );
+            }
+            let mut s = 1.0;
+            while s < len {
+                b.bx(
+                    (s, s + 0.2),
+                    (-h - 0.3, h + 0.3),
+                    (-0.45, -0.3),
+                    MaterialId::CONCRETE,
+                    FeatureKind::MISC,
+                    PrimFlags::NO_COLLIDE,
+                );
+                s += 2.0;
+            }
+        }
+        // P2-04: a tram car for a bridge: floor, glazed sides and a roof, end to end.
+        64 => {
+            b.deck((0.0, len), (-h, h), (-0.3, 0.0), MaterialId::METAL);
+            for side in [-1.0, 1.0] {
+                b.wall((side * h, side * (h + 0.15)), 2.8, len, true);
+            }
+            b.side_solid(
+                (0.0, len),
+                (-h - 0.15, h + 0.15),
+                (2.8, 3.1),
+                MaterialId::METAL,
+            );
+            let mut s = 12.0;
+            while s < len {
+                b.side_solid((s - 0.1, s + 0.1), (-h, h), (0.0, 2.8), MaterialId::METAL);
+                s += 24.0;
+            }
+        }
+        // P2-05: a chain walk: planks on two chains that hang as rails.
+        65 => {
+            let mut s = 0.0;
+            while s < len {
+                b.deck(
+                    (s, (s + 0.9).min(len)),
+                    (-h, h),
+                    (-0.1, 0.0),
+                    MaterialId::GRATING,
+                );
+                s += 1.0;
+            }
+            for side in [-1.0, 1.0] {
+                b.rail((0.0, len), (side * h - 0.03, side * h + 0.03), (1.0, 1.06));
+                let mut s = 2.0;
+                while s < len {
+                    b.rail(
+                        (s - 0.03, s + 0.03),
+                        (side * h - 0.03, side * h + 0.03),
+                        (0.0, 1.0),
+                    );
+                    s += 4.0;
+                }
+            }
+        }
+        // P2-06: a colonnade walk: columns every 4 m on one side under an entablature.
+        66 => {
+            b.deck((0.0, len), (-h, h), (-0.3, 0.0), MaterialId::CONCRETE);
+            let t = p.side * (h + 0.5);
+            let mut s = 2.0;
+            while s < len {
+                b.side_solid(
+                    (s - 0.4, s + 0.4),
+                    (t - 0.4, t + 0.4),
+                    (-0.3, 4.0),
+                    MaterialId::CONCRETE,
+                );
+                s += 4.0;
+            }
+            b.side_solid(
+                (0.0, len),
+                (t - 0.6, t + 0.6),
+                (4.0, 4.7),
+                MaterialId::CONCRETE,
+            );
+            b.rail(
+                (0.0, len),
+                (-p.side * h - 0.05, -p.side * h + 0.05),
+                (0.0, 1.0),
+            );
+        }
+        // P2-07: a cornice walk: a ledge from a wall, with no rail on the open side.
+        67 => {
+            b.deck((0.0, len), (-h, h), (-0.4, 0.0), MaterialId::CONCRETE);
+            b.side_solid(
+                (0.0, len),
+                (p.side * h, p.side * (h + 1.0)),
+                (-0.4, 3.0),
+                MaterialId::CONCRETE,
+            );
+            b.side_solid(
+                (0.0, len),
+                (-p.side * h - p.side * 0.15, -p.side * h),
+                (-0.4, 0.1),
+                MaterialId::CONCRETE,
+            );
+        }
+        // P2-08: a passage in a wall: lined with concrete, a lit strip along the roof.
+        68 => {
+            b.deck((0.0, len), (-h, h), (-0.3, 0.0), MaterialId::CONCRETE);
+            for side in [-1.0, 1.0] {
+                b.side_solid(
+                    (0.0, len),
+                    (side * h, side * (h + 0.3)),
+                    (0.0, 2.4),
+                    MaterialId::CONCRETE,
+                );
+            }
+            b.side_solid(
+                (0.0, len),
+                (-h - 0.3, h + 0.3),
+                (2.4, 2.7),
+                MaterialId::CONCRETE,
+            );
+            b.bx(
+                (0.0, len),
+                (-0.15, 0.15),
+                (2.38, 2.4),
+                MaterialId::EMISSIVE,
+                FeatureKind::WINDOW,
+                PrimFlags::NO_COLLIDE,
+            );
+            b.cut((0.0, len), (-h - 1.0, h + 1.0), (-0.5, 3.4));
+        }
+        // P2-09: a tunnel through a bundle of cables: sixteen cables round the walkway.
+        69 => {
+            b.deck((0.0, len), (-h, h), (-0.3, 0.0), MaterialId::GRATING);
+            for k in 0..16 {
+                let a = f64::from(k) / 16.0;
+                let t = (a * 2.0 - 1.0) * (h + 0.6);
+                let y = if k % 2 == 0 {
+                    2.4 + 0.5 * a
+                } else {
+                    0.9 + 1.4 * a
+                };
+                let t = if k % 2 == 0 {
+                    t
+                } else {
+                    (if k % 4 == 1 { 1.0 } else { -1.0 }) * (h + 0.5 + 0.3 * a)
+                };
+                b.bx(
+                    (0.0, len),
+                    (t - 0.12, t + 0.12),
+                    (y - 0.12, y + 0.12),
+                    MaterialId::PIPE,
+                    FeatureKind::CABLE,
+                    PrimFlags::NO_COLLIDE,
+                );
+            }
+            let mut s = 4.0;
+            while s < len {
+                for side in [-1.0, 1.0] {
+                    b.side_solid(
+                        (s - 0.1, s + 0.1),
+                        (side * (h + 0.3), side * (h + 0.5)),
+                        (0.0, 2.6),
+                        MaterialId::METAL,
+                    );
+                }
+                b.side_solid(
+                    (s - 0.1, s + 0.1),
+                    (-h - 0.5, h + 0.5),
+                    (2.6, 2.8),
+                    MaterialId::METAL,
+                );
+                s += 8.0;
+            }
+            b.cut((0.0, len), (-h - 1.5, h + 1.5), (-0.5, 3.4));
+        }
+        // P2-10: a bridge floored with glass: panes in a frame, you see the drop.
+        70 => {
+            b.bx(
+                (0.0, len),
+                (-h, h),
+                (-0.15, 0.0),
+                MaterialId::LIT_WINDOW,
+                FeatureKind::WALKWAY,
+                PrimFlags::NONE,
+            );
+            for side in [-1.0, 1.0] {
+                b.deck(
+                    (0.0, len),
+                    (side * h - 0.1, side * h + 0.1),
+                    (-0.6, 0.0),
+                    MaterialId::METAL,
+                );
+                b.rail(
+                    (0.0, len),
+                    (side * (h + 0.05) - 0.04, side * (h + 0.05) + 0.04),
+                    (0.0, 1.1),
+                );
+            }
+            let mut s = 2.0;
+            while s < len {
+                b.deck((s, s + 0.1), (-h, h), (-0.5, -0.15), MaterialId::METAL);
+                s += 2.0;
+            }
+        }
+        // P2-11: a covered market street: stalls and awnings on both sides, roof beams, lamps.
+        71 => {
+            b.deck((0.0, len), (-h, h), (-0.3, 0.0), MaterialId::CONCRETE);
+            let mut s = 1.0;
+            while s + 2.0 < len {
+                for side in [-1.0, 1.0] {
+                    let t0 = side * (h - 0.8);
+                    let t1 = side * h;
+                    b.side_solid(
+                        (s, s + 2.5),
+                        (t0.min(t1), t0.max(t1)),
+                        (0.0, 1.0),
+                        MaterialId::CONCRETE,
+                    );
+                    let a0 = side * (h - 1.8);
+                    b.side_solid(
+                        (s, s + 2.5),
+                        (a0.min(t1), a0.max(t1)),
+                        (2.5, 2.7),
+                        MaterialId::WARM,
+                    );
+                    b.side_solid(
+                        (s + 1.1, s + 1.3),
+                        (side * (h - 0.3) - 0.1, side * (h - 0.3) + 0.1),
+                        (1.9, 2.5),
+                        MaterialId::EMISSIVE,
+                    );
+                }
+                s += 4.0;
+            }
+            let mut s = 4.0;
+            while s < len {
+                b.side_solid(
+                    (s - 0.2, s + 0.2),
+                    (-h - 0.3, h + 0.3),
+                    (3.6, 4.0),
+                    MaterialId::METAL,
+                );
+                s += 8.0;
+            }
+        }
+        // P2-12: a ceiling walk: panes between ribs, a hall seen below.
+        72 => {
+            let mut s = 0.0;
+            while s < len {
+                b.bx(
+                    (s, (s + 3.0).min(len)),
+                    (-h, h),
+                    (-0.15, 0.0),
+                    MaterialId::LIT_WINDOW,
+                    FeatureKind::WALKWAY,
+                    PrimFlags::NONE,
+                );
+                b.deck(
+                    ((s + 3.0).min(len), (s + 4.0).min(len)),
+                    (-h, h),
+                    (-0.4, 0.0),
+                    MaterialId::CONCRETE,
+                );
+                s += 4.0;
+            }
+            for side in [-1.0, 1.0] {
+                b.rail((0.0, len), (side * h - 0.05, side * h + 0.05), (0.0, 1.0));
+            }
+        }
         // PH-01: a grating deck with ribs and optional rails.
         _ => {
             if p.gaps {
@@ -1126,10 +1471,15 @@ fn legal(c: &Ctx) -> Vec<(u8, usize)> {
     match c.kind {
         Kind::Bored => {
             v.extend([(11, PATH_ENCLOSED), (12, PATH_ENCLOSED)]);
+            v.extend([(68, PATH_ENCLOSED), (69, PATH_ENCLOSED)]);
             return v;
         }
         Kind::Engulfed { ring } => {
-            v.extend([(11, PATH_ENCLOSED), (12, PATH_ENCLOSED)]);
+            v.extend([
+                (11, PATH_ENCLOSED),
+                (12, PATH_ENCLOSED),
+                (68, PATH_ENCLOSED),
+            ]);
             if ring {
                 v.push((20, PATH_ENCLOSED));
             }
@@ -1137,12 +1487,15 @@ fn legal(c: &Ctx) -> Vec<(u8, usize)> {
         }
         Kind::Open => {}
     }
+    // P2-03 a track walk, P2-02 a gutter and P2-01 a pipe interior run anywhere in the open.
+    v.extend([(63, PATH_WALK), (62, PATH_WALK), (61, PATH_ENCLOSED)]);
     if c.roof {
         v.extend([
             (6, PATH_WALK),
             (7, PATH_WALK),
             (15, PATH_STREET),
             (18, PATH_WALK),
+            (72, PATH_WALK),
         ]);
     } else {
         v.push((2, PATH_ENCLOSED));
@@ -1157,8 +1510,10 @@ fn legal(c: &Ctx) -> Vec<(u8, usize)> {
         }
         if c.steps >= 2 {
             v.push((4, PATH_WALK));
+            v.push((65, PATH_WALK));
             if c.open_above {
                 v.push((3, PATH_WALK));
+                v.extend([(64, PATH_WALK), (70, PATH_WALK)]);
             }
         }
     }
@@ -1166,12 +1521,18 @@ fn legal(c: &Ctx) -> Vec<(u8, usize)> {
         v.push((20, PATH_ENCLOSED));
     }
     if c.wall[0] || c.wall[1] {
-        v.extend([(8, PATH_WALK), (9, PATH_ENCLOSED), (13, PATH_STREET)]);
+        v.extend([
+            (8, PATH_WALK),
+            (9, PATH_ENCLOSED),
+            (13, PATH_STREET),
+            (66, PATH_WALK),
+            (67, PATH_WALK),
+        ]);
         if c.steps >= 2 {
             v.push((19, PATH_STREET));
         }
         if c.wall[0] && c.wall[1] && c.steps >= 2 {
-            v.extend([(10, PATH_ENCLOSED), (14, PATH_STREET)]);
+            v.extend([(10, PATH_ENCLOSED), (14, PATH_STREET), (71, PATH_STREET)]);
         }
     }
     v
@@ -1348,6 +1709,7 @@ fn vertical_legal(t: &Tissue, cs: &[[i64; 3]], kind: Kind, height: f64) -> Vec<u
     }
     if kind == Kind::Open {
         v.extend(paths_v::LADDER_IDS);
+        v.extend(paths_v::P2V_IDS);
     }
     v
 }
@@ -1755,7 +2117,7 @@ mod tests {
         use glam::I64Vec3;
         let seed = WorldSeed(0x5eed);
         let cache = TissueCache::default();
-        let mut seen = [0usize; 64];
+        let mut seen = [0usize; 100];
         let mut segments = 0usize;
         let mut bored = 0usize;
         let mut mods = [[0usize; 6]; 9];
@@ -1813,7 +2175,11 @@ mod tests {
                 mods[row]
             );
         }
-        for id in IDS.into_iter().chain(crate::paths_v::VIDS) {
+        for id in IDS
+            .into_iter()
+            .chain(crate::paths_v::VIDS)
+            .chain(crate::paths_v::P2V_IDS)
+        {
             assert!(seen[id as usize] > 0, "PH-{id:02} never occurs: {seen:?}");
         }
     }

@@ -32,13 +32,20 @@ pub const KIT_TAGS: [&str; 12] = [
 
 /// The pieces so far, with the kit index of each; boxes are made in the lattice's own frame
 /// (`Emitter::frame_box`), so a turned lattice carries its kit turned.
-struct M<'a> {
-    em: Emitter<'a>,
-    tags: Vec<usize>,
+pub(crate) struct M<'a> {
+    pub(crate) em: Emitter<'a>,
+    pub(crate) tags: Vec<usize>,
 }
 
 impl M<'_> {
-    fn boxed(
+    pub(crate) fn new(t: &Tissue) -> M<'_> {
+        M {
+            em: Emitter::new(&t.lattice),
+            tags: Vec::new(),
+        }
+    }
+
+    pub(crate) fn boxed(
         &mut self,
         tag: usize,
         min: [f64; 3],
@@ -54,7 +61,7 @@ impl M<'_> {
     }
 
     /// A round bar is drawn as a square one: `radius` is the half width.
-    fn bar(
+    pub(crate) fn bar(
         &mut self,
         tag: usize,
         axis: Axis,
@@ -84,17 +91,25 @@ impl M<'_> {
 
 /// One face of a part: the plane `p` on `axis` (0 = x, 2 = z) facing `sign`, spanning `t` along
 /// the other horizontal axis and `y` in height.
-struct Face {
-    axis: usize,
-    sign: f64,
-    p: f64,
-    t: (f64, f64),
-    y: (f64, f64),
+pub(crate) struct Face {
+    pub(crate) axis: usize,
+    pub(crate) sign: f64,
+    pub(crate) p: f64,
+    pub(crate) t: (f64, f64),
+    pub(crate) y: (f64, f64),
 }
 
 impl Face {
     /// A box `off0..off1` metres out from the face, `t0..t1` along it and `y0..y1` high.
-    fn bx(&self, off0: f64, off1: f64, t0: f64, t1: f64, y0: f64, y1: f64) -> ([f64; 3], [f64; 3]) {
+    pub(crate) fn bx(
+        &self,
+        off0: f64,
+        off1: f64,
+        t0: f64,
+        t1: f64,
+        y0: f64,
+        y1: f64,
+    ) -> ([f64; 3], [f64; 3]) {
         let other = 2 - self.axis;
         let (a, b) = (self.p + self.sign * off0, self.p + self.sign * off1);
         let (mut lo, mut hi) = ([0.0; 3], [0.0; 3]);
@@ -107,16 +122,16 @@ impl Face {
         (lo, hi)
     }
 
-    fn width(&self) -> f64 {
+    pub(crate) fn width(&self) -> f64 {
         self.t.1 - self.t.0
     }
 
-    fn height(&self) -> f64 {
+    pub(crate) fn height(&self) -> f64 {
         self.y.1 - self.y.0
     }
 }
 
-fn faces(lo: [f64; 3], hi: [f64; 3]) -> [Face; 4] {
+pub(crate) fn faces(lo: [f64; 3], hi: [f64; 3]) -> [Face; 4] {
     [
         Face {
             axis: 0,
@@ -150,7 +165,15 @@ fn faces(lo: [f64; 3], hi: [f64; 3]) -> [Face; 4] {
 }
 
 /// The kit piece `kit` (0 to 11, the order of `KIT_TAGS`) on a face, a roof or an underside.
-fn piece(m: &mut M, kit: usize, rng: &mut Rng, f: &Face, lo: [f64; 3], hi: [f64; 3]) {
+fn piece(
+    m: &mut M,
+    kit: usize,
+    rng: &mut Rng,
+    f: &Face,
+    lo: [f64; 3],
+    hi: [f64; 3],
+    name: &[crate::glyphs::Glyph; 3],
+) {
     let (w, h) = (f.width(), f.height());
     let (t0, t1) = f.t;
     let along =
@@ -336,17 +359,35 @@ fn piece(m: &mut M, kit: usize, rng: &mut Rng, f: &Face, lo: [f64; 3], hi: [f64;
                 );
             }
         }
-        // KIT-10: a glyph panel: a dark slab with three to five lit bars.
+        // KIT-10: a glyph panel: a dark slab with the name of the district in the City's script,
+        // three glyphs of seven by seven lit cells (MUL-01).
         9 => {
-            let x = along(rng, 3.0);
-            let y = f.y.0 + 3.0 + rng.next_f32() as f64 * (h - 8.0).max(0.0);
-            let (a, b) = f.bx(0.0, 0.2, x - 1.5, x + 1.5, y, y + 4.0);
+            let cell = 0.3;
+            let glyph = 7.0 * cell;
+            let width = 3.0 * glyph + 2.0 * cell + 2.0;
+            let x = along(rng, width / 2.0 + 1.0).max(t0 + width / 2.0 + 0.5);
+            let y = f.y.0 + 2.0 + rng.next_f32() as f64 * (h - 6.0).max(0.0);
+            let (a, b) = f.bx(
+                0.0,
+                0.2,
+                x - width / 2.0,
+                x + width / 2.0,
+                y,
+                y + glyph + 1.0,
+            );
             m.boxed(9, a, b, MaterialId::METAL, FeatureKind::MISC);
-            for k in 0..(3 + rng.below(3)) {
-                let yy = y + 0.5 + 0.7 * k as f64;
-                let len = 0.8 + rng.next_f32() as f64 * 1.6;
-                let (a, b) = f.bx(0.2, 0.3, x - 1.2, x - 1.2 + len, yy, yy + 0.3);
-                m.boxed(9, a, b, MaterialId::EMISSIVE, FeatureKind::MISC);
+            for (k, g) in name.iter().enumerate() {
+                let gx = x - width / 2.0 + 1.0 + k as f64 * (glyph + cell);
+                for (row, bits) in g.iter().enumerate() {
+                    for col in 0..7 {
+                        if bits >> col & 1 == 1 {
+                            let (cx, cy) =
+                                (gx + col as f64 * cell, y + 0.5 + (6 - row) as f64 * cell);
+                            let (a, b) = f.bx(0.2, 0.3, cx, cx + cell * 0.9, cy, cy + cell * 0.9);
+                            m.boxed(9, a, b, MaterialId::EMISSIVE, FeatureKind::MISC);
+                        }
+                    }
+                }
             }
         }
         // KIT-11: a handrail along the foot of the face, on posts (the stairs have their own).
@@ -385,6 +426,10 @@ fn piece(m: &mut M, kit: usize, rng: &mut Rng, f: &Face, lo: [f64; 3], hi: [f64;
 pub fn dress(t: &Tissue) -> Vec<(usize, Primitive)> {
     let pitch = t.lattice.pitch as f64;
     let base = hash(t.seed.0, Level::L2, t.cell.coords, salt::KIT_EXT);
+    // The district's name in the City's script, for the glyph panels (MUL-01).
+    let alphabet = crate::glyphs::alphabet(t.seed);
+    let l1 = t.cell.coords.div_euclid(glam::I64Vec3::splat(8));
+    let name = crate::glyphs::name_of(t.seed, l1).map(|g| alphabet[usize::from(g)]);
     let mut m = M {
         em: Emitter::new(&t.lattice),
         tags: Vec::new(),
@@ -412,7 +457,7 @@ pub fn dress(t: &Tissue) -> Vec<(usize, Primitive)> {
             }
             let fs = faces(lo, hi);
             for (kit, face) in picks.into_iter().zip(face_picks) {
-                piece(&mut m, kit, &mut rng, &fs[face], lo, hi);
+                piece(&mut m, kit, &mut rng, &fs[face], lo, hi, &name);
             }
         }
     }

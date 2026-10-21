@@ -177,6 +177,10 @@ pub(crate) fn mutations_of(t: &Tissue, words: &[u64; 16]) -> Vec<u8> {
     if t.rare == Some(crate::rare::Rare::Inverted) {
         out.push(1);
     }
+    // The Recursion: every structure swallows a smaller copy of an older form (STG-02).
+    if t.strange == Some(crate::strange::Strange::Recursion) {
+        out.push(15);
+    }
     // None in half of the cases, one in three tenths, two in the rest.
     let count = match below(words[3], 10) {
         0..=4 => 0,
@@ -697,9 +701,18 @@ pub(crate) fn place(
         };
         // A form that cannot be made at this size is a slab tower instead, unless it is a hub,
         // a set piece or a local place: those are landmarks and are not placed as a plain slab.
-        let (out, used) = match (form.build)(build_size, &mut rng) {
+        // The Grid: every structure is the same cube of two slots (STG-04).
+        let grid = t.strange == Some(crate::strange::Strange::Grid)
+            && form.tag.starts_with('F')
+            && build_size.iter().all(|&v| v >= 2);
+        let built = if grid {
+            crate::forms::FormOut::of_cube(2)
+        } else {
+            (form.build)(build_size, &mut rng)
+        };
+        let (out, used) = match built {
             Some(o) => (o, None),
-            None if !form.tag.starts_with("FORM") => return None,
+            None if !form.tag.starts_with("FORM") && !form.tag.starts_with("F2") => return None,
             None => (
                 (crate::forms::FORMS[0].build)(build_size, &mut rng)?,
                 Some(0u16),
@@ -2571,7 +2584,7 @@ mod tests {
     fn every_variant_occurs() {
         let cache = TissueCache::default();
         let mut seen = [0usize; 27];
-        let mut forms = [0usize; 23];
+        let mut forms = [0usize; FORMS.len()];
         let mut muts = [0usize; 16];
         let cell = (0..3).flat_map(|_| [0i64]).count();
         let _ = cell;
@@ -2631,7 +2644,7 @@ mod tests {
             assert!(*n > 0, "MUT-{k:02} never applied");
         }
         for (k, n) in forms.iter().enumerate() {
-            assert!(*n > 0, "FORM-{:02} never placed", k + 1);
+            assert!(*n > 0, "{} never placed", FORMS[k].tag);
         }
         for (sv, n) in seen.iter().enumerate().skip(1) {
             assert!(*n > 0, "SV-{sv:02} never placed");

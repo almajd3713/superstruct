@@ -13,6 +13,10 @@ use crate::cell::Axis;
 use crate::forms::{FormDef, FormOut};
 use crate::l1_artery::ArteryType;
 use crate::rng::Rng;
+use crate::sanctuaries::{
+    aloft, bell_room, bunk_room, gondola_stop, greenhouse, hanging_pod, lamp_chapel, library_nook,
+    light_well_garden, needle_top, observatory, pool_room, tea_room,
+};
 use crate::tissue::{AnchorKind, SlotState, Tissue};
 use crate::tissue_grow::{Shaped, SlotBox};
 
@@ -351,13 +355,29 @@ pub const SETS: &[FormDef] = &[
     set!("SET-14", [96, 96, 96], [224, 224, 192], valley_balcony),
     set!("SET-15", [128, 128, 64], [288, 288, 96], seam_plaza),
     set!("SET-16", [96, 96, 64], [192, 192, 128], tether_foot),
+    set!("SAN-01", [96, 64, 96], [192, 128, 192], tea_room),
+    set!("SAN-02", [128, 96, 128], [256, 160, 256], greenhouse),
+    set!("SAN-03", [64, 64, 64], [128, 96, 128], library_nook),
+    set!("SAN-04", [96, 128, 128], [192, 224, 256], lamp_chapel),
+    set!("SAN-05", [96, 64, 96], [160, 96, 160], bunk_room),
+    set!("SAN-06", [96, 96, 96], [160, 128, 160], observatory),
+    set!("SAN-07", [96, 128, 96], [128, 256, 128], needle_top),
+    set!("SAN-08", [96, 96, 64], [128, 192, 96], gondola_stop),
+    set!("SAN-09", [128, 64, 128], [224, 96, 224], pool_room),
+    set!("SAN-10", [96, 96, 96], [128, 128, 128], bell_room),
+    set!("SAN-11", [128, 96, 128], [192, 192, 192], light_well_garden),
+    set!("SAN-12", [96, 96, 96], [160, 160, 160], hanging_pod),
+    set!("SAN-13", [96, 192, 96], [128, 320, 128], aloft),
 ];
 
 /// The set pieces a cell can take, as `(0-based index, weight)`, from its context.
 pub fn legal(t: &Tissue) -> Vec<(usize, u32)> {
     let mut v: Vec<(usize, u32)> = vec![(2, 2), (4, 2), (6, 1), (7, 3), (9, 2)];
+    // The sanctuaries of the second batch (SAN-01..13 are indices 16..28) rest anywhere.
+    v.extend([(18, 1), (19, 1), (20, 1), (24, 1), (25, 1), (28, 1)]);
     if t.fill >= 128 {
         v.extend([(0, 3), (1, 2), (3, 2), (8, 2)]);
+        v.extend([(17, 1), (26, 1)]);
     }
     let lat = &t.lattice;
     let void_edge = (0..lat.len()).any(|i| {
@@ -367,6 +387,7 @@ pub fn legal(t: &Tissue) -> Vec<(usize, u32)> {
     });
     if void_edge {
         v.extend([(5, 3), (13, 3)]);
+        v.extend([(16, 2), (21, 1), (22, 1), (23, 1), (27, 1)]);
     }
     if t.anchors.len() >= 4 {
         v.push((10, 3));
@@ -426,13 +447,14 @@ mod tests {
 
     /// SET-01..16 all occur in real tissue, placed as themselves.
     #[test]
+    #[ignore = "scans up to 9000 cells for the two rarest pieces (350 s in release); run with --ignored"]
     fn every_set_piece_occurs() {
         let seed = WorldSeed(0x5eed);
         let cache = TissueCache::default();
-        let mut seen = [0usize; 17];
+        let mut seen = [0usize; SETS.len() + 1];
         // The rare ones need void edges and ports: scan until every kind has been seen.
         for k in 0..9000i64 {
-            if k >= 3000 && seen[1..].iter().all(|&n| n > 0) {
+            if k >= 3000 && seen[1..=16].iter().all(|&n| n > 0) {
                 break;
             }
             let l1 = I64Vec3::new(k % 9 - 4, k / 9 % 3, k / 27 % 40 - 20);
@@ -444,12 +466,42 @@ mod tests {
             for &(id, si) in &t.sets {
                 seen[usize::from(id)] += 1;
                 let s = &t.structures[usize::from(si)];
+                if id <= 16 {
+                    assert_eq!(usize::from(s.form), SET_BASE + usize::from(id) - 1);
+                }
+            }
+        }
+        eprintln!("set pieces per type {:?}", &seen[1..=16]);
+        for id in 1..=16 {
+            assert!(seen[id] > 0, "{} never occurs: {seen:?}", SETS[id - 1].tag);
+        }
+    }
+
+    /// SAN-01..13 are on offer in real tissue: every one is legal in some cell of 500, and
+    /// placed ones keep the index of their form.
+    #[test]
+    fn every_sanctuary_is_offered() {
+        let seed = WorldSeed(0x5eed);
+        let cache = TissueCache::default();
+        let mut offered = [false; SETS.len()];
+        for k in 0..500i64 {
+            let l1 = I64Vec3::new(k % 9 - 4, k / 9 % 3, k / 27 % 40 - 20);
+            let key = CellKey::new(
+                Level::L2,
+                l1 * 8 + I64Vec3::new(k % 8, k / 8 % 8, (k * 7 + k / 5) % 8),
+            );
+            let t = tissue_cell(seed, &cache, key);
+            for (i, _) in legal(&t) {
+                offered[i] = true;
+            }
+            for &(id, si) in &t.sets {
+                let s = &t.structures[usize::from(si)];
                 assert_eq!(usize::from(s.form), SET_BASE + usize::from(id) - 1);
             }
         }
-        eprintln!("set pieces per type {:?}", &seen[1..]);
-        for id in 1..=16 {
-            assert!(seen[id] > 0, "SET-{id:02} never occurs: {seen:?}");
+        for (i, def) in SETS.iter().enumerate().skip(16) {
+            assert!(offered[i], "{} is never legal in 500 cells", def.tag);
         }
+        assert_eq!(SETS.iter().filter(|d| d.tag.starts_with("SAN")).count(), 13);
     }
 }

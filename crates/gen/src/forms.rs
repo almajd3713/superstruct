@@ -16,6 +16,13 @@
 )]
 
 use crate::cell::Axis;
+use crate::forms2::{
+    arcology, battleship_island, blast_furnace, boullee_hall, bridge_house, capsule_tower,
+    cathedral, cooling_tower, dish, gasometer, habitat_stack, hanging_garden_tower,
+    hollow_mountain, lattice_ghost, lift_tower_cluster, megaframe, metabolist_trunk,
+    monster_building, silo_bank, space_frame, sphere_house, stair_tower_field, stepped_slab,
+    viaduct,
+};
 use crate::prim::Dir4;
 use crate::rng::Rng;
 use crate::tissue_grow::{Shaped, SlotBox};
@@ -51,6 +58,11 @@ pub struct FormOut {
 }
 
 impl FormOut {
+    /// One cube of `side` slots (the Grid, STG-04).
+    pub fn of_cube(side: i32) -> Option<Self> {
+        Self::of_boxes(vec![bx([0, 0, 0], [side, side, side])])
+    }
+
     fn of_boxes(boxes: Vec<SlotBox>) -> Option<Self> {
         Some(Self {
             boxes,
@@ -590,6 +602,60 @@ pub const FORMS: &[FormDef] = &[
     form!("FORM-21", 6, [192, 192, 96], [480, 480, 224], starburst),
     form!("FORM-22", 6, [160, 128, 96], [416, 320, 320], wedge),
     form!("FORM-23", 6, [128, 128, 192], [320, 320, 512], cone),
+    form!("F2-01", 0, [96, 96, 160], [224, 224, 480], capsule_tower),
+    form!("F2-02", 0, [128, 128, 128], [352, 352, 352], habitat_stack),
+    form!("F2-03", 1, [224, 224, 128], [480, 480, 384], arcology),
+    form!("F2-04", 4, [160, 160, 128], [320, 320, 448], cooling_tower),
+    form!("F2-05", 3, [128, 128, 96], [320, 320, 224], dish),
+    form!("F2-06", 3, [128, 128, 96], [288, 288, 224], gasometer),
+    form!("F2-07", 3, [128, 128, 128], [320, 320, 384], blast_furnace),
+    form!("F2-08", 2, [224, 64, 96], [512, 192, 224], viaduct),
+    form!("F2-09", 2, [160, 160, 128], [416, 416, 384], megaframe),
+    form!("F2-10", 2, [192, 192, 64], [480, 480, 128], space_frame),
+    form!("F2-11", 0, [96, 96, 160], [256, 256, 480], metabolist_trunk),
+    form!("F2-12", 1, [192, 96, 128], [480, 320, 384], stepped_slab),
+    form!("F2-13", 4, [192, 192, 96], [448, 448, 256], boullee_hall),
+    form!("F2-14", 4, [128, 128, 160], [288, 288, 288], sphere_house),
+    form!("F2-15", 0, [160, 224, 96], [352, 512, 256], cathedral),
+    form!(
+        "F2-16",
+        6,
+        [160, 160, 128],
+        [416, 416, 384],
+        monster_building
+    ),
+    form!(
+        "F2-17",
+        3,
+        [224, 96, 64],
+        [512, 224, 160],
+        battleship_island
+    ),
+    form!("F2-18", 2, [192, 160, 96], [448, 384, 224], bridge_house),
+    form!("F2-19", 3, [128, 128, 64], [320, 320, 192], silo_bank),
+    form!(
+        "F2-20",
+        0,
+        [160, 160, 128],
+        [352, 352, 416],
+        lift_tower_cluster
+    ),
+    form!(
+        "F2-21",
+        6,
+        [160, 160, 96],
+        [352, 352, 224],
+        stair_tower_field
+    ),
+    form!("F2-22", 1, [192, 192, 96], [448, 448, 224], hollow_mountain),
+    form!(
+        "F2-23",
+        0,
+        [96, 96, 160],
+        [224, 224, 416],
+        hanging_garden_tower
+    ),
+    form!("F2-24", 5, [128, 128, 128], [320, 320, 352], lattice_ghost),
 ];
 
 /// The indices into `FORMS` of family `family`.

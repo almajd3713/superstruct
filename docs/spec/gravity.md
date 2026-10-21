@@ -221,6 +221,20 @@ These use the field, gates, and lulls above. Their geometry is specified where t
 
 Only `gravity_at(p)` is a function of position alone. `Tumbler`, `Orbiters` and the Archipelago rotation depend on the world clock and live in the engine, not in `gen`.
 
+### 8.1 What is built (PW.10.14, `worldgen::weightless`, `GEN_VERSION` 24)
+
+Fields come from wells with no geometry of their own (`Well::quiet`: the geometry is the feature's); `gravity::draw_wells` appends them to the ordinary draw.
+
+| ID | Built as |
+|---|---|
+| WGT-01, 02 | **Featherfall shafts**: an L0 column holds one with chance 1 in 7 (`WEIGHTLESS`, `0x012B`, keyed `(x, 2⁴⁰, z)`), at an inner L1 column, through every L1 cell. Its field is a Plane well per L0 cell, 48 m across the whole 32 km, of strength 4–16 along the shaft (a fall of 1–3 m/s), reach 96 m. Variants: straight (a platform every 96 m), helical (a spiral of lights), branching (a gallery of 6 × 6 m, 48 m long, every 256 m) and **upward** (the plane's up is `−n`, rings of red light). Walls of 4 m with a doorway every 128 m and a landing outside it, rings of light every 64 m. One shaft in forty is **the Drop** (WON-13): 128 m across, strength 4, straight |
+| WGT-03, 04 | **Drift lanes** and **gravity rivers**: an L0 cell holds one with chance 1 in 6 (the kind is drawn with the other weightless features): a lull tube (a Tube well of strength 0, radius 10–30 m) along x or z through the site's L1 row, the whole L0 cell for a lane and 1–10 km for a river, with a current of 0.5–2.5 m/s along it (`current_at`, cm/s). Rings of light every 64 m. The controller's drift speed relaxes to the current with the 4 s constant |
+| WGT-05 | **The Archipelago**: a lull plane of 1 km with ten floating fragments (40–100 m cubes), each its own Point well (strength 32–128, reach 200–600 m), so you stand on a fragment. The rotation of fragments by the world clock is not drawn |
+| WGT-06 | **Tumbler rooms**: a hollow cube of 120 m with a doorway; `tumbler_at(seed, p)` gives the room and `Tumbler::up_at(t)` its up at world time `t`: one of the six axes, redrawn every 180–480 s from the room's key. The engine (`app.rs`) sets the walker's up from it inside the room. The world clock is the tram game time, which is not saved yet |
+| WGT-07 | **Orbiters**: 24 debris cubes (12–32 m) at radii of 400–875 m round the site, with their periods (120–330 s) and phases in `orbiters(seed, l1)`. They are placed at phase 0 and do not move yet (a moving instance system is PW.10.12) |
+| WGT-08 | **Low-gravity districts**: the ordinary wells of strength below 160 (about four in eleven). The Tidal well's falling strength is the edge |
+| WGT-09 | **The weightless cathedral**: a hall of 480 × 64 × 64 m with a lull plane over its nave, ribs every 32 m, 30 floating lamps and four rails along its middle |
+
 ## 9. Tests
 
 - `gravity_at` is a pure function: same inputs, same output across threads and runs; no float in the vector sum.

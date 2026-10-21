@@ -31,6 +31,7 @@ use crate::liftdraw::LiftDraw;
 use crate::liftplan::plan_cell;
 use crate::liftsys::{LiftInput, LiftSystem, PlanResult, PlayerView};
 use crate::meshpool::MeshPool;
+use crate::moversys::{MoverSystem, WithMovers};
 use crate::overlay::{Overlay, OverlayInfo};
 use crate::readback;
 use crate::renderer::{DebugBox, FrameInput, FrameParams, Renderer};
@@ -95,6 +96,8 @@ struct App {
     beacon_draw: BeaconDraw,
     trams: TramSystem,
     tram_draw: TramDraw,
+    /// World-clock movers near the player (`moversys.rs`).
+    movers: MoverSystem,
     far_trams: FarTrams,
     /// `SUPERSTRUCT_TRAM=auto`: a scripted ride for hitch captures.
     tram_auto: Option<TramAuto>,
@@ -206,9 +209,24 @@ impl App {
         });
     }
 
+    /// The world clock in milliseconds: the game time of the tram system, which a restart
+    /// resets (the save has no clock yet).
+    #[allow(clippy::cast_sign_loss)] // the clock never runs backwards
+    fn world_clock_ms(&self) -> u64 {
+        (self.trams.time() * 1000.0) as u64
+    }
+
     /// Moves the player by one fixed step: noclip fly, or the walking controller.
     #[allow(clippy::too_many_lines)] // fly, photo, tram auto-walk and the walker
     fn move_player(&mut self, dt: f32) {
+        // The movers stand at their pose for the world clock (SYS-01), wherever the player is.
+        let focus = if self.fly_mode {
+            self.camera.pos
+        } else {
+            self.walker.pos
+        };
+        self.movers
+            .update(WorldSeed(self.settings.seed), &focus, self.world_clock_ms());
         // Without the cursor grabbed there is no input, but gravity still applies when walking.
         let grabbed = self.cursor_grabbed;
         let axis = |pos: Action, neg: Action| {
@@ -305,14 +323,30 @@ impl App {
             };
             self.step_lifts(dt);
             let aboard = self.trams.aboard();
-            let world = Riding {
+            let riding = Riding {
                 world: self.streamer.collision(),
                 force_ready: aboard,
+            };
+            let world = WithMovers {
+                inner: &riding,
+                movers: &self.movers,
             };
             if aboard || !self.lifts.holds_controller(&self.walker.pos) {
                 let seed = WorldSeed(self.settings.seed);
                 let at = &self.walker.pos;
-                let field = Field::from_gravity(gravity_at(seed, at.sector(), at.local()));
+                let mut field = Field::from_gravity(gravity_at(seed, at.sector(), at.local()));
+                // Weightless features (WGT-03, 06): the current of a drift lane, and the room
+                // that turns with the world clock.
+                let metres =
+                    [0, 1, 2].map(|i| at.sector()[i] * 1024 + at.local()[i].floor() as i64);
+                let cm = worldgen::weightless::current_at(seed, metres);
+                field.current = Vec3::new(cm[0] as f32, cm[1] as f32, cm[2] as f32) * 0.01;
+                if let Some(room) = worldgen::weightless::tumbler_at(seed, metres) {
+                    let up = room.up_at(self.trams.time() as i64);
+                    field.up = Vec3::new(f32::from(up[0]), f32::from(up[1]), f32::from(up[2]))
+                        .normalize_or_zero();
+                    field.strength = 1.0;
+                }
                 self.walker.step_in(dt, input, &world, field);
             }
             if let Event::Respawn(spot) =
@@ -744,6 +778,11 @@ impl App {
             &self.trams,
             &render_camera.pos,
         );
+        self.movers.draw(
+            &mut running.renderer,
+            &running.gpu.device,
+            &running.gpu.queue,
+        );
         self.far_trams.update(
             &mut running.renderer,
             &running.gpu.queue,
@@ -1050,6 +1089,7 @@ impl ApplicationHandler for App {
 }
 
 /// Opens the window and blocks until it is closed.
+#[allow(clippy::too_many_lines)] // one struct literal of every system
 pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
     let replay = crate::shot::from_env();
     let settings = match &replay {
@@ -1090,6 +1130,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         beacon_draw: BeaconDraw::default(),
         trams: TramSystem::new(WorldSeed(settings_seed)),
         tram_draw: TramDraw::default(),
+        movers: MoverSystem::default(),
         far_trams: FarTrams::default(),
         tram_auto: (std::env::var("SUPERSTRUCT_TRAM").as_deref() == Ok("auto"))
             .then(|| TramAuto::new(WorldSeed(settings_seed))),

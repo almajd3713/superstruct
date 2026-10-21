@@ -84,12 +84,15 @@ pub struct Controller {
 pub struct Field {
     pub up: Vec3,
     pub strength: f32,
+    /// The current of a drift lane here, in m/s: a drifting player's speed relaxes towards it.
+    pub current: Vec3,
 }
 
 impl Field {
     pub const STANDARD: Field = Field {
         up: Vec3::Y,
         strength: 1.0,
+        current: Vec3::ZERO,
     };
 
     pub fn from_gravity(g: worldgen::gravity::Gravity) -> Self {
@@ -97,6 +100,7 @@ impl Field {
         Field {
             up: v.normalize_or_zero(),
             strength: f32::from(g.strength) / 256.0,
+            current: Vec3::ZERO,
         }
     }
 }
@@ -242,7 +246,7 @@ impl Controller {
         }
         self.orient(dt, field);
         if field.strength < LULL {
-            self.drift_step(dt, input, src);
+            self.drift_step(dt, input, src, field.current);
             return;
         }
         if let Some(c) = self.climb {
@@ -310,12 +314,13 @@ impl Controller {
     /// Free drift in a lull (GRV-14): no gravity, velocity decays over 4 s, the forward key pushes
     /// along the view at 0.5 m/s² up to 1 m/s, and a surface takes the speed into it away
     /// without damage.
-    fn drift_step(&mut self, dt: f32, input: MoveInput, src: &dyn SolidSource) {
+    fn drift_step(&mut self, dt: f32, input: MoveInput, src: &dyn SolidSource, current: Vec3) {
         self.grounded = false;
         self.grounded_time = 0.0;
         self.platform = None;
         self.climb = None;
-        self.vel *= (1.0 - dt / DRIFT_DECAY).max(0.0);
+        // The speed decays towards the current of the lane, if there is one.
+        self.vel = current + (self.vel - current) * (1.0 - dt / DRIFT_DECAY).max(0.0);
         let thrust = input.thrust.clamp(-1.0, 1.0);
         let along = self.vel.dot(input.look);
         if thrust != 0.0
@@ -768,6 +773,7 @@ pub(crate) mod tests {
             let field = Field {
                 up: n,
                 strength: 1.0,
+                current: Vec3::ZERO,
             };
             let start = centre + n * 10.05;
             let mut c = at(start.x, start.y, start.z);
@@ -799,6 +805,7 @@ pub(crate) mod tests {
         let flip = Field {
             up: Vec3::NEG_Y,
             strength: 1.0,
+            current: Vec3::ZERO,
         };
         run_in(&mut c, &w, 1.0, Vec3::ZERO, flip);
         let turned = c.up().dot(Vec3::Y).clamp(-1.0, 1.0).acos();
@@ -824,6 +831,7 @@ pub(crate) mod tests {
         let lull = Field {
             up: Vec3::ZERO,
             strength: 0.0,
+            current: Vec3::ZERO,
         };
         let mut c = at(100.0, 100.0, 100.0);
         let look = Vec3::new(1.0, 0.0, 0.0);
@@ -849,6 +857,23 @@ pub(crate) mod tests {
         assert!(c.up().dot(Vec3::Y) > 0.9999);
     }
 
+    /// WGT-03: in a drift lane the speed relaxes to the current, with nothing pushing.
+    #[test]
+    fn a_drift_lane_carries_a_drifter() {
+        let w = Flat(vec![]);
+        let lane = Field {
+            up: Vec3::ZERO,
+            strength: 0.0,
+            current: Vec3::new(1.5, 0.0, 0.0),
+        };
+        let mut c = at(100.0, 100.0, 100.0);
+        for _ in 0..(20 * 120) {
+            c.step_in(1.0 / 120.0, drift_input(0.0, Vec3::X), &w, lane);
+        }
+        assert!((c.vel.x - 1.5).abs() < 0.05, "{}", c.vel);
+        assert!(local(&c).x > 120.0, "carried {} m", local(&c).x - 100.0);
+    }
+
     #[test]
     fn a_surface_stops_a_drifter_without_a_bounce() {
         let wall = floor_box([1700, 1000, 1000], [1760, 3000, 3000]);
@@ -856,6 +881,7 @@ pub(crate) mod tests {
         let lull = Field {
             up: Vec3::ZERO,
             strength: 0.0,
+            current: Vec3::ZERO,
         };
         let mut c = at(100.0, 100.0, 100.0);
         for _ in 0..1200 {
@@ -872,6 +898,7 @@ pub(crate) mod tests {
         let half = Field {
             up: Vec3::Y,
             strength: 0.5,
+            current: Vec3::ZERO,
         };
         let mut c = at(100.0, 100.0, 100.0);
         run_in(&mut c, &w, 1.0, Vec3::ZERO, half);

@@ -138,13 +138,7 @@ pub fn rare_at(seed: WorldSeed, l1: I64Vec3) -> Option<Rare> {
     }
 }
 
-/// What the geometry events add to their L1 cell, in cell-local quanta, and the space they keep
-/// clear of everything else.
-#[derive(Debug, Default)]
-pub struct Content {
-    pub prims: Vec<Primitive>,
-    pub keep_out: Vec<QAabb>,
-}
+pub use crate::features::Content;
 
 struct B {
     out: Vec<Primitive>,
@@ -564,28 +558,6 @@ pub fn rare_content(seed: WorldSeed, l1: I64Vec3) -> Content {
         prims: b.out,
         keep_out,
     }
-}
-
-/// The L2 cells of L1 cell `l1` that hold or touch the space a rare event keeps clear, for the
-/// artery tree to reach (an event with no geometry has none).
-pub fn tie_cells(seed: WorldSeed, l1: I64Vec3) -> Vec<[i64; 3]> {
-    let content = rare_content(seed, l1);
-    let l2 = |q: i32| i64::from(q / M).div_euclid(512);
-    let mut cells = Vec::new();
-    for k in &content.keep_out {
-        let lo = [k.min.x, k.min.y, k.min.z].map(|v| (l2(v) - 1).max(0));
-        let hi = [k.max.x, k.max.y, k.max.z].map(|v| (l2(v - 1) + 1).min(7));
-        for z in lo[2]..=hi[2] {
-            for y in lo[1]..=hi[1] {
-                for x in lo[0]..=hi[0] {
-                    if !cells.contains(&[x, y, z]) {
-                        cells.push([x, y, z]);
-                    }
-                }
-            }
-        }
-    }
-    cells
 }
 
 #[cfg(test)]

@@ -400,6 +400,7 @@ mod tests {
         let field = Field {
             up: Vec3::Y,
             strength,
+            current: Vec3::ZERO,
         };
         let top = local(&c).y;
         for _ in 0..(20.0 / DT) as u32 {

@@ -212,6 +212,10 @@ impl MaterialId {
     pub const LIT_WINDOW: Self = Self(8);
     /// A dim red signal lamp: one of the four light colours of a knot's far signature.
     pub const SIGNAL: Self = Self(9);
+    /// Moss, roots and vines: a dull olive grey (GROW-01, 02, 04, 05).
+    pub const MOSS: Self = Self(10);
+    /// Pale fungus that glows a little (GROW-03).
+    pub const FUNGUS: Self = Self(11);
 }
 
 /// What a primitive belongs to. Append-only.

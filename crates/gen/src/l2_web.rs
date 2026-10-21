@@ -144,6 +144,9 @@ pub fn l2_cell_web_edges(
 fn add_extras(seed: WorldSeed, cell: CellKey, t: &crate::tissue::Tissue, out: &mut Vec<Primitive>) {
     out.extend(crate::gates::cell_markers(seed, cell.coords));
     out.extend(crate::kit_ext::dress(t).into_iter().map(|(_, p)| p));
+    out.extend(crate::quarters::dress(t).into_iter().map(|(_, p)| p));
+    out.extend(crate::growth::dress(t).into_iter().map(|(_, p)| p));
+    out.extend(crate::strange::cell_pieces(seed, cell.coords));
     out.extend(crate::wellgeom::cell_pieces(seed, cell.coords));
     // Two identical pieces would z-fight, and no offset can separate them.
     let mut seen = std::collections::HashSet::new();

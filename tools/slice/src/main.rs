@@ -12,6 +12,7 @@
     clippy::cast_possible_wrap
 )]
 
+mod glyph_sheet;
 mod render;
 mod stack_view;
 
@@ -29,6 +30,7 @@ slice: cross-sections and connectivity reports from the generator
 USAGE:
     slice [OPTIONS]
     slice --report [OPTIONS]
+    slice --glyphs --seed N --out out/glyphs.png
 
 SECTION OPTIONS:
     --seed <TEXT|N>      World seed: a number, or text that is hashed. Default: 42
@@ -78,6 +80,7 @@ struct Args {
     between: bool,
     fill: bool,
     report: bool,
+    glyphs: bool,
     count: u32,
     sample_seed: u64,
     threads: usize,
@@ -100,6 +103,7 @@ fn parse() -> Result<Option<Args>> {
         between: false,
         fill: false,
         report: false,
+        glyphs: false,
         count: 10_240,
         sample_seed: 7,
         threads: std::thread::available_parallelism().map_or(2, usize::from),
@@ -141,6 +145,7 @@ fn parse() -> Result<Option<Args>> {
             "--between" => a.between = true,
             "--fill" => a.fill = true,
             "--report" => a.report = true,
+            "--glyphs" => a.glyphs = true,
             "--count" => a.count = value("--count")?.parse().context("--count")?,
             "--sample-seed" => {
                 a.sample_seed = value("--sample-seed")?.parse().context("--sample-seed")?;
@@ -160,7 +165,20 @@ fn parse() -> Result<Option<Args>> {
 
 fn main() -> Result<()> {
     let Some(a) = parse()? else { return Ok(()) };
-    if a.report {
+    if a.glyphs {
+        let out = a
+            .out
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("out/glyphs.png"));
+        if let Some(dir) = out.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        glyph_sheet::render(a.seed)
+            .save(&out)
+            .with_context(|| format!("writing {}", out.display()))?;
+        println!("wrote {}", out.display());
+        Ok(())
+    } else if a.report {
         report(&a)
     } else {
         let out = a

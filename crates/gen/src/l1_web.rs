@@ -50,7 +50,7 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
         }
     }
     add_staircase(seed, l1, &mut out);
-    add_rare(seed, l1, &mut out);
+    add_features(seed, l1, &mut out);
     if let Some(s) = skeleton(seed, l1) {
         out.ports = skeleton_ports(l1, &s);
         out.child_constraints
@@ -59,27 +59,25 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
     out
 }
 
-/// The geometry of a rare event of this L1 cell (RARE-05..09, 13, 14, 02): what it keeps clear
-/// is cut out of the rest of the cell and listed for the children, and its own pieces go in.
-fn add_rare(seed: WorldSeed, l1: I64Vec3, out: &mut CellOutput) {
-    let content = crate::rare::rare_content(seed, l1);
-    if content.keep_out.is_empty() {
-        return;
+/// The world-scale features of this L1 cell (`features`): what each keeps clear is cut out of the
+/// rest of the cell and listed for the children, and its own pieces go in.
+fn add_features(seed: WorldSeed, l1: I64Vec3, out: &mut CellOutput) {
+    for content in crate::features::contents(seed, l1) {
+        for keep in &content.keep_out {
+            let bore = Primitive {
+                shape: Shape::Box { aabb: *keep },
+                material: crate::prim::MaterialId::CONCRETE,
+                kind: crate::prim::FeatureKind::MISC,
+                flags: crate::prim::PrimFlags::NO_COLLIDE,
+            };
+            let prims = std::mem::take(&mut out.primitives);
+            out.primitives = crate::carve::carve(prims, &[bore], [0; 3]).0;
+            out.primitives.retain(|p| !enters(p, keep));
+            out.child_constraints
+                .push(ChildConstraint::KeepOut { aabb: *keep });
+        }
+        out.primitives.extend(content.prims);
     }
-    for keep in &content.keep_out {
-        let bore = Primitive {
-            shape: Shape::Box { aabb: *keep },
-            material: crate::prim::MaterialId::CONCRETE,
-            kind: crate::prim::FeatureKind::MISC,
-            flags: crate::prim::PrimFlags::NO_COLLIDE,
-        };
-        let prims = std::mem::take(&mut out.primitives);
-        out.primitives = crate::carve::carve(prims, &[bore], [0; 3]).0;
-        out.primitives.retain(|p| !enters(p, keep));
-        out.child_constraints
-            .push(ChildConstraint::KeepOut { aabb: *keep });
-    }
-    out.primitives.extend(content.prims);
 }
 
 /// The infinite staircase of this L1 column, if it has one (STAIR-01..04): the other pieces of

@@ -287,6 +287,8 @@ pub struct Tissue {
     pub seed: WorldSeed,
     /// The rare event whose district this cell is in (`rare.rs`).
     pub rare: Option<crate::rare::Rare>,
+    /// The strange region this cell is in (`strange.rs`).
+    pub strange: Option<crate::strange::Strange>,
     pub cell: CellKey,
     pub lattice: Lattice,
     pub anchors: Vec<Anchor>,
@@ -373,7 +375,8 @@ fn build(seed: WorldSeed, cache: &TissueCache, cell: CellKey, grown: bool) -> Ti
     let web = regime(seed, l0).web;
     let frame = web.frame_l2(seed, l2);
     let centre = l2 * 512 + I64Vec3::splat(256);
-    let rare = crate::rare::rare_at(seed, l1);
+    let strange = crate::strange::strange_of(seed, l0);
+    let rare = crate::rare::rare_at(seed, l1).or(strange.and_then(crate::strange::rare_of));
     let chr = character_near(seed, l0, centre.rem_euclid(I64Vec3::splat(32_768))).map(|mut c| {
         // RARE-03 and RARE-04: the biggest and the smallest scale of the table.
         match rare {
@@ -507,6 +510,7 @@ fn build(seed: WorldSeed, cache: &TissueCache, cell: CellKey, grown: bool) -> Ti
     let mut t = Tissue {
         seed,
         rare,
+        strange,
         cell,
         lattice: lat,
         anchors,

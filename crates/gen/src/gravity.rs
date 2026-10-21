@@ -98,6 +98,8 @@ pub struct Well {
     pub fold: Vec<FoldSegment>,
     /// A quiet lull's twins: they leave no planetoid and no furnace (`rare.rs`).
     pub quiet: bool,
+    /// A plane well whose up is `-n` (the upward featherfall shaft).
+    pub flip: bool,
 }
 
 fn oct3(r: [i64; 3]) -> i64 {
@@ -224,6 +226,9 @@ impl Well {
                 }
                 let n = dir(self.axis);
                 let mut up = [n[0] * 4, n[1] * 4, n[2] * 4];
+                if self.flip {
+                    up = neg(up);
+                }
                 let mut coverage = smooth_coverage(self.reach, d);
                 if self.kind == WellKind::Seam {
                     if dot(r, n) < 0 {
@@ -340,6 +345,7 @@ fn rare_wells(seed: WorldSeed, l0: I64Vec3) -> Option<Vec<Well>> {
         l1: site.l1,
         fold: Vec::new(),
         quiet: false,
+        flip: false,
     };
     match site.kind {
         Rare::Planetoid => Some(vec![base]),
@@ -351,6 +357,7 @@ fn rare_wells(seed: WorldSeed, l0: I64Vec3) -> Option<Vec<Well>> {
                 reach: 6000,
                 strength: 160,
                 quiet: true,
+                flip: false,
                 ..base.clone()
             };
             Some(vec![pair(-200), pair(200)])
@@ -385,6 +392,14 @@ fn rare_wells(seed: WorldSeed, l0: I64Vec3) -> Option<Vec<Well>> {
 }
 
 fn draw_wells(seed: WorldSeed, l0: I64Vec3) -> Vec<Well> {
+    let mut wells = draw_main_wells(seed, l0);
+    // The weightless features add their own (`weightless.rs`): fields without geometry of
+    // their own.
+    wells.extend(crate::weightless::wells(seed, l0));
+    wells
+}
+
+fn draw_main_wells(seed: WorldSeed, l0: I64Vec3) -> Vec<Well> {
     if let Some(wells) = rare_wells(seed, l0) {
         return wells;
     }
@@ -433,6 +448,7 @@ fn draw_wells(seed: WorldSeed, l0: I64Vec3) -> Vec<Well> {
         l1,
         fold: Vec::new(),
         quiet: false,
+        flip: false,
     };
     let mut out = Vec::new();
     match kind {
@@ -650,7 +666,10 @@ pub fn find_well(seed: WorldSeed, kind: WellKind, search: i64) -> Option<(I64Vec
                         continue;
                     }
                     let l0 = I64Vec3::new(x, y, z);
-                    if let Some(w) = wells_of(seed, l0).iter().find(|w| w.kind == kind) {
+                    if let Some(w) = wells_of(seed, l0)
+                        .iter()
+                        .find(|w| w.kind == kind && !w.quiet)
+                    {
                         return Some((l0, w.clone()));
                     }
                 }
@@ -772,7 +791,10 @@ mod tests {
         let mut n = 0;
         for x in 0..20 {
             for z in 0..20 {
-                if !wells_of(SEED, I64Vec3::new(x, 0, z)).is_empty() {
+                if wells_of(SEED, I64Vec3::new(x, 0, z))
+                    .iter()
+                    .any(|w| !w.quiet)
+                {
                     n += 1;
                 }
             }

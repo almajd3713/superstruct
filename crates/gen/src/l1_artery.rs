@@ -656,7 +656,7 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
         b.tie(k, &cells, TieKind::Stair);
     }
 
-    let cells: Vec<L2c> = crate::rare::tie_cells(seed, l1);
+    let cells: Vec<L2c> = crate::features::tie_cells(seed, l1);
     if !cells.is_empty() {
         b.tie(k, &cells, TieKind::Rare);
     }

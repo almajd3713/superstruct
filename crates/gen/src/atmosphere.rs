@@ -169,7 +169,10 @@ pub fn atmosphere_at(seed: WorldSeed, pos: &WorldPos) -> Atmosphere {
             for &(z, wz) in &axes[2] {
                 let w = wx * wy * wz;
                 if w > 0.0 {
-                    let a = regime_atmosphere(&regime(seed, I64Vec3::new(x, y, z)));
+                    let l0 = I64Vec3::new(x, y, z);
+                    let mut a = regime_atmosphere(&regime(seed, l0));
+                    // Fog districts and the Far Lands (STG-07, STG-11).
+                    a.sigma *= crate::strange::fog_factor(seed, l0);
                     out.fog_color += a.fog_color * w;
                     out.sigma += a.sigma * w;
                     out.ambient += a.ambient * w;

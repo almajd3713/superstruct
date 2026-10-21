@@ -31,6 +31,8 @@ pub enum PayoffKind {
     Lift,
     /// A lamp.
     Light,
+    /// An installation (`payoffs2.rs`, PAY-01..10 as 0..9).
+    Install(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,6 +318,19 @@ pub fn payoff_pass(t: &mut Tissue, rng: &mut Rng) {
             });
             continue;
         }
+        // 1b. An installation (PAY-01..10), one leaf in four.
+        if words[1].is_multiple_of(4) {
+            let kind = ((words[1] >> 8) % 10) as usize;
+            let mut r = Rng::new(words[1] ^ words[2].rotate_left(17));
+            if let Some(s) = crate::payoffs2::installation(t, kind, (cx, floor, cz), &mut r) {
+                specs.extend(s);
+                list.push(Payoff {
+                    slot: leaf as u32,
+                    kind: PayoffKind::Install(kind as u8),
+                });
+                continue;
+            }
+        }
         // 2. A view: a balcony toward the ray.
         if let Some(d) = view_dir(t, leaf, words[2] as usize) {
             balcony(&mut specs, (cx, cz, floor), d, pitch);
@@ -409,6 +424,7 @@ mod tests {
         let seed = WorldSeed(0x5eed);
         let cache = TissueCache::default();
         let (mut sets, mut views, mut lifts, mut lights) = (0, 0, 0, 0);
+        let mut installs = [0usize; 10];
         let mut leaves = 0;
         for key in cells(2000) {
             let t = tissue_cell(seed, &cache, key);
@@ -422,6 +438,7 @@ mod tests {
                     PayoffKind::View(_) => views += 1,
                     PayoffKind::Lift => lifts += 1,
                     PayoffKind::Light => lights += 1,
+                    PayoffKind::Install(k) => installs[usize::from(k)] += 1,
                 }
             }
             for &si in &t.lift_segments {
@@ -437,7 +454,13 @@ mod tests {
                 );
             }
         }
-        eprintln!("dead ends {leaves}: sets {sets}, views {views}, lifts {lifts}, lights {lights}");
+        eprintln!(
+            "dead ends {leaves}: sets {sets}, views {views}, lifts {lifts}, lights {lights}, installations {installs:?}"
+        );
         assert!(sets > 0 && views > 0 && lifts > 0 && lights > 0);
+        assert!(
+            installs.iter().sum::<usize>() > 0,
+            "no installation: {installs:?}"
+        );
     }
 }
