@@ -131,3 +131,13 @@ tissue the occlusion culling hides) was not measured: the renderer has no counte
 The GPU spends about 2.5 ms a frame, so the frame (11 ms) is CPU-bound and the switch changes nothing
 that the frame rate or the zone times can show. The share of the tissue that the pass hides is
 not measured: PW.7.5 adds a draw counter.
+
+### How much the occlusion culling hides (HOR-15; PW.7.5, `SUPERSTRUCT_CULLSTATS=1`)
+
+Chunks drawn in the last frame (mean of the one-second windows of a 60 m/s fly-through, 19
+windows after the first five): with `SUPERSTRUCT_OCCLUSION=0` set A (the frustum) holds **258**
+chunks of 864 resident; with the default two-phase pass A holds 246 and B (newly unhidden) 0, so
+**247 are drawn**. The frustum removes about 70 % of the resident chunks; the occlusion pass
+removes a further **4 %**. HOR-15's expectation that occlusion hides most of the tissue does not
+hold at the chunk granularity (an L2 chunk is 512 m and mostly partly visible); the frame rate is
+the same (134 and 133 fps) and the frame is CPU-bound (`PW.7.4`).

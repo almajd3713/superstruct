@@ -1127,10 +1127,21 @@ impl App {
                     .collect::<Vec<_>>()
                     .join(", ")
             });
+            // `SUPERSTRUCT_CULLSTATS=1`: the chunks drawn in the last frame, set A (visible last frame
+            // and in the frustum) and set B (newly unhidden), and those resident. Blocks the GPU.
+            let drawn = if std::env::var_os("SUPERSTRUCT_CULLSTATS").is_some() {
+                self.running.as_ref().map_or_else(String::new, |r| {
+                    let (a, b) = r.renderer.read_drawn_counts(&r.gpu.device);
+                    format!("A {a} B {b} of {}", self.streamer.stats().resident)
+                })
+            } else {
+                String::new()
+            };
             info!(
                 fps = format!("{:.1}", f64::from(self.fps_frames) / elapsed.as_secs_f64()),
                 worst_ms = format!("{:.1}", self.worst_frame * 1000.0),
                 gpu,
+                drawn,
                 "frame rate"
             );
             self.worst_frame = 0.0;
