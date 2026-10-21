@@ -737,7 +737,7 @@ fn scan_cell(
                     r.hit(&format!("f rise {which} id {}", w.id), || {
                         format!("PV {} end at ({:.1}, {:.1}, {:.1})", w.id, e.x, e.y, e.z)
                     });
-                    r.hit("f rise", || String::new());
+                    r.hit("f rise", String::new);
                 }
             }
         }
