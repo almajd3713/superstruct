@@ -216,6 +216,29 @@ Great Roads, Spines, Bores, Rivers, the Rail Abyss and the Cable Highway (`the-w
 
 Gravity wells are specified in `gravity.md` (PW.0.6). L0 only holds their centres: an integer point per well from the L0 key `[WELL]`, about one per 50 km. They matter here in two places: `StackGeometry::Curved` (`regimes.md` §8.1) and the radial orientation policy.
 
+### 3W.5 Rare events (PW.9.1–9.3, `worldgen::rare`, `GEN_VERSION` 22)
+
+One L0 cell in six holds one rare event (`RARE_SITE`, `0x0124`, keyed by the L0 cell): the kind is uniform over the fourteen of RARE-01..14 and the site is an **inner** L1 cell (indices 1–6 on each axis, so a district stays in its L0 cell). `rare_at(seed, l1)` is the event that touches an L1 cell: its own site, or a district that reaches it. The draws of geometry come from `RARE_BUILD` (`0x0125`), keyed by the site's L1 cell. Every event is on top of the older rare events of `regimes.md` §5.1.
+
+| ID | Kind | Reach | What it does |
+|---|---|---|---|
+| RARE-01 | Inverted district | the site's L1 cell and its 26 neighbours | support weights are zero except Hanging (×8) and Suspended; mutation 1 (inverted) always applies |
+| RARE-02 | Repeating corridor | the site's cell | one corridor of 6 × 4 m and 4 km along x through the middle of the cell, a frame (two posts and a lit beam) every 8 m, identical in every section; the cell keeps the space clear |
+| RARE-03 | Scale break | district | the stratum's scale is the largest of the table, ×4 (not ×8: the table's end) |
+| RARE-04 | Dollhouse | district | the scale is ×½ |
+| RARE-05 | Hollow trunk | the site's cell | 16 facets of 32 m (inner radius 80 m) the whole height of the cell, and a helix of 64 treads a turn (0.4375 m rise, 4 m wide, inner radius 48 m) inside, 146 turns |
+| RARE-06 | Builder site | the site's cell | four posts of 290–500 m, beams every 96 m (each present half the time), a scaffold of poles and grating decks up one face, a crane on a mast |
+| RARE-07 | The web | the site's cell | a void of 1 km on a side crossed by ten catwalks (3 m wide, with rails) at 88 m intervals and fourteen vertical cables; the catwalks reach 16 m past the void |
+| RARE-08 | Lamp sun | the site's cell | an emissive cube of 160 m with four lamps of 48 m, far-visible |
+| RARE-09 | Tram graveyard | the site's cell | 48 tram bodies (24 × 3.2 × 3.2 m) at random places, headings and tilts in a 760 m square, 40 m deep void |
+| RARE-10 | Planetoid | the L0 cell | the L0 cell's wells are replaced by one Point well at the site (reach 9 km, strength 256); the stack is `Curved` round it whatever the regime drew, so the crusts wrap; the cube core of `gravity.md` §3.4 is 2 km |
+| RARE-11 | Möbius corridor | the L0 cell | a Fold well that is a square loop of 1.2 km (reach 300 m): upright on two sides, upside down on the other two. **Deviation:** the field is single-valued, so a lap must cross an even number of flips; the loop is upside down for half of it instead of returning you inverted |
+| RARE-12 | Shattered grain | district | every box of a form is turned by a frame of its own (`mutations::shatter`), 5°–30° of tilt, any heading |
+| RARE-13 | Section cliff | the site's cell | a wall 4 km tall and 2 km wide, a thousand floors every 4 m cantilevered 128 m out of it, nine columns; the 700 m in front is kept clear |
+| RARE-14 | Quiet lull | the L0 cell | a hollow cube chamber (half size 128 m, 16 m walls) with four rails of 4 cm across it and a lamp; two equal twin wells at ±200 m make its middle a lull; the twins leave no planetoid and no furnace (`Well::quiet`) |
+
+The geometry events cut the L1 pieces out of the space they keep clear (boxes are cut, other shapes are dropped if they really enter it), list it as a `KeepOut` for the children and tie the L2 cells round it to the artery tree (`TieKind::Rare`), so the routes of the tissue reach it. The events with no geometry of their own (the districts, the wells) add none (`rare_content` is empty).
+
 ## 4W. L1 in the Web: Frame, Voids, Fill, Arteries (4096 m)
 
 | | |

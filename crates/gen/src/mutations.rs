@@ -96,6 +96,26 @@ pub fn pose(mut out: FormOut, size: [i32; 3], yaw: u8, tilt: u8) -> FormOut {
     out
 }
 
+/// RARE-12, shattered grain: every box of the form turned about the centre of its own base by a
+/// frame of its own (any heading, 5° to 30° of tilt).
+pub fn shatter(mut out: FormOut, rng: &mut Rng) -> FormOut {
+    let mut turned = out.turned.clone();
+    for b in out
+        .boxes
+        .drain(..)
+        .chain(out.shaped.drain(..).map(|(_, b)| b))
+    {
+        turned.push(Turned {
+            bx: b,
+            yaw: rng.below(64) as u8,
+            tilt: 1 + rng.below(6) as u8,
+            pivot: None,
+        });
+    }
+    out.turned = turned;
+    out
+}
+
 /// Applies mutation `id` to `out`, built for `size` (the size `size_before` gave, scaled back
 /// up by `stretch` for MUT-07). `size` is the bounding box the structure will occupy.
 #[allow(clippy::too_many_lines)] // one arm per mutation

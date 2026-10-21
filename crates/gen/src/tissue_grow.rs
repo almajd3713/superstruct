@@ -173,6 +173,10 @@ fn rej(_code: usize) -> Option<Structure> {
 pub(crate) fn mutations_of(t: &Tissue, words: &[u64; 16]) -> Vec<u8> {
     let weights = t.character.map_or([4u8; 6], |c| c.mutations).map(u32::from);
     let mut out: Vec<u8> = Vec::new();
+    // An inverted district turns every form upside down (RARE-01).
+    if t.rare == Some(crate::rare::Rare::Inverted) {
+        out.push(1);
+    }
     // None in half of the cases, one in three tenths, two in the rest.
     let count = match below(words[3], 10) {
         0..=4 => 0,
@@ -711,6 +715,10 @@ pub(crate) fn place(
         {
             out = crate::mutations::pose(out, sz, yaw, tilt);
         }
+        // RARE-12: in a shattered district every box has a frame of its own.
+        if t.rare == Some(crate::rare::Rare::Shattered) && t.lattice.frame.is_axis_aligned() {
+            out = crate::mutations::shatter(out, &mut rng);
+        }
         let out = out.shifted(b.lo);
         let mut placed = Placed::boxes(out.boxes, overlap);
         placed.shaped = out.shaped;
@@ -1010,6 +1018,13 @@ fn support_weights(t: &Tissue) -> [u32; 11] {
     let g = crate::gravity::field_at_metres(t.seed, [c.x, c.y, c.z]);
     if g == crate::gravity::Gravity::DEFAULT || g.is_lull() {
         w[RADIAL] = 0;
+    }
+    // RARE-01: in an inverted district everything hangs.
+    if t.rare == Some(crate::rare::Rare::Inverted) {
+        let hang = w[HANGING].max(4) * 8;
+        w = [0; 11];
+        w[HANGING] = hang;
+        w[SUSPENDED] = 2;
     }
     w
 }

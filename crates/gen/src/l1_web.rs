@@ -50,12 +50,36 @@ pub fn l1_cell(seed: WorldSeed, cell: CellKey) -> CellOutput {
         }
     }
     add_staircase(seed, l1, &mut out);
+    add_rare(seed, l1, &mut out);
     if let Some(s) = skeleton(seed, l1) {
         out.ports = skeleton_ports(l1, &s);
         out.child_constraints
             .extend((0..out.ports.len()).map(|i| ChildConstraint::ForcedPort { port: i as u32 }));
     }
     out
+}
+
+/// The geometry of a rare event of this L1 cell (RARE-05..09, 13, 14, 02): what it keeps clear
+/// is cut out of the rest of the cell and listed for the children, and its own pieces go in.
+fn add_rare(seed: WorldSeed, l1: I64Vec3, out: &mut CellOutput) {
+    let content = crate::rare::rare_content(seed, l1);
+    if content.keep_out.is_empty() {
+        return;
+    }
+    for keep in &content.keep_out {
+        let bore = Primitive {
+            shape: Shape::Box { aabb: *keep },
+            material: crate::prim::MaterialId::CONCRETE,
+            kind: crate::prim::FeatureKind::MISC,
+            flags: crate::prim::PrimFlags::NO_COLLIDE,
+        };
+        let prims = std::mem::take(&mut out.primitives);
+        out.primitives = crate::carve::carve(prims, &[bore], [0; 3]).0;
+        out.primitives.retain(|p| !enters(p, keep));
+        out.child_constraints
+            .push(ChildConstraint::KeepOut { aabb: *keep });
+    }
+    out.primitives.extend(content.prims);
 }
 
 /// The infinite staircase of this L1 column, if it has one (STAIR-01..04): the other pieces of
@@ -90,7 +114,7 @@ fn add_staircase(seed: WorldSeed, l1: I64Vec3, out: &mut CellOutput) {
 }
 
 /// Whether the shape of `p` has a point inside the column `keep`, found by sampling the part of
-/// the shape's box that overlaps it every 1 m across and 8 m along.
+/// the shape's box that overlaps it.
 pub(crate) fn enters(p: &Primitive, keep: &crate::prim::QAabb) -> bool {
     use glam::Vec3;
     let b = p.aabb();
@@ -107,10 +131,13 @@ pub(crate) fn enters(p: &Primitive, keep: &crate::prim::QAabb) -> bool {
     if (0..3).any(|k| lo[k] >= hi[k]) {
         return false;
     }
-    let step = |a: Q, z: Q, s: usize| (a..z).step_by(s);
-    for x in step(lo[0], hi[0], 16) {
-        for z in step(lo[2], hi[2], 16) {
-            for y in step(lo[1], hi[1], 128) {
+    // At most 32 samples across and 1024 up, never finer than 1 m: a footprint of 64 m is
+    // sampled every 2 m, a void of a kilometre every 32 m.
+    let step =
+        |a: Q, z: Q, n: Q| (a..z).step_by(usize::try_from(((z - a) / n).max(16)).unwrap_or(16));
+    for x in step(lo[0], hi[0], 32) {
+        for z in step(lo[2], hi[2], 32) {
+            for y in step(lo[1], hi[1], 1024) {
                 let v = Vec3::new(x as f32 / 16.0, y as f32 / 16.0, z as f32 / 16.0);
                 if p.shape.contains(v) {
                     return true;

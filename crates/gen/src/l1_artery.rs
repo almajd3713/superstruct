@@ -253,6 +253,8 @@ pub enum TieKind {
     Between,
     /// The L2 cells of an infinite staircase's footprint column.
     Stair,
+    /// The L2 cells round a rare event's geometry.
+    Rare,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -652,6 +654,11 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
             }
         }
         b.tie(k, &cells, TieKind::Stair);
+    }
+
+    let cells: Vec<L2c> = crate::rare::tie_cells(seed, l1);
+    if !cells.is_empty() {
+        b.tie(k, &cells, TieKind::Rare);
     }
 
     Some(Skeleton {

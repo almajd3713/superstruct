@@ -353,6 +353,9 @@ pub fn cell_pieces(seed: WorldSeed, l2: I64Vec3) -> Vec<Primitive> {
         for dy in -1..=1 {
             for dx in -1..=1 {
                 for w in wells_of(seed, home + I64Vec3::new(dx, dy, dz)).iter() {
+                    if w.quiet {
+                        continue;
+                    }
                     furnace_machinery(&cell, w, &mut out);
                     match w.kind {
                         WellKind::Point => cube_walls(&cell, w.centre, core_half(w), &mut out),

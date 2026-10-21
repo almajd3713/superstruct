@@ -96,6 +96,8 @@ pub struct Well {
     pub extent: [i64; 3],
     pub l1: I64Vec3,
     pub fold: Vec<FoldSegment>,
+    /// A quiet lull's twins: they leave no planetoid and no furnace (`rare.rs`).
+    pub quiet: bool,
 }
 
 fn oct3(r: [i64; 3]) -> i64 {
@@ -319,7 +321,73 @@ fn live_centre(
     None
 }
 
+/// The wells a rare event sets in place of the ordinary draw: a planetoid, a Möbius corridor or
+/// the twins of a quiet lull (`rare.rs`).
+fn rare_wells(seed: WorldSeed, l0: I64Vec3) -> Option<Vec<Well>> {
+    use crate::rare::{Rare, site_of};
+    let site = site_of(seed, l0)?;
+    let c = [0, 1, 2].map(|i| site.l1[i] * L1_SIZE + L1_SIZE / 2);
+    if is_cavity(seed, CellKey::new(Level::L1, site.l1)) {
+        return None;
+    }
+    let base = Well {
+        kind: WellKind::Point,
+        centre: c,
+        axis: 0,
+        reach: 9000,
+        strength: 256,
+        extent: [0; 3],
+        l1: site.l1,
+        fold: Vec::new(),
+        quiet: false,
+    };
+    match site.kind {
+        Rare::Planetoid => Some(vec![base]),
+        Rare::QuietLull => {
+            // Equal and opposed: the middle of the chamber is a lull.
+            let pair = |dx: i64| Well {
+                kind: WellKind::Twin,
+                centre: [c[0] + dx, c[1], c[2]],
+                reach: 6000,
+                strength: 160,
+                quiet: true,
+                ..base.clone()
+            };
+            Some(vec![pair(-200), pair(200)])
+        }
+        Rare::Moebius => {
+            // A square loop of 1.2 km, upright for two sides and upside down for two.
+            let side = 1200;
+            let start = [c[0] - side / 2, c[1], c[2] - side / 2];
+            let legs = [(0, 1, 1), (2, 1, 1), (0, -1, -1), (2, -1, -1)];
+            let mut at = start;
+            let mut fold = Vec::new();
+            for (axis, sign, up) in legs {
+                fold.push(FoldSegment {
+                    start: at,
+                    axis,
+                    sign,
+                    len: side,
+                    up: [0, up, 0],
+                });
+                at[axis] += sign * side;
+            }
+            Some(vec![Well {
+                kind: WellKind::Fold,
+                reach: 300,
+                strength: 224,
+                fold,
+                ..base
+            }])
+        }
+        _ => None,
+    }
+}
+
 fn draw_wells(seed: WorldSeed, l0: I64Vec3) -> Vec<Well> {
+    if let Some(wells) = rare_wells(seed, l0) {
+        return wells;
+    }
     let mut rng = Rng::new(hash(seed.0, Level::L0, l0, salt::WELL));
     if !rng.chance(0.25) {
         return Vec::new();
@@ -364,6 +432,7 @@ fn draw_wells(seed: WorldSeed, l0: I64Vec3) -> Vec<Well> {
         extent,
         l1,
         fold: Vec::new(),
+        quiet: false,
     };
     let mut out = Vec::new();
     match kind {
@@ -534,7 +603,7 @@ pub fn well_centre_in_l1(seed: WorldSeed, l1: I64Vec3) -> Option<[i64; 3]> {
             for dx in -1..=1 {
                 let found = wells_of(seed, l0 + I64Vec3::new(dx, dy, dz))
                     .iter()
-                    .find(|w| w.l1 == l1)
+                    .find(|w| w.l1 == l1 && !w.quiet)
                     .map(|w| w.centre);
                 if found.is_some() {
                     return found;

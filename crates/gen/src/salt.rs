@@ -27,6 +27,10 @@ salts! {
     WELL = 0x0122;
     /// Keyed by a 256 m patch cell: Damaged well patches.
     WELL_PATCH = 0x0123;
+    /// Keyed by the L0 cell: whether it holds a Web rare event and which (`regimes.md` §12).
+    RARE_SITE = 0x0124;
+    /// Keyed by the L1 cell of a rare event: the draws of its geometry.
+    RARE_BUILD = 0x0125;
     REGIME_WEB = 0x0110;
     /// Keyed by the L0 cell: the interior stack sequence (`regimes.md` §8.2).
     STACK = 0x0111;

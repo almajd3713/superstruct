@@ -226,13 +226,21 @@ fn build(seed: WorldSeed, cell: I64Vec3, web: &WebFields) -> Stack {
         push(&mut segs, bd, false, kind, flooded);
         pos += bd;
     }
-    let well = if matches!(web.stack, StackGeometry::Curved) {
+    // A planetoid (RARE-10) wraps its crusts round its well whatever the regime drew.
+    let planet =
+        crate::rare::site_of(seed, cell).is_some_and(|r| r.kind == crate::rare::Rare::Planetoid);
+    let geometry = if planet {
+        StackGeometry::Curved
+    } else {
+        web.stack
+    };
+    let well = if matches!(geometry, StackGeometry::Curved) {
         crate::gravity::radial_well(seed, cell)
     } else {
         None
     };
     Stack {
-        geometry: web.stack,
+        geometry,
         segments: segs,
         well,
     }
