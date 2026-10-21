@@ -141,3 +141,18 @@ chunks of 864 resident; with the default two-phase pass A holds 246 and B (newly
 removes a further **4 %**. HOR-15's expectation that occlusion hides most of the tissue does not
 hold at the chunk granularity (an L2 chunk is 512 m and mostly partly visible); the frame rate is
 the same (134 and 133 fps) and the frame is CPU-bound (`PW.7.4`).
+
+### More blocks for MET-04 (bots, 2 × 2 × 2 L1, same settings)
+
+| Block | MET-04 median | reach one in 20 km | MET-07 | MET-08 |
+|---|---|---|---|---|
+| seed 42 at L1 (8, 0, 8) | > 20 km | 35 % | 0.338 | 8.2 |
+| seed 42 at L1 (−8, 0, 16) | 4.4 km | 74 % | 0.346 | 9.4 |
+| seed 7 at L1 (8, 0, 8) | 5.1 km | 75 % | 0.346 | 8.2 |
+| seed 1234 at L1 (−8, 0, −8) | 0.5 km | 94 % | 0.395 | 6.5 |
+
+With the three blocks at the origin (6.2, 0.99 and 1.6 km) the median over seven blocks is
+**4.4 km** against 1.5–2.5 km: long views are too rare in typical places (HOR-12 does not hold
+on average; the spread between blocks is wide because it follows where the Betweens are).
+MET-07 holds everywhere; MET-08 is between 6.5 and 9.4 (target 8). MET-05 (14–32 m) holds
+everywhere.
