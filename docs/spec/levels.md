@@ -1378,6 +1378,30 @@ wonder, rare, mover and spine sites of the L0 cells around a position, a functio
   dead lamps lighting.
 - **TOOL-08 chalk.** C draws a bright mark on the surface in view within 6 m.
 
+### 5W.45 Machines that notice you (PW.10.15, `GEN_VERSION` 26)
+
+Four things that answer the walker. Nothing about the world's *generation* depends on the walker:
+the machines are generated like any mover, and only their pose is driven by the engine.
+
+- **Sensed movers** (`worldgen::movers::SENSED`, drawn with the other mover kinds at the same 1 in
+  10 L0 cells, so existing kinds' sites move at 26): their pose is `pose_sensed(awake, spun_ms)`,
+  not `pose(t)`; the world clock never moves them.
+  - **NOT-01 EngineHall** (`NOT-01`): a floor of 100 m with pillars and a ring of beams, and a rotor
+    of four blades 14 m up (passable). The rotor wakes when the walker is within 90 m of the
+    hall's middle, takes 1.5 s to reach full speed, turns one 1/64 step per 250 ms (16 s a turn),
+    and spins down 6 s after the walker leaves.
+  - **NOT-03 Doors** (`NOT-03`): a gallery of 200 m with four doors 40 m apart, each a leaf 12 × 8 m
+    that rises 9 m (smoothstep over 1.5 s) when the walker is within 24 m and sinks 6 s after they
+    leave. Each door is its own mover with its own key.
+  - The engine (`MoverSystem::sense`) keeps `awake`, the time it has run and the linger per sensed
+    mover; these are not saved, so a restart finds every machine asleep.
+- **NOT-02 lifts that come** (`liftsys`): waiting within 3 m of a served opening for 1.2 s calls the
+  lift as the call key would; it then rests 8 s before noticing again.
+- **NOT-04 lamps ahead** (`engine::tools::Route`): with a gaze-mark pinned, a line of up to 25 lamps
+  every 40 m (a kilometre) lights up from the walker toward the nearest pin, and is laid again
+  every 40 m walked, so those behind go out. *Deviation:* the lamps run along the straight line
+  to the mark, not along a walkable route (the nav graph is not there yet, PW.7.3).
+
 ## 6. L3: Blocks (64 m)
 
 > **Web redesign.** From version 7 the plan, entrances and skeleton are those of §6W. The rest of this section (tiles, solver, sockets, fallback, validator) is reused.

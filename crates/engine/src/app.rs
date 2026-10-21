@@ -30,7 +30,7 @@ use crate::input::{Action, Bindings, InputState};
 use crate::liftdraw::LiftDraw;
 use crate::liftplan::plan_cell;
 use crate::liftsys::{LiftInput, LiftSystem, PlanResult, PlayerView};
-use crate::marks::{MarkDraw, Shape};
+use crate::marks::{MarkDraw, RouteDraw, Shape};
 use crate::meshpool::MeshPool;
 use crate::moversys::{MoverSystem, WithMovers};
 use crate::overlay::{Overlay, OverlayInfo};
@@ -104,6 +104,7 @@ struct App {
     chalk: Vec<WorldPos>,
     trail_draw: MarkDraw,
     chalk_draw: MarkDraw,
+    route_draw: RouteDraw,
     trams: TramSystem,
     tram_draw: TramDraw,
     /// World-clock movers near the player (`moversys.rs`).
@@ -235,8 +236,12 @@ impl App {
         } else {
             self.walker.pos
         };
-        self.movers
-            .update(WorldSeed(self.settings.seed), &focus, self.world_clock_ms());
+        self.movers.update(
+            WorldSeed(self.settings.seed),
+            &focus,
+            self.world_clock_ms(),
+            dt,
+        );
         // Without the cursor grabbed there is no input, but gravity still applies when walking.
         let grabbed = self.cursor_grabbed;
         let axis = |pos: Action, neg: Action| {
@@ -841,6 +846,15 @@ impl App {
             &running.gpu.queue,
             &self.trail,
         );
+        if let Some(route) = self.tools.route.take() {
+            self.route_draw.set(
+                &mut running.renderer,
+                &running.gpu.device,
+                &running.gpu.queue,
+                route.anchor,
+                &route.lamps,
+            );
+        }
         self.chalk_draw.update(
             &mut running.renderer,
             &running.gpu.device,
@@ -1212,6 +1226,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         tool_zoom: 1.0,
         trail_draw: MarkDraw::new(Shape::Lamp),
         chalk_draw: MarkDraw::new(Shape::Chalk),
+        route_draw: RouteDraw::default(),
         trams: TramSystem::new(WorldSeed(settings_seed)),
         tram_draw: TramDraw::default(),
         movers: MoverSystem::default(),

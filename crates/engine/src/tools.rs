@@ -3,6 +3,8 @@
 //! standing still, the trail and chalk marks. All of it is saved in `save.toml`. Spec:
 //! `docs/spec/levels.md` §5W.44.
 
+#![allow(clippy::cast_sign_loss)] // distances and counts here are never negative
+
 use glam::{I64Vec3, Vec3};
 use worldgen::coord::WorldPos;
 use worldgen::glyphs::{name_of, transliterate};
@@ -43,8 +45,24 @@ pub struct Frame {
     pub hit_m: Option<f32>,
 }
 
+/// NOT-04: lamps every `ROUTE_STEP_M` for `ROUTE_LAMPS` of them (a kilometre), laid again once
+/// the walker has moved `ROUTE_RELAY_M`.
+const ROUTE_STEP_M: f32 = 40.0;
+const ROUTE_LAMPS: usize = 25;
+const ROUTE_RELAY_M: f64 = 40.0;
+
+/// The lamps of a route from the walker toward a pinned mark.
+pub struct Route {
+    pub anchor: WorldPos,
+    /// Metres from `anchor`; empty when there is no route.
+    pub lamps: Vec<Vec3>,
+}
+
 pub struct Tools {
     seed: WorldSeed,
+    /// Set when the route was laid anew this frame; the app takes it to redraw.
+    pub route: Option<Route>,
+    last_route: Option<WorldPos>,
     pub atlas: bool,
     still_s: f32,
     dwell: Option<(I64Vec3, f32)>,
@@ -134,6 +152,8 @@ impl Tools {
     pub fn new(seed: WorldSeed) -> Self {
         Self {
             seed,
+            route: None,
+            last_route: None,
             atlas: false,
             still_s: 0.0,
             dwell: None,
@@ -212,6 +232,32 @@ impl Tools {
         {
             save.chalk.push(BeaconPos::of(&p));
             dirty = true;
+        }
+
+        // NOT-04: with a mark pinned, a line of lamps lights up ahead toward the nearest one.
+        let relay = self
+            .last_route
+            .is_none_or(|p| f.eye.delta(&p).length() >= ROUTE_RELAY_M);
+        if relay {
+            self.last_route = Some(f.eye);
+            let nearest = save
+                .marks
+                .iter()
+                .map(|m| direction_to(at, I64Vec3::from(*m)))
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            let lamps = nearest.map_or_else(Vec::new, |(dir, km)| {
+                let n =
+                    ((km * 1000.0 / f64::from(ROUTE_STEP_M)).max(0.0) as usize).min(ROUTE_LAMPS);
+                (1..=n)
+                    .map(|k| {
+                        dir * (k as f32 * ROUTE_STEP_M) - Vec3::Y * crate::controller::EYE_HEIGHT
+                    })
+                    .collect()
+            });
+            self.route = Some(Route {
+                anchor: f.eye,
+                lamps,
+            });
         }
 
         self.still_s = if f.moving { 0.0 } else { self.still_s + f.dt };

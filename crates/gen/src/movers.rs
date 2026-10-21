@@ -43,7 +43,15 @@ pub enum MoverKind {
     /// BLD-01..05, P2-30: a Builder: a slow giant machine that places a beam every six minutes
     /// for an hour while it creeps along its rails, or one half built in its dock.
     Builder,
+    /// NOT-01: an engine hall whose rotor starts turning when someone walks in and spins down
+    /// after they leave. Not on the world clock: the engine drives it (`pose_sensed`).
+    EngineHall,
+    /// NOT-03: four doors in a gallery, each of which rises as someone comes within reach.
+    Doors,
 }
+
+/// The movers that notice the walker (PW.10.15); their pose is `pose_sensed`.
+pub const SENSED: [MoverKind; 2] = [MoverKind::EngineHall, MoverKind::Doors];
 
 pub const KINDS: [MoverKind; 5] = [
     MoverKind::MovingBridge,
@@ -69,6 +77,8 @@ impl MoverKind {
             MoverKind::TurningLift => "P2-28",
             MoverKind::GateTram => "P2-29",
             MoverKind::Builder => "P2-30",
+            MoverKind::EngineHall => "NOT-01",
+            MoverKind::Doors => "NOT-03",
         }
     }
 }
@@ -125,7 +135,45 @@ fn ramp(u: i64, a: i64, b: i64, c: i64, d: i64) -> i64 {
     }
 }
 
+/// Milliseconds a door takes to rise, and the rotor's quarter-turn steps per second.
+pub const DOOR_RISE_M: i64 = 9;
+const ROTOR_STEP_MS: u64 = 250;
+
 impl Mover {
+    /// Whether this mover follows the walker instead of the world clock.
+    pub fn sensed(&self) -> bool {
+        SENSED.contains(&self.kind)
+    }
+
+    /// How near, in metres, the walker wakes it.
+    pub fn wake_radius(&self) -> f64 {
+        match self.kind {
+            MoverKind::EngineHall => 90.0,
+            _ => 24.0,
+        }
+    }
+
+    /// The pose of a sensed mover that is `awake` (0 to 1024) awake and has turned for
+    /// `spun_ms`: a door is raised by `awake`; the rotor is turned by the time it has run.
+    pub fn pose_sensed(&self, awake: i64, spun_ms: u64) -> Pose {
+        let smooth = |t: i64| t * t * (3 * 1024 - 2 * t) / (1024 * 1024);
+        match self.kind {
+            MoverKind::Doors => Pose {
+                offset: [
+                    0.0,
+                    (smooth(awake.clamp(0, 1024)) * self.reach) as f32 / 1024.0,
+                    0.0,
+                ],
+                yaw: 0,
+            },
+            MoverKind::EngineHall => Pose {
+                offset: [0.0; 3],
+                yaw: ((spun_ms / ROTOR_STEP_MS) % 64) as u8,
+            },
+            _ => self.pose(spun_ms),
+        }
+    }
+
     /// The position in the cycle in 1024ths at world time `t_ms`.
     fn cycle(&self, t_ms: u64) -> i64 {
         (((t_ms + self.phase_ms) % self.period_ms) * 1024 / self.period_ms) as i64
@@ -179,7 +227,7 @@ impl Mover {
             }
             // Runs the length of its line and back; over the ring in the middle it is turned
             // half a turn.
-            MoverKind::Builder => Pose {
+            MoverKind::Builder | MoverKind::EngineHall | MoverKind::Doors => Pose {
                 offset: [0.0; 3],
                 yaw: 0,
             },
@@ -204,7 +252,8 @@ pub fn site_of(seed: WorldSeed, l0: I64Vec3) -> Option<(MoverKind, I64Vec3)> {
     if rng.below(if frontier { 2 } else { ONE_IN }) != 0 {
         return None;
     }
-    let drawn = KINDS[rng.below(5) as usize];
+    let all: Vec<MoverKind> = KINDS.into_iter().chain(SENSED).collect();
+    let drawn = all[rng.below(all.len() as u64) as usize];
     let kind = if frontier { MoverKind::Builder } else { drawn };
     let inner = |r: &mut Rng| 1 + r.below(6) as i64;
     Some((
@@ -322,6 +371,35 @@ pub fn movers_in_cell(seed: WorldSeed, l1: I64Vec3) -> Vec<Mover> {
             }
             (parts, 240)
         }
+        // A rotor of three long blades and a short one on a hub, 14 m above the floor of the
+        // hall, passable (the blades turn high above the walkway).
+        MoverKind::EngineHall => (
+            vec![
+                part([-4, 12, -4], [4, 20, 4], metal, FeatureKind::MASS, false),
+                part([4, 14, -1], [44, 18, 1], metal, FeatureKind::TETHER, false),
+                part([-1, 14, 4], [1, 18, 40], metal, FeatureKind::TETHER, false),
+                part(
+                    [-34, 14, -1],
+                    [-4, 18, 1],
+                    metal,
+                    FeatureKind::TETHER,
+                    false,
+                ),
+                part(
+                    [-1, 14, -24],
+                    [1, 18, -4],
+                    MaterialId::WARM,
+                    FeatureKind::TETHER,
+                    false,
+                ),
+            ],
+            0,
+        ),
+        // One leaf of a door, 12 m wide and 8 m high, that rises 9 m.
+        MoverKind::Doors => (
+            vec![part([-6, 0, -1], [6, 8, 0], metal, FeatureKind::MASS, true)],
+            DOOR_RISE_M,
+        ),
         MoverKind::GateTram => (
             vec![
                 part([-12, 0, -2], [12, 1, 2], metal, FeatureKind::TRAM, true),
@@ -346,17 +424,27 @@ pub fn movers_in_cell(seed: WorldSeed, l1: I64Vec3) -> Vec<Mover> {
             400,
         ),
     };
-    vec![Mover {
-        kind,
-        origin,
-        parts,
-        timed,
-        dock,
-        period_ms,
-        phase_ms,
-        reach,
-        key,
-    }]
+    // The gallery has four doors, 40 m apart along z.
+    let doors: Vec<i64> = if kind == MoverKind::Doors {
+        (0..4).map(|k| (k - 2) * 40 + 20).collect()
+    } else {
+        vec![0]
+    };
+    doors
+        .into_iter()
+        .enumerate()
+        .map(|(i, dz)| Mover {
+            kind,
+            origin: [origin[0], origin[1], origin[2] + dz],
+            parts: parts.clone(),
+            timed: timed.clone(),
+            dock,
+            period_ms,
+            phase_ms,
+            reach,
+            key: key.wrapping_add(i as u64),
+        })
+        .collect()
 }
 
 /// The fixed supports of the mover in L1 cell `l1`, and the space it moves through.
@@ -364,6 +452,7 @@ pub fn mover_content(seed: WorldSeed, l1: I64Vec3) -> Content {
     let Some(m) = movers_in_cell(seed, l1).into_iter().next() else {
         return Content::default();
     };
+    let kind = m.kind;
     let c = 2048i32;
     let mut b: Vec<crate::prim::Primitive> = Vec::new();
     let mut add = |lo: [i32; 3], hi: [i32; 3], material: MaterialId, kind: FeatureKind, flags| {
@@ -380,7 +469,7 @@ pub fn mover_content(seed: WorldSeed, l1: I64Vec3) -> Content {
     let solid = crate::prim::PrimFlags::NONE;
     let far = crate::prim::PrimFlags::FAR_VISIBLE;
     let conc = MaterialId::CONCRETE;
-    let keep = match m.kind {
+    let keep = match kind {
         // Two banks of 60 m with a gap of 120 m between them; the leaf rests over the gap.
         MoverKind::MovingBridge => {
             add(
@@ -497,6 +586,65 @@ pub fn mover_content(seed: WorldSeed, l1: I64Vec3) -> Content {
             );
             ([c - 28, c - 8, c - 16], [c + 290, c + 90, c + 16])
         }
+        MoverKind::EngineHall => {
+            // A floor of 100 m with a pillar at each corner and a ring of beams above.
+            add(
+                [c - 50, c - 2, c - 50],
+                [c + 50, c, c + 50],
+                conc,
+                FeatureKind::DECK,
+                far | solid,
+            );
+            for (x, z) in [(-48, -48), (48, -48), (-48, 48), (48, 48)] {
+                add(
+                    [c + x - 2, c, c + z - 2],
+                    [c + x + 2, c + 30, c + z + 2],
+                    MaterialId::METAL,
+                    FeatureKind::TETHER,
+                    far | solid,
+                );
+            }
+            for (lo, hi) in [
+                ([c - 50, c + 28, c - 50], [c + 50, c + 30, c - 46]),
+                ([c - 50, c + 28, c + 46], [c + 50, c + 30, c + 50]),
+                ([c - 50, c + 28, c - 50], [c - 46, c + 30, c + 50]),
+                ([c + 46, c + 28, c - 50], [c + 50, c + 30, c + 50]),
+            ] {
+                add(lo, hi, MaterialId::METAL, FeatureKind::MASS, far | solid);
+            }
+            ([c - 54, c - 6, c - 54], [c + 54, c + 34, c + 54])
+        }
+        MoverKind::Doors => {
+            // A gallery 16 m wide and 200 m long along z, with a floor, two walls and a frame
+            // at each of the four doors.
+            add(
+                [c - 8, c - 1, c - 100],
+                [c + 8, c, c + 100],
+                conc,
+                FeatureKind::DECK,
+                far | solid,
+            );
+            for x in [-8, 6] {
+                add(
+                    [c + x, c, c - 100],
+                    [c + x + 2, c + 12, c + 100],
+                    conc,
+                    FeatureKind::MASS,
+                    far | solid,
+                );
+            }
+            for k in 0..4 {
+                let z = c + (k - 2) * 40 + 20;
+                add(
+                    [c - 8, c + 8, z - 2],
+                    [c + 8, c + 12, z + 1],
+                    MaterialId::METAL,
+                    FeatureKind::MASS,
+                    solid,
+                );
+            }
+            ([c - 10, c - 4, c - 104], [c + 10, c + 22, c + 104])
+        }
         MoverKind::GateTram => {
             // The line: two rails over 400 m, a station at each end and a ring of light.
             for z in [-1, 1] {
@@ -564,6 +712,32 @@ mod tests {
             }
         }
         panic!("{kind:?} not found");
+    }
+
+    /// NOT-01, NOT-03: the sensed movers occur, a door rises with its wakefulness, and the rotor
+    /// turns with the time it has run.
+    #[test]
+    fn sensed_movers_follow_the_walker_not_the_clock() {
+        let (l1, door) = find(MoverKind::Doors);
+        assert!(door.sensed());
+        assert_eq!(movers_in_cell(SEED, l1).len(), 4);
+        let keys: std::collections::HashSet<u64> =
+            movers_in_cell(SEED, l1).iter().map(|m| m.key).collect();
+        assert_eq!(keys.len(), 4);
+        assert!(door.pose_sensed(0, 0).offset.iter().all(|c| c.abs() < 1e-6));
+        assert!((door.pose_sensed(1024, 0).offset[1] - DOOR_RISE_M as f32).abs() < 1e-4);
+        let mid = door.pose_sensed(512, 0).offset[1];
+        assert!(mid > 0.0 && mid < DOOR_RISE_M as f32);
+        // The world clock does not move a sensed mover.
+        assert_eq!(door.pose(0), door.pose(123_456));
+        let (l1, hall) = find(MoverKind::EngineHall);
+        assert!(!mover_content(SEED, l1).prims.is_empty());
+        assert_eq!(hall.pose_sensed(0, 0).yaw, 0);
+        assert_ne!(hall.pose_sensed(1024, 1000).yaw, 0);
+        assert_eq!(
+            hall.pose_sensed(1024, 0).yaw,
+            hall.pose_sensed(1024, 16_000).yaw
+        );
     }
 
     #[test]

@@ -31,7 +31,17 @@ struct Active {
     placed: usize,
     /// The chunk of the timed pieces that stand, and how many it holds.
     frame: Option<(ChunkHandle, usize)>,
+    /// A sensed mover (NOT-01, NOT-03): how awake it is, 0 to 1, and how long it has run.
+    awake: f32,
+    spun_ms: f64,
+    /// Seconds left before it falls asleep again after the walker leaves.
+    linger: f32,
 }
+
+/// Seconds a sensed mover takes to wake or to sleep, and how long it stays awake after the
+/// walker has gone.
+const WAKE_S: f32 = 1.5;
+const LINGER_S: f32 = 6.0;
 
 #[derive(Default)]
 pub struct MoverSystem {
@@ -47,7 +57,7 @@ fn absolute(p: &WorldPos) -> [f64; 3] {
 
 impl MoverSystem {
     /// Keeps the movers within 3.5 km of `player` at their pose at world time `t_ms`.
-    pub fn update(&mut self, seed: WorldSeed, player: &WorldPos, t_ms: u64) {
+    pub fn update(&mut self, seed: WorldSeed, player: &WorldPos, t_ms: u64, dt: f32) {
         let p = absolute(player);
         let l1 = I64Vec3::new(
             (p[0] / 4096.0).floor() as i64,
@@ -64,6 +74,12 @@ impl MoverSystem {
                             continue;
                         }
                         seen.push(m.key);
+                        if m.sensed() {
+                            let near =
+                                d.iter().map(|v| v * v).sum::<f64>().sqrt() <= m.wake_radius();
+                            self.sense(&m, near, dt);
+                            continue;
+                        }
                         // The Slow district runs the world clock at a tenth (STG-09).
                         let (num, den) = worldgen::strange::time_scale_at(seed, m.origin);
                         let t_ms = t_ms * num / den;
@@ -87,6 +103,9 @@ impl MoverSystem {
                                         vel,
                                         drawn: None,
                                         frame: None,
+                                        awake: 0.0,
+                                        spun_ms: 0.0,
+                                        linger: 0.0,
                                     },
                                 );
                             }
@@ -111,6 +130,41 @@ impl MoverSystem {
                 );
             }
         }
+    }
+
+    /// Wakes a sensed mover while the walker is near and for a while after, and puts it to
+    /// sleep slowly; its pose follows (a door rises, the rotor turns while it runs).
+    #[allow(clippy::cast_sign_loss)] // awake and the run time are never negative
+    fn sense(&mut self, m: &Mover, near: bool, dt: f32) {
+        let a = self.active.entry(m.key).or_insert_with(|| Active {
+            pose: m.pose_sensed(0, 0),
+            mover: m.clone(),
+            vel: Vec3::ZERO,
+            drawn: None,
+            placed: 0,
+            frame: None,
+            awake: 0.0,
+            spun_ms: 0.0,
+            linger: 0.0,
+        });
+        if near {
+            a.linger = LINGER_S;
+        } else {
+            a.linger = (a.linger - dt).max(0.0);
+        }
+        let target = if a.linger > 0.0 { 1.0 } else { 0.0 };
+        let step = dt / WAKE_S;
+        a.awake = if target > a.awake {
+            (a.awake + step).min(target)
+        } else {
+            (a.awake - step).max(target)
+        };
+        a.spun_ms += f64::from(dt) * 1000.0 * f64::from(a.awake);
+        let pose = m.pose_sensed((a.awake * 1024.0) as i64, a.spun_ms as u64);
+        if dt > 0.0 {
+            a.vel = (Vec3::from(pose.offset) - Vec3::from(a.pose.offset)) / dt;
+        }
+        a.pose = pose;
     }
 
     /// The active movers' keys and poses, for tests and tools.
@@ -341,7 +395,7 @@ mod tests {
         let start = absolute(&c.pos);
         let mut t = t0;
         for _ in 0..(40 * 120) {
-            sys.update(SEED, &c.pos, t);
+            sys.update(SEED, &c.pos, t, 0.0);
             let world = WithMovers {
                 inner: &empty,
                 movers: &sys,
@@ -352,6 +406,41 @@ mod tests {
         let end = absolute(&c.pos);
         assert!(c.grounded, "the walker fell off the leaf: {:?}", c.pos);
         assert!(end[0] - start[0] > 5.0, "carried {} m", end[0] - start[0]);
+    }
+
+    /// NOT-03: a door rises when the walker comes near and sinks again after they leave.
+    #[test]
+    fn a_door_rises_for_the_walker_and_sinks_after() {
+        let l1 = (-40..40)
+            .flat_map(|x| (-40..40).map(move |z| (x, z)))
+            .find_map(|(x, z)| {
+                site_of(SEED, I64Vec3::new(x, 0, z))
+                    .filter(|(k, _)| *k == MoverKind::Doors)
+                    .map(|(_, l1)| l1)
+            })
+            .expect("no doors");
+        let door = movers_in_cell(SEED, l1).remove(0);
+        let near = at(&door, 3.0, 1.0, 5.0);
+        let far = at(&door, 400.0, 1.0, 5.0);
+        let rise = |sys: &MoverSystem| {
+            sys.poses()
+                .iter()
+                .map(|(_, p)| p.offset[1])
+                .fold(0.0, f32::max)
+        };
+        let mut sys = MoverSystem::default();
+        sys.update(SEED, &near, 0, 0.0);
+        assert!(rise(&sys).abs() < 1e-6);
+        for _ in 0..240 {
+            sys.update(SEED, &near, 0, 1.0 / 60.0);
+        }
+        assert!((rise(&sys) - 9.0).abs() < 0.01, "{}", rise(&sys));
+        // Away: it waits, then sinks. (The far player is outside the active range of the cell
+        // only when it is more than 3.5 km away, so stay inside it.)
+        for _ in 0..(60 * 12) {
+            sys.update(SEED, &far, 0, 1.0 / 60.0);
+        }
+        assert!(rise(&sys) < 0.01, "{}", rise(&sys));
     }
 
     /// BLD-01: a beam the Builder has placed is solid where it was put, and not before.
@@ -379,10 +468,15 @@ mod tests {
         let start = (m.period_ms - m.phase_ms) % m.period_ms + 10 * m.period_ms;
         let player = at(&m, 0.0, 12.0, 0.0);
         let mut sys = MoverSystem::default();
-        sys.update(SEED, &player, start);
+        sys.update(SEED, &player, start, 0.0);
         let mut before = Vec::new();
         sys.gather(&player, 600.0, &mut before);
-        sys.update(SEED, &player, start + worldgen::movers::BUILDER_WORK_MS / 2);
+        sys.update(
+            SEED,
+            &player,
+            start + worldgen::movers::BUILDER_WORK_MS / 2,
+            0.0,
+        );
         let mut after = Vec::new();
         sys.gather(&player, 600.0, &mut after);
         assert_eq!(

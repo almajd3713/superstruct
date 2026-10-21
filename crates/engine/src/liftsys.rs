@@ -30,6 +30,11 @@ pub const CAR_KEEP: f64 = 1024.0;
 pub const ARRIVAL_DISTANCE: f32 = 32.0;
 pub const GATE_TIME: f32 = 1.0;
 pub const CALL_REACH: f64 = 2.0;
+/// NOT-02: standing within this of an opening for `NOTICE_S` calls the lift by itself.
+pub const NOTICE_REACH: f64 = 3.0;
+const NOTICE_S: f32 = 1.2;
+/// After a call the lift does not notice you again for this long.
+const NOTICE_COOLDOWN_S: f32 = 8.0;
 pub const CALL_REACH_Y: f64 = 0.5;
 pub const ON_CAR_TOL: f64 = 0.1;
 pub const CAPTION_TIME: f32 = 2.5;
@@ -112,6 +117,8 @@ struct Session {
     pending: Option<bool>,
     gates: Vec<GateBox>,
     gates_dirty: bool,
+    /// Seconds spent beside an opening (negative while cooling down after a call).
+    notice_s: f32,
 }
 
 struct Caption {
@@ -126,6 +133,23 @@ pub struct LiftSystem {
     caption: Option<Caption>,
     hints_shown: u32,
     solids: Vec<DynamicSolid>,
+}
+
+/// One step of the notice timer: `(new timer, fire)`. Beside an opening it counts up and fires at
+/// `NOTICE_S`, after which it cools down; away from one it resets (a cool-down ends early).
+fn notice_step(acc: f32, near: bool, dt: f32) -> (f32, bool) {
+    if acc < 0.0 {
+        return ((acc + dt).min(0.0), false);
+    }
+    if !near {
+        return (0.0, false);
+    }
+    let acc = acc + dt;
+    if acc >= NOTICE_S {
+        (-NOTICE_COOLDOWN_S, true)
+    } else {
+        (acc, false)
+    }
 }
 
 fn cell_key(col: (i64, i64), y: i64) -> CellKey {
@@ -339,6 +363,7 @@ impl LiftSystem {
                         pending: None,
                         gates: Vec::new(),
                         gates_dirty: true,
+                        notice_s: 0.0,
                     });
                 }
             }
@@ -383,8 +408,10 @@ impl LiftSystem {
         };
         self.request_plans(i, focus, requests);
 
-        if input.call && player.controllable && !riding {
-            self.call(i, player, requests);
+        let noticed = player.controllable && !riding && self.notice(i, dt, player);
+        if (input.call || noticed) && player.controllable && !riding {
+            let reach = if input.call { CALL_REACH } else { NOTICE_REACH };
+            self.call(i, player, reach, requests);
         }
         if player.controllable && riding && (input.up || input.down) {
             self.press(i, input.up, focus, requests);
@@ -442,11 +469,21 @@ impl LiftSystem {
     }
 
     /// A call at an opening in reach (spec §4.3 and §6.2).
-    fn call(&mut self, i: usize, player: &PlayerView, _requests: &mut [PlanRequest]) {
+    /// NOT-02: the lift notices someone waiting at an opening and comes.
+    fn notice(&mut self, i: usize, dt: f32, player: &PlayerView) -> bool {
+        let near = self.nearest_opening(i, player, NOTICE_REACH).is_some();
+        let s = &mut self.sessions[i];
+        let (acc, fire) = notice_step(s.notice_s, near, dt);
+        s.notice_s = acc;
+        fire
+    }
+
+    /// The nearest served segment within `reach`, over every planned cell: its distance, the
+    /// cell and the height of the stop.
+    fn nearest_opening(&self, i: usize, player: &PlayerView, reach: f64) -> Option<(f64, i64, Q)> {
         let seed = self.seed;
         let s = &self.sessions[i];
         let f = footprint(seed, s.col);
-        // The nearest served segment within reach, over every planned cell.
         let mut best: Option<(f64, i64, Q)> = None;
         for (&y, plan) in &s.plans {
             let CellPlan::Core { stops, .. } = plan else {
@@ -462,13 +499,20 @@ impl LiftSystem {
                 for (side, spans) in stop.served.iter().enumerate() {
                     for &(a, b) in spans {
                         let d = side_distance(&f, side, (a, b), l.x, l.z);
-                        if d <= CALL_REACH && best.is_none_or(|(bd, _, _)| d < bd) {
+                        if d <= reach && best.is_none_or(|(bd, _, _)| d < bd) {
                             best = Some((d, y, stop.y));
                         }
                     }
                 }
             }
         }
+        best
+    }
+
+    fn call(&mut self, i: usize, player: &PlayerView, reach: f64, _requests: &mut [PlanRequest]) {
+        let seed = self.seed;
+        let f = footprint(seed, self.sessions[i].col);
+        let best = self.nearest_opening(i, player, reach);
         let Some((_, cell_y, stop_q)) = best else {
             return;
         };
@@ -881,6 +925,20 @@ fn build_gates(seed: WorldSeed, s: &Session) -> Vec<GateBox> {
 #[cfg(test)]
 #[allow(clippy::cast_sign_loss)]
 mod tests {
+    #[test]
+    fn a_lift_notices_someone_who_waits_and_then_rests() {
+        let mut acc = 0.0;
+        let mut fired = 0;
+        for _ in 0..40 {
+            let (a, f) = notice_step(acc, true, 0.5);
+            acc = a;
+            fired += usize::from(f);
+        }
+        // 20 s beside the opening: a call at 1.5 s, an 8 s rest, a second call, a second rest.
+        assert_eq!(fired, 2, "{fired}");
+        assert_eq!(notice_step(0.9, false, 0.1), (0.0, false));
+    }
+
     use super::*;
     use crate::collision::{CollisionChunk, CollisionWorld};
     use crate::controller::{Controller, MoveInput};
