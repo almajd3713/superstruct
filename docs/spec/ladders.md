@@ -47,8 +47,8 @@ to the side. A ladder well, a ladder chain and a façade ladder break every 4 m,
 | 11 into a roof hatch | a slab over the top with the way on beside it |
 | 12 between balconies | balconies every 4 m on the face beside the ladder |
 | 13 helical rungs | a drum slab; the rungs are drawn slanting across it (the corridor is straight) |
-| 14 gravity-gate ladder | waits for the gravity gates (PW.6.3) |
-| 15 ladder across a lull ceiling | waits for the lulls (PW.6.8) |
+| 14 gravity-gate ladder | `gates::gate_ladder` (`GEN_VERSION` 33): in a gate of kind Ladder whose membrane is horizontal (the zone's axis is y), a shaft of 18 m through the zone: a climbing corridor (`LADDER`, rungs on +x), a wall of 0.6 m behind the rungs, a rung every 5/16 m (passable) and a landing at each end. In the field of the low side the climb is up; past the membrane it is down, and the far landing, the deck's underside, is a floor from that side. Gates of other axes carry none. *Not exercised in the engine:* whether the climb carries a walker through the turn is for the 🎮 review |
+| 15 ladder across a lull ceiling | `weightless` drift lanes (`GEN_VERSION` 33): a rail along the tube's ceiling (3 m under the top of the ring) and a rung of 4 m across it every 4 m, passable. *Not built:* the pull along the rungs (a handrail mechanic), so far you drift along it |
 
 Ladder ids weigh a quarter of a stair id in the choice of a vertical type; the stratum's LADDER
 weight decides whether a stratum has them. L3 interiors carry corridors in their ladder wells

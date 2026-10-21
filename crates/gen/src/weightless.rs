@@ -685,6 +685,47 @@ fn site_content(seed: WorldSeed, l1: I64Vec3) -> Content {
                 }
                 a += 64;
             }
+            // LAD-15: a rung ladder across the ceiling of the tube: a rail along it and a rung
+            // every 4 m, passable (the lane is a lull: hands pull you along).
+            let ceil = c + r - 4;
+            let mut a = (a0 / 4 + 1) * 4;
+            if site.axis == 0 {
+                b.boxed(
+                    [a0, ceil, c - 1],
+                    [a1, ceil + 1, c],
+                    MaterialId::METAL,
+                    FeatureKind::RAILING,
+                    none,
+                );
+            } else {
+                b.boxed(
+                    [c - 1, ceil, a0],
+                    [c, ceil + 1, a1],
+                    MaterialId::METAL,
+                    FeatureKind::RAILING,
+                    none,
+                );
+            }
+            while a + 1 < a1 {
+                if site.axis == 0 {
+                    b.boxed(
+                        [a, ceil, c - 2],
+                        [a + 1, ceil + 1, c + 2],
+                        MaterialId::METAL,
+                        FeatureKind::MISC,
+                        none,
+                    );
+                } else {
+                    b.boxed(
+                        [c - 2, ceil, a],
+                        [c + 2, ceil + 1, a + 1],
+                        MaterialId::METAL,
+                        FeatureKind::MISC,
+                        none,
+                    );
+                }
+                a += 4;
+            }
             keep.push(if site.axis == 0 {
                 volume([a0, c - r - 4, c - r - 4], [a1, c + r + 4, c + r + 4])
             } else {
@@ -938,6 +979,32 @@ mod tests {
         past[r.axis] += r.length / 2 + 200;
         assert!(!gravity_at_metres(SEED, past).is_lull(), "the river ends");
         assert!((1000..=10_000).contains(&r.length));
+    }
+
+    /// LAD-15: the tube of a drift lane has a rail and rungs across its ceiling, passable.
+    #[test]
+    fn a_lane_has_a_rung_ladder_across_its_ceiling() {
+        let (_, s) = find_site(Kind::DriftLane);
+        let content = weightless_content(SEED, s.l1);
+        let rungs = content
+            .prims
+            .iter()
+            .filter(|p| p.material == MaterialId::METAL && p.kind == FeatureKind::MISC)
+            .count();
+        let rails = content
+            .prims
+            .iter()
+            .filter(|p| p.material == MaterialId::METAL && p.kind == FeatureKind::RAILING)
+            .count();
+        assert!(rungs > 100, "{rungs} rungs");
+        assert_eq!(rails, 1);
+        assert!(
+            content
+                .prims
+                .iter()
+                .filter(|p| p.material == MaterialId::METAL)
+                .all(|p| p.flags.contains(PrimFlags::NO_COLLIDE))
+        );
     }
 
     /// WGT-05: a lull with ten fragments, each its own planetoid.

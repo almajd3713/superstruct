@@ -235,11 +235,92 @@ pub fn gate_markers(zone: &GateZone, l2: I64Vec3) -> Vec<Primitive> {
     out
 }
 
-/// The markers of every gate in L2 cell `l2`.
+/// LAD-14: the ladder of a ladder gate whose membrane is horizontal (the ladder runs along y):
+/// a shaft of 18 m through the zone, with a wall to put the rungs on, a rung every 0.31 m, and a
+/// landing at each end. In the field of the low side the climb is up; past the membrane it is
+/// down, and the far landing is a floor from that side (the deck's underside). Cell-local
+/// quanta; other axes and other kinds have none.
+pub fn gate_ladder(zone: &GateZone, l2: I64Vec3) -> Vec<Primitive> {
+    if zone.kind != GateKind::Ladder || zone.axis != 1 {
+        return Vec::new();
+    }
+    let origin = [l2.x * L2_SIZE, l2.y * L2_SIZE, l2.z * L2_SIZE];
+    let (cx, cz) = (
+        i64::midpoint(zone.min[0], zone.max[0]),
+        i64::midpoint(zone.min[2], zone.max[2]),
+    );
+    let (y0, y1) = (zone.min[1] - 9, zone.max[1] + 9);
+    // Quanta from the cell's corner for absolute metres plus a number of sixteenths.
+    let q = |x: i64, sx: i64, y: i64, sy: i64, z: i64, sz: i64| {
+        QVec3::new(
+            ((x - origin[0]) * 16 + sx) as i32,
+            ((y - origin[1]) * 16 + sy) as i32,
+            ((z - origin[2]) * 16 + sz) as i32,
+        )
+    };
+    let boxed =
+        |lo: QVec3, hi: QVec3, material: MaterialId, kind: FeatureKind, flags: PrimFlags| {
+            Primitive {
+                shape: Shape::Box {
+                    aabb: QAabb::new(lo, hi),
+                },
+                material,
+                kind,
+                flags,
+            }
+        };
+    let (solid, free) = (PrimFlags::NONE, PrimFlags::NO_COLLIDE);
+    let mut out = Vec::new();
+    // The climbing corridor (rungs on its +x side, code 1), not drawn and not solid.
+    out.push(boxed(
+        q(cx, 5, y0, 0, cz, -6),
+        q(cx, 19, y1, 0, cz, 6),
+        MaterialId(1),
+        FeatureKind::LADDER,
+        free,
+    ));
+    // The wall behind the rungs.
+    out.push(boxed(
+        q(cx, 20, y0, 0, cz, -16),
+        q(cx, 30, y1, 0, cz, 16),
+        MaterialId::CONCRETE,
+        FeatureKind::SHAFT_WALL,
+        solid,
+    ));
+    // The rungs, 5 sixteenths apart.
+    let mut rung = 0i64;
+    while y0 * 16 + rung < y1 * 16 {
+        out.push(boxed(
+            q(cx, 16, y0, rung, cz, -7),
+            q(cx, 20, y0, rung + 1, cz, 7),
+            MaterialId::METAL,
+            FeatureKind::MISC,
+            free,
+        ));
+        rung += 5;
+    }
+    // The landings: the low one is a floor of the low side, the high one a floor of the high side.
+    for (ya, sy) in [(y0, -3i64), (y1, 0)] {
+        out.push(boxed(
+            q(cx, -32, ya, sy, cz, -19),
+            q(cx, 5, ya, sy + 3, cz, 19),
+            MaterialId::CONCRETE,
+            FeatureKind::DECK,
+            solid,
+        ));
+    }
+    out
+}
+
+/// The markers and the ladders of every gate in L2 cell `l2`.
 pub fn cell_markers(seed: WorldSeed, l2: I64Vec3) -> Vec<Primitive> {
     gates_in_l2(seed, l2)
         .iter()
-        .flat_map(|z| gate_markers(z, l2))
+        .flat_map(|z| {
+            let mut v = gate_markers(z, l2);
+            v.extend(gate_ladder(z, l2));
+            v
+        })
         .collect()
 }
 
@@ -325,6 +406,72 @@ mod tests {
             prev = Some(g);
         }
         assert!(weak < 64, "no weak point inside the gate: {weak}");
+    }
+
+    /// LAD-14: a ladder gate with a horizontal membrane carries a climbable shaft through the zone,
+    /// with a landing at each end, all inside the cell.
+    #[test]
+    fn a_ladder_gate_has_a_shaft_with_rungs_and_two_landings() {
+        let mut found = 0;
+        'search: for seed in (0..24).map(WorldSeed) {
+            let Some((_, w)) = find_well(seed, WellKind::Seam, 40) else {
+                continue;
+            };
+            if dir(w.axis)[1] == 0 {
+                continue;
+            }
+            let c = w.centre;
+            for dz in -10..10 {
+                for dy in -10..10 {
+                    for dx in -10..10 {
+                        let l2 = I64Vec3::new(
+                            c[0].div_euclid(L2_SIZE) + dx,
+                            c[1].div_euclid(L2_SIZE) + dy,
+                            c[2].div_euclid(L2_SIZE) + dz,
+                        );
+                        for g in gates_in_l2(seed, l2).iter() {
+                            let pieces = gate_ladder(g, l2);
+                            if g.kind != GateKind::Ladder || g.axis != 1 {
+                                assert!(pieces.is_empty());
+                                continue;
+                            }
+                            assert!(
+                                pieces.iter().any(|p| p.kind == FeatureKind::LADDER),
+                                "no climbing corridor"
+                            );
+                            let decks = pieces
+                                .iter()
+                                .filter(|p| p.kind == FeatureKind::DECK)
+                                .count();
+                            assert_eq!(decks, 2);
+                            let rungs = pieces
+                                .iter()
+                                .filter(|p| p.material == MaterialId::METAL)
+                                .count();
+                            assert!(rungs >= 50, "{rungs} rungs");
+                            let cell = 512 * 16;
+                            for p in &pieces {
+                                let b = p.aabb();
+                                assert!(
+                                    b.min.x >= 0
+                                        && b.min.y >= 0
+                                        && b.min.z >= 0
+                                        && b.max.x <= cell
+                                        && b.max.y <= cell
+                                        && b.max.z <= cell,
+                                    "{b:?} leaves its cell"
+                                );
+                            }
+                            found += 1;
+                            if found >= 2 {
+                                break 'search;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(found > 0, "no ladder gate with a horizontal membrane found");
     }
 
     #[test]
