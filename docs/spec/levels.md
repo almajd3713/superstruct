@@ -1405,6 +1405,15 @@ the machines are generated like any mover, and only their pose is driven by the 
   every 40 m walked, so those behind go out. *Deviation:* the lamps run along the straight line
   to the mark, not along a walkable route (the nav graph is not there yet, PW.7.3).
 
+### 5W.46a L1 face ports reach the right L2 cell (`GEN_VERSION` 30)
+
+`ArteryPort::l2(high)` is the L2 cell next to the face in the L1 cell on its low side (`high`: index 7
+of the axis) or on its high side (index 0). The artery routing (`l1_artery::skeleton`) and the
+tissue's anchors (`tissue::tissue_cell`) now use `p.l2(dir.is_positive())`: the cell of the L1 cell
+that touches the face. Before version 30 they used `!dir.is_positive()`, which put a port on the
+cell at the far end of the L1 cell, so no route crossed an L1 face (the bots measured the largest
+connected component at 13 % of the nodes; it is now about 80 %).
+
 ### 5W.46 Ambient movers, lamp suns, signs, pools (PW.10.19–PW.10.23, `worldgen::ambient`, `GEN_VERSION` 27)
 
 `ambient::site_of`: one L0 cell in six holds an ambient mover (a `Mover` on the world clock, same

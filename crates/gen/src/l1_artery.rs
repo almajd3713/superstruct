@@ -132,7 +132,8 @@ pub struct ArteryPort {
 }
 
 impl ArteryPort {
-    /// The L2 cell of the port inside the L1 cell on the `high` (+) or low (−) side of the face.
+    /// The L2 cell of the port next to the face, in the L1 cell on its low side (`high`: the
+    /// cell at the high end of the axis, index 7) or on its high side (the cell at index 0).
     pub fn l2(&self, high: bool) -> L2c {
         let (i, j) = (i64::from(self.ij[0]), i64::from(self.ij[1]));
         let k = if high { N - 1 } else { 0 };
@@ -561,7 +562,9 @@ pub fn skeleton(seed: WorldSeed, l1: I64Vec3) -> Option<Skeleton> {
         }
     }
     for &(dir, p) in &ports {
-        let start = p.l2(!dir.is_positive());
+        // The L2 cell of this L1 cell that touches the face: the high end (7) of an axis for
+        // a positive face, the low end (0) for a negative one.
+        let start = p.l2(dir.is_positive());
         b.run(start, Goal::Tree, p.kind, Role::Port { dir, id: p.id });
     }
 
@@ -705,7 +708,7 @@ mod tests {
             "{l1:?}: tree is not connected"
         );
         for &(dir, p) in &s.ports {
-            assert!(in_t(index(p.l2(!dir.is_positive())) as u16), "{l1:?}: port");
+            assert!(in_t(index(p.l2(dir.is_positive())) as u16), "{l1:?}: port");
         }
         for a in &s.arteries {
             for w in a.cells.windows(2) {
@@ -842,8 +845,8 @@ mod tests {
                         assert!((2..=4).contains(&ports.len()), "{a:?} {dir:?}");
                         for (i, p) in ports.iter().enumerate() {
                             assert!(ports[..i].iter().all(|q| q.ij != p.ij));
-                            assert!(sa.tree.contains(&(index(p.l2(false)) as u16)));
-                            assert!(sb.tree.contains(&(index(p.l2(true)) as u16)));
+                            assert!(sa.tree.contains(&(index(p.l2(true)) as u16)));
+                            assert!(sb.tree.contains(&(index(p.l2(false)) as u16)));
                         }
                         let _ = face;
                     }

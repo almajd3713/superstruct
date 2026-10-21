@@ -407,7 +407,7 @@ fn build(seed: WorldSeed, cache: &TissueCache, cell: CellKey, grown: bool) -> Ti
         let here = crate::l1_artery::index([local.x, local.y, local.z]) as u16;
         let type_rank = |k: ArteryType| ArteryType::ALL.iter().position(|&t| t == k).unwrap_or(0);
         for &(dir, p) in &s.ports {
-            if crate::l1_artery::index(p.l2(!dir.is_positive())) as u16 == here {
+            if crate::l1_artery::index(p.l2(dir.is_positive())) as u16 == here {
                 found.push((
                     face_rank(dir),
                     type_rank(p.kind),

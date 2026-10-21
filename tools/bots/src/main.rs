@@ -87,7 +87,7 @@ fn parse() -> Result<Opts> {
 fn main() -> Result<()> {
     let o = parse()?;
     let t0 = Instant::now();
-    let g = graph::load(&o);
+    let g = graph::load(&o)?;
     eprintln!(
         "loaded {} cells, {} plates, {} links in {:.0} s",
         g.cells,

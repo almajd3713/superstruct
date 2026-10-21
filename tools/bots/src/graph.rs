@@ -1,6 +1,8 @@
-//! The nav graph of a block of L2 cells and what the walkers measure on it. The nodes are points
-//! 8 m apart along the tissue's walks (the designed walk network, with its path types); walks
-//! that pass within 2.5 m of each other, in a cell or across a face, are joined.
+//! The nav graph of a block of L2 cells and what the walkers measure on it. The nodes are the
+//! lattice slots of the tissue's route (its segments, whose ends are shared with the neighbours),
+//! the edges join consecutive slots of a segment, and the route slots on the two sides of an L2
+//! face are joined where they face each other: the designed network, which the generator
+//! guarantees to be connected, with the path type of each segment.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, BinaryHeap, HashMap};
@@ -18,41 +20,45 @@ use worldgen::tissue::tissue_cell;
 
 use crate::Opts;
 
-/// The occupancy grid: 16 m cells; a cell is solid when a piece covers a quarter of it.
 const GRID_M: f64 = 16.0;
 /// A long view is a ray this long (MET-04), the cap on the search (20 km) and the rays' reach.
 const LONG_M: f64 = 2000.0;
 const CAP_M: f64 = 20_000.0;
 const REACH_M: f64 = 4000.0;
 
+/// A segment: its path type and its slots (index and centre).
+type Seg = (u8, Vec<(u16, [f32; 3])>);
+
 struct CellData {
     crust: bool,
-    /// Cell-local metres of the centre of each payoff that shows open space or a place.
+    /// The slots of every segment (index and cell-local centre in metres, which a turned
+    /// lattice moves), with its path type.
+    segs: Vec<Seg>,
+    /// The slots of the payoffs that show open space or a place.
     breath: Vec<[f32; 3]>,
-    /// The tissue's walks: the type and the polyline in cell-local metres.
-    walks: Vec<(u8, Vec<[f32; 3]>)>,
+    /// The ports on the cell's faces: the axis, whether it is the high face, the point in
+    /// cell-local metres and the slot the port routes from.
+    ports: Vec<(u8, bool, [f32; 3], u16)>,
 }
-
-/// Metres between nodes along a walk, and how near two walks must pass to be joined.
-const STEP_M: f32 = 8.0;
-const JOIN_M: f32 = 20.0;
 
 pub struct Graph {
     pub cells: usize,
     dim: i64,
     data: Vec<CellData>,
     pos: Vec<[f32; 3]>,
-    /// The cell of each node, and the type of its walk.
+    /// The cell of each node.
     cell: Vec<u32>,
-    kind: Vec<u8>,
-    /// Whether the node is an end of a walk or joins another walk (what MET-10 counts).
-    key: Vec<bool>,
-    /// The first node of each cell and one past its last.
+    /// The first node of each cell and one past its last, and the node of each slot.
     range: Vec<(u32, u32)>,
-    adj: Vec<Vec<(u32, f32)>>,
+    slot_node: Vec<HashMap<u16, u32>>,
+    /// Neighbours with the distance and the path type (`CROSS` over a face).
+    adj: Vec<Vec<(u32, f32, u8)>>,
     grid: Vec<AtomicU64>,
     gdim: usize,
 }
+
+/// The type of an edge that crosses an L2 face.
+const CROSS: u8 = 255;
 
 impl Graph {
     pub fn nodes(&self) -> usize {
@@ -109,7 +115,7 @@ fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
         .max(0.5)
 }
 
-pub fn load(o: &Opts) -> Graph {
+pub fn load(o: &Opts) -> anyhow::Result<Graph> {
     let seed = WorldSeed(o.seed);
     let dim = o.blocks * 8;
     let low = o.low * 8;
@@ -119,8 +125,7 @@ pub fn load(o: &Opts) -> Graph {
     let cache = L1Cache::default();
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(o.threads.max(1))
-        .build()
-        .expect("thread pool");
+        .build()?;
     // The L1 pieces: the frame, the skin and the features.
     pool.install(|| {
         (0..o.blocks * o.blocks * o.blocks)
@@ -187,29 +192,66 @@ pub fn load(o: &Opts) -> Graph {
                                 | worldgen::payoffs::PayoffKind::Install(_)
                         )
                     })
-                    .map(|p| {
-                        let c = t.lattice.coords(p.slot as usize);
-                        [0, 1, 2].map(|i| (c[i] as f32 + 0.5) * pitch)
+                    .map(|p| p.slot as u16)
+                    // Local places (light wells, atria, thin spots, ...) show open space too.
+                    .chain(
+                        t.locals
+                            .iter()
+                            .filter_map(|&(_, si)| t.structures[usize::from(si)].slots.first())
+                            .map(|&i| i as u16),
+                    )
+                    .map(|i| {
+                        let c = t.lattice.centre(usize::from(i));
+                        [c.x as f32, c.y as f32, c.z as f32]
                     })
                     .collect();
-                let walks = t
-                    .paths
-                    .walks
+                // The path type of each segment (PH and PV ids); a segment without one is 0.
+                let kind_of = |si: usize| {
+                    t.paths
+                        .chosen
+                        .iter()
+                        .find(|c| usize::from(c.0) == si)
+                        .map_or(0, |c| c.1)
+                };
+                let segs = t
+                    .segments
                     .iter()
-                    .map(|w| {
+                    .enumerate()
+                    .map(|(si, seg)| {
                         (
-                            w.id,
-                            w.points
+                            kind_of(si),
+                            seg.slots
                                 .iter()
-                                .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+                                .map(|&i| {
+                                    let c = t.lattice.centre(i as usize);
+                                    (i as u16, [c.x as f32, c.y as f32, c.z as f32])
+                                })
                                 .collect(),
                         )
                     })
                     .collect();
+                let ports = t
+                    .anchors
+                    .iter()
+                    .filter_map(|a| {
+                        let worldgen::tissue::AnchorKind::Port { face, .. } = a.kind else {
+                            return None;
+                        };
+                        let o = face.offset();
+                        let axis = [o.x, o.y, o.z].iter().position(|&v| v != 0)?;
+                        Some((
+                            axis as u8,
+                            [o.x, o.y, o.z][axis] > 0,
+                            a.point.map(|v| v as f32),
+                            a.slot as u16,
+                        ))
+                    })
+                    .collect();
                 CellData {
                     crust,
+                    segs,
                     breath,
-                    walks,
+                    ports,
                 }
             })
             .collect()
@@ -220,92 +262,96 @@ pub fn load(o: &Opts) -> Graph {
         data,
         pos: Vec::new(),
         cell: Vec::new(),
-        kind: Vec::new(),
-        key: Vec::new(),
         range: Vec::new(),
+        slot_node: Vec::new(),
         adj: Vec::new(),
         grid,
         gdim,
     };
     g.build_nodes();
-    g
+    Ok(g)
 }
 
 impl Graph {
-    fn add(&mut self, a: u32, b: u32) {
+    fn add(&mut self, a: u32, b: u32, ty: u8) {
         let w = dist(self.pos[a as usize], self.pos[b as usize]);
-        self.adj[a as usize].push((b, w));
-        self.adj[b as usize].push((a, w));
+        self.adj[a as usize].push((b, w, ty));
+        self.adj[b as usize].push((a, w, ty));
     }
 
-    /// Nodes along every walk, joined along it, then joined to the walks that pass near.
+    fn org(&self, k: usize) -> [f32; 3] {
+        let d = self.dim;
+        [
+            (k as i64 % d * 512) as f32,
+            (k as i64 / d % d * 512) as f32,
+            (k as i64 / (d * d) * 512) as f32,
+        ]
+    }
+
+    /// A node for every slot of every segment, edges along the segments and over the faces.
     fn build_nodes(&mut self) {
         let d = self.dim;
-        let mut walk_of: Vec<u32> = Vec::new();
-        let mut uid = 0u32;
         for k in 0..self.data.len() {
-            let org = [
-                (k as i64 % d * 512) as f32,
-                (k as i64 / d % d * 512) as f32,
-                (k as i64 / (d * d) * 512) as f32,
-            ];
+            let org = self.org(k);
             let start = self.pos.len() as u32;
-            for (id, pts) in &self.data[k].walks {
-                for seg in pts.windows(2) {
-                    let len = dist(seg[0], seg[1]);
-                    let n = (len / STEP_M).ceil().max(1.0) as usize;
-                    for i in 0..n {
-                        let f = i as f32 / n as f32;
-                        let p = [0, 1, 2].map(|a| org[a] + seg[0][a] + (seg[1][a] - seg[0][a]) * f);
-                        self.pos.push(p);
+            let mut map: HashMap<u16, u32> = HashMap::new();
+            for (_, slots) in &self.data[k].segs {
+                for &(i, c) in slots {
+                    map.entry(i).or_insert_with(|| {
+                        self.pos.push([0, 1, 2].map(|a| org[a] + c[a]));
                         self.cell.push(k as u32);
-                        self.kind.push(*id);
-                        walk_of.push(uid);
-                        self.key.push(i == 0 && seg.as_ptr() == pts.as_ptr());
-                    }
+                        (self.pos.len() - 1) as u32
+                    });
                 }
-                if let Some(&last) = pts.last() {
-                    self.pos.push([0, 1, 2].map(|a| org[a] + last[a]));
-                    self.cell.push(k as u32);
-                    self.kind.push(*id);
-                    walk_of.push(uid);
-                    self.key.push(true);
-                }
-                uid += 1;
             }
             self.range.push((start, self.pos.len() as u32));
+            self.slot_node.push(map);
         }
         self.adj = vec![Vec::new(); self.pos.len()];
-        for n in 1..self.pos.len() {
-            if walk_of[n] == walk_of[n - 1] {
-                self.add((n - 1) as u32, n as u32);
+        for k in 0..self.data.len() {
+            for si in 0..self.data[k].segs.len() {
+                let ty = self.data[k].segs[si].0;
+                let ids: Vec<u16> = self.data[k].segs[si].1.iter().map(|s| s.0).collect();
+                for w in ids.windows(2) {
+                    let (a, b) = (self.slot_node[k][&w[0]], self.slot_node[k][&w[1]]);
+                    if a != b && !self.adj[a as usize].iter().any(|e| e.0 == b) {
+                        self.add(a, b, ty);
+                    }
+                }
             }
         }
-        // Joins: walks that pass within `JOIN_M`, found through a hash of 3 m cubes.
-        let mut cubes: HashMap<[i32; 3], Vec<u32>> = HashMap::new();
-        for (n, p) in self.pos.iter().enumerate() {
-            let c = p.map(|v| (v / 3.0).floor() as i32);
-            cubes.entry(c).or_default().push(n as u32);
-        }
-        let mut joins = Vec::new();
-        for (n, p) in self.pos.iter().enumerate() {
-            let c = p.map(|v| (v / 3.0).floor() as i32);
-            let mut count = 0;
-            'scan: for dz in -1..=1 {
-                for dy in -1..=1 {
-                    for dx in -1..=1 {
-                        let Some(list) = cubes.get(&[c[0] + dx, c[1] + dy, c[2] + dz]) else {
+        // The ports on the two sides of a face that meet: the same point within 4 m.
+        let mut found = Vec::new();
+        for z in 0..d {
+            for y in 0..d {
+                for x in 0..d {
+                    let a = ((z * d + y) * d + x) as usize;
+                    for (axis, step) in [(0usize, (1, 0, 0)), (1, (0, 1, 0)), (2, (0, 0, 1))] {
+                        let (nx, ny, nz) = (x + step.0, y + step.1, z + step.2);
+                        if nx >= d || ny >= d || nz >= d {
                             continue;
-                        };
-                        for &o in list {
-                            if (o as usize) > n
-                                && walk_of[o as usize] != walk_of[n]
-                                && dist(*p, self.pos[o as usize]) <= JOIN_M
+                        }
+                        let b = ((nz * d + ny) * d + nx) as usize;
+                        for pa in self.data[a]
+                            .ports
+                            .iter()
+                            .filter(|p| p.0 as usize == axis && p.1)
+                        {
+                            for pb in self.data[b]
+                                .ports
+                                .iter()
+                                .filter(|p| p.0 as usize == axis && !p.1)
                             {
-                                joins.push((n as u32, o));
-                                count += 1;
-                                if count >= 4 {
-                                    break 'scan;
+                                let across = (0..3)
+                                    .filter(|&i| i != axis)
+                                    .all(|i| (pa.2[i] - pb.2[i]).abs() <= 4.0);
+                                if !across {
+                                    continue;
+                                }
+                                if let (Some(&na), Some(&nb)) =
+                                    (self.slot_node[a].get(&pa.3), self.slot_node[b].get(&pb.3))
+                                {
+                                    found.push((na, nb));
                                 }
                             }
                         }
@@ -313,10 +359,8 @@ impl Graph {
                 }
             }
         }
-        for (a, b) in joins {
-            self.add(a, b);
-            self.key[a as usize] = true;
-            self.key[b as usize] = true;
+        for (na, nb) in found {
+            self.add(na, nb, CROSS);
         }
     }
 
@@ -378,7 +422,7 @@ impl Graph {
             if m as f32 / 1000.0 > d[n as usize] + 0.01 {
                 continue;
             }
-            for &(o, w) in &self.adj[n as usize] {
+            for &(o, w, _) in &self.adj[n as usize] {
                 let nd = d[n as usize] + w;
                 if nd < d[o as usize] {
                     d[o as usize] = nd;
@@ -410,6 +454,7 @@ pub struct Report {
     vertical: f64,
     types_per_km: f64,
     three_links: f64,
+    three_of_junctions: f64,
     bots: usize,
     km: f64,
 }
@@ -437,21 +482,14 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
     // Breathing space: the nodes near a payoff.
     let mut breath = Vec::new();
     for k in 0..g.data.len() {
-        let org = {
-            let d = g.dim;
-            [
-                (k as i64 % d * 512) as f32,
-                (k as i64 / d % d * 512) as f32,
-                (k as i64 / (d * d) * 512) as f32,
-            ]
-        };
-        for b in &g.data[k].breath {
-            let at = [org[0] + b[0], org[1] + b[1], org[2] + b[2]];
-            // The nearest node of the cell within 24 m.
-            let (lo, hi) = g.range[k];
+        let org = g.org(k);
+        let (lo, hi) = g.range[k];
+        for c in &g.data[k].breath {
+            let at = [org[0] + c[0], org[1] + c[1], org[2] + c[2]];
+            // The nearest route node of the cell within 48 m (a balcony hangs beside a leaf).
             let best = (lo..hi)
                 .map(|n| (n, dist(g.pos[n as usize], at)))
-                .filter(|&(_, d)| d < 24.0)
+                .filter(|&(_, d)| d <= 48.0)
                 .min_by(|a, b| a.1.total_cmp(&b.1));
             if let Some((n, _)) = best {
                 breath.push(n);
@@ -459,13 +497,39 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
         }
     }
     eprintln!("{} breathing-space nodes", breath.len());
-    if let Some(&s0) = starts.first() {
-        let reach = g.distances(&[s0]);
-        let n = reach.iter().filter(|d| d.is_finite()).count();
+    let cross = g.adj.iter().flatten().filter(|e| e.2 == CROSS).count() / 2;
+    eprintln!("{cross} links over faces");
+    {
+        // The components of the graph: how much of it a walker can reach from where it stands.
+        let mut comp = vec![u32::MAX; g.pos.len()];
+        let mut sizes = Vec::new();
+        for n in 0..g.pos.len() {
+            if comp[n] != u32::MAX {
+                continue;
+            }
+            let id = sizes.len() as u32;
+            let mut stack = vec![n as u32];
+            comp[n] = id;
+            let mut size = 0usize;
+            while let Some(m) = stack.pop() {
+                size += 1;
+                for &(o, _, _) in &g.adj[m as usize] {
+                    if comp[o as usize] == u32::MAX {
+                        comp[o as usize] = id;
+                        stack.push(o);
+                    }
+                }
+            }
+            sizes.push(size);
+        }
+        let mut sorted = sizes.clone();
+        sorted.sort_unstable_by(|a, b| b.cmp(a));
         eprintln!(
-            "from the first start {} of {} nodes are reachable",
-            n,
-            g.pos.len()
+            "{} components; the largest holds {} of {} nodes; the next five {:?}",
+            sizes.len(),
+            sorted[0],
+            g.pos.len(),
+            &sorted[1..sorted.len().min(6)]
         );
     }
     let to_breath = g.distances(&breath);
@@ -499,8 +563,8 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
             if nbrs.is_empty() {
                 break;
             }
-            let choices: Vec<_> = nbrs.iter().filter(|&&(n, _)| n != prev).collect();
-            let &(to, w) = if choices.is_empty() {
+            let choices: Vec<_> = nbrs.iter().filter(|&&(n, _, _)| n != prev).collect();
+            let &(to, w, ty) = if choices.is_empty() {
                 &nbrs[0]
             } else {
                 choices[next(choices.len())]
@@ -509,22 +573,25 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
             up += f64::from((b[1] - a[1]).abs());
             total += f64::from(w);
             walked_m += f64::from(w);
-            seen.insert(g.kind[to as usize]);
+            if ty != CROSS {
+                seen.insert(ty);
+            }
             prev = at;
             at = to;
         }
         types_km += seen.len() as f64;
         walked += walked_m / 1000.0;
     }
-    let keys: Vec<usize> = (0..g.pos.len()).filter(|&n| g.key[n]).collect();
-    let linked = keys.iter().filter(|&&n| g.adj[n].len() >= 3).count();
+    let linked = (0..g.pos.len()).filter(|&n| g.adj[n].len() >= 3).count();
+    let ends = (0..g.pos.len()).filter(|&n| g.adj[n].len() != 2).count();
     Report {
         starts: starts.len(),
         long_m,
         breath_m,
         vertical: up / total.max(1.0),
         types_per_km: types_km / walked.max(1e-9),
-        three_links: linked as f64 / keys.len().max(1) as f64,
+        three_links: linked as f64 / g.pos.len().max(1) as f64,
+        three_of_junctions: linked as f64 / ends.max(1) as f64,
         bots: o.bots,
         km: walked,
     }
@@ -559,10 +626,15 @@ impl fmt::Display for Report {
             "  MET-08 path types per km walked                      {:>8.1}     target >= 8",
             self.types_per_km
         )?;
+        writeln!(
+            f,
+            "  MET-10 nodes with three or more links                {:>8.3}     target >= 0.40     (of all route slots)",
+            self.three_links
+        )?;
         write!(
             f,
-            "  MET-10 nodes with three or more links                {:>8.3}     target >= 0.40",
-            self.three_links
+            "  MET-10 ... of the junctions and ends                 {:>8.3}     target >= 0.40     (nodes whose degree is not 2)",
+            self.three_of_junctions
         )
     }
 }

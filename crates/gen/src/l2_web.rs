@@ -566,8 +566,10 @@ mod tests {
             .filter(|((_, k), _)| *k == FeatureKind::STAIR_TOWER.0 || *k == FeatureKind::RAMP.0)
             .map(|(_, n)| n)
             .sum();
+        // At most 0.1 % (0.05 % before the L1 face ports moved in version 30); the stairs that
+        // stand across another walk are the census's counter `b` for PW.4.15.
         assert!(
-            stairs * 2000 <= w.samples,
+            stairs * 1000 <= w.samples,
             "{stairs} samples blocked by stairs: {w:?}"
         );
     }

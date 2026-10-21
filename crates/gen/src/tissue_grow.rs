@@ -2616,13 +2616,15 @@ mod tests {
         }
         // Halls for the nested variants.
         let mut halls = 0;
-        'search: for x in -8..8 {
-            for z in -8..8 {
-                for v in crate::l1_void::voids_of_l0(seed(), I64Vec3::new(x, 0, z)) {
+        'search: for (x, y, z) in
+            (-8..8).flat_map(|x| (-1..=1).flat_map(move |y| (-8..8).map(move |z| (x, y, z))))
+        {
+            {
+                for v in crate::l1_void::voids_of_l0(seed(), I64Vec3::new(x, y, z)) {
                     if !matches!(
                         v.kind,
                         crate::l1_void::VoidKind::Hall | crate::l1_void::VoidKind::Shaft
-                    ) || halls >= 80
+                    ) || halls >= 160
                     {
                         continue;
                     }
@@ -2633,7 +2635,7 @@ mod tests {
                     for s in &t.structures {
                         seen[usize::from(s.variant)] += 1;
                     }
-                    if halls >= 80 {
+                    if halls >= 160 {
                         break 'search;
                     }
                 }

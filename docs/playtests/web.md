@@ -56,3 +56,40 @@ measures the share of slots that are built, engulfed or solid (every structure b
 MET-01 is close but still under 0.70 on all three seeds; the cells at the edge of a crust, where a
 crust fills part of its cell, pull the mean down (the tissue's aim over these cells is 0.81).
 MET-10 (0.135–0.148 against 0.40) stands as measured. `PW.12.0` is narrowed to these two.
+
+### Bots on the route network (`cargo run -p bots --release -- --blocks 2`, 8 km block, 3 000 starts, 60 walkers of 3 km)
+
+The bots load every L2 cell of the block, take the tissue's route slots as nodes (edges along the
+segments, with their path type) and join the cells through the L1 face ports. Long views come
+from 26 rays per node through an occupancy grid of 16 m cells (the tissue's envelopes and the L1
+pieces); starts are in the middle 4 km, so the rays stay inside the block.
+
+**A bug found by the bots (`GEN_VERSION` 30).** The first run showed the world falling apart at
+every L1 face: the largest component held 13 % of the nodes and no link crossed an L1 face. The
+cause: the L1 face ports were given to the L2 cell on the **far** side of the L1 cell (the
+`+X` Avenue at `x = 0` instead of `x = 7`), in the artery routing (`l1_artery`) and in the
+tissue's anchors. Both now use the cell that touches the face (`p.l2(dir.is_positive())`). After
+the fix the largest component holds 86 % (seed 42), 85 % (seed 7) and 79 % (seed 1234) of the
+nodes, and about 2 000 links cross L1 faces in the block.
+
+| Metric | Target | seed 42 | seed 7 | seed 1234 |
+|---|---|---|---|---|
+| MET-04 walking distance to a 2 km sightline (median) | 1.5–2.5 km | 6.2 km | 0.99 km | 1.6 km |
+| starts that reach one within 20 km | | 77 % | 86 % | 78 % |
+| MET-05 walking distance to breathing space (median) | ≤ 150 m | 8.5 km | 7.0 km | 10.7 km |
+| MET-07 vertical share of walked distance | ≥ 0.33 | 0.334 | 0.340 | 0.333 |
+| MET-08 path types per km walked | ≥ 8 | 8.5 | 9.0 | 9.3 |
+| MET-10 nodes with three or more links (all route slots) | ≥ 0.40 | 0.055 | 0.055 | 0.052 |
+| ... of the junctions and ends | | 0.83 | 0.79 | 0.78 |
+
+**Reading.**
+- **MET-07 and MET-08 are in range** on all three seeds, narrowly (0.333 against 0.33).
+- **MET-04 is in range on two seeds in three**; seed 42's long views are far apart (6.2 km).
+- **MET-05 fails by a wide margin.** Only about 180 route nodes in 4 096 cells are near a view,
+  set, installation or local place. The payoffs are sparse: one in about 23 cells. Either the
+  payoffs are too rare for the metric's definition, or more of the cell's places count (windows
+  to a void, cut-aways) than the generator records as payoffs.
+- **MET-10** depends on what a node is: counting every route slot, junctions are few; counting
+  junctions and ends only, four in five have three or more links, so the web branches.
+- Not yet measured: MET-03 (rays inside the cell only), MET-09. PRN-01..08 are the principles
+  these numbers stand for; the numbers above are the record for PW.12.1.
