@@ -86,6 +86,9 @@ pub struct StreamerConfig {
     pub upload_budget_bytes: u64,
     /// Resident GPU bytes above which unwanted chunks are evicted, least recently wanted first.
     pub memory_budget_bytes: u64,
+    /// Resident or held bytes above which the L2 and L1 detail bands shrink (and grow back when
+    /// the memory falls), so that flying on never takes more than this (PW.4.23).
+    pub memory_hard_cap_bytes: u64,
 }
 
 impl Default for StreamerConfig {
@@ -94,6 +97,7 @@ impl Default for StreamerConfig {
             stream: StreamConfig::default(),
             upload_budget_bytes: 16 << 20,
             memory_budget_bytes: 768 << 20,
+            memory_hard_cap_bytes: 2 << 30,
         }
     }
 }
@@ -138,6 +142,8 @@ pub struct Streamer {
     cfg: StreamerConfig,
     pool: MeshPool,
     resident: FastMap<ChunkId, Resident>,
+    /// How far the detail bands are scaled down to fit `memory_hard_cap_bytes` (1.0 is none).
+    band_scale: f64,
     /// Meshes the workers finished that still wait for upload budget.
     ready: VecDeque<ChunkMesh>,
     wanted: Vec<Wanted>,
@@ -167,6 +173,7 @@ impl Streamer {
             cfg,
             pool,
             resident: FastMap::default(),
+            band_scale: 1.0,
             ready: VecDeque::new(),
             wanted: Vec::new(),
             wanted_map: FastMap::default(),
@@ -356,15 +363,43 @@ impl Streamer {
         self.digests.insert(chunk.id, digest);
     }
 
+    /// The band radii with the full-detail bands (L2 full and mid, L1 full) scaled down by
+    /// `band_scale`.
+    fn scaled_stream(&self) -> StreamConfig {
+        let mut c = self.cfg.stream;
+        c.l2_radius_m *= self.band_scale;
+        c.l2_mid_radius_m *= self.band_scale;
+        c.l1_full_radius_m *= self.band_scale;
+        c.ordered()
+    }
+
+    /// Shrinks the bands 10 % while the memory is over the hard cap, grows them back 5 % at a
+    /// time once it is under 60 % of it.
+    fn adapt_bands(&mut self, resident: u64, held: u64) {
+        let cap = self.cfg.memory_hard_cap_bytes;
+        let before = self.band_scale;
+        // Pages are held beyond what is resident (holes left by evictions), so what is held may
+        // reach half as much again as the cap before the bands shrink for it.
+        if resident > cap || held > cap.saturating_add(cap / 2) {
+            self.band_scale = (self.band_scale * 0.9).max(0.25);
+        } else if resident < cap / 10 * 6 && held < cap && self.band_scale < 1.0 {
+            self.band_scale = (self.band_scale * 1.05).min(1.0);
+        }
+        if (self.band_scale - before).abs() > f64::EPSILON {
+            self.last_cell = None;
+            tracing::info!(
+                "detail bands at {:.0} % ({} MiB resident, {} MiB held)",
+                self.band_scale * 100.0,
+                resident >> 20,
+                held >> 20
+            );
+        }
+    }
+
     fn retarget(&mut self, cam: &WorldPos, view_dir: Vec3) {
         let t = Instant::now();
-        desired_set_with_probes(
-            &self.cfg.stream,
-            cam,
-            view_dir,
-            &self.probes,
-            &mut self.scratch,
-        );
+        let stream = self.scaled_stream();
+        desired_set_with_probes(&stream, cam, view_dir, &self.probes, &mut self.scratch);
         let t_set = t.elapsed().as_secs_f64() * 1000.0;
         std::mem::swap(&mut self.wanted, &mut self.scratch);
         self.wanted_map.clear();
@@ -502,6 +537,7 @@ impl Streamer {
     }
 
     fn evict(&mut self, sink: &mut dyn ChunkSink) {
+        self.adapt_bands(self.resident_bytes, sink.allocated_bytes());
         // Pages are bigger than what is in them (a chunk is a few in a page and evictions leave
         // holes), so the memory held is also held to half as much again as the budget.
         let (budget, held_limit) = (
@@ -591,6 +627,36 @@ mod tests {
         Streamer::new(cfg, MeshPool::new(WorldSeed(0), 2))
     }
 
+    /// PW.4.23: over the hard cap the full-detail bands shrink (never below a quarter), under
+    /// 60 % of it they grow back, and the L3 and far bands are left alone.
+    #[test]
+    fn bands_shrink_over_the_hard_cap_and_grow_back() {
+        let mut s = streamer(StreamerConfig {
+            stream: small(),
+            upload_budget_bytes: 1 << 20,
+            memory_budget_bytes: 1000,
+            memory_hard_cap_bytes: 1000,
+        });
+        for _ in 0..40 {
+            s.adapt_bands(2000, 2000);
+        }
+        assert!((s.band_scale - 0.25).abs() < 1e-9, "{}", s.band_scale);
+        let c = s.scaled_stream();
+        assert!(
+            (c.l2_radius_m - 150.0).abs() < 1e-6
+                && (c.l1_far_radius_m - small().l1_far_radius_m).abs() < 1e-6
+        );
+        for _ in 0..80 {
+            s.adapt_bands(100, 100);
+        }
+        assert!((s.band_scale - 1.0).abs() < 1e-9);
+        // Between 60 % and 100 % of the cap nothing moves.
+        s.adapt_bands(2000, 2000);
+        let held = s.band_scale;
+        s.adapt_bands(800, 800);
+        assert!((s.band_scale - held).abs() < 1e-12);
+    }
+
     #[test]
     #[ignore = "reads the v6 world (lift core, decks, v6 L2/L3), replaced in version 7; rebuilt or deleted with PW.3"]
     fn uploads_never_exceed_the_frame_budget_and_everything_arrives() {
@@ -599,6 +665,7 @@ mod tests {
             stream: small(),
             upload_budget_bytes: budget,
             memory_budget_bytes: u64::MAX,
+            memory_hard_cap_bytes: u64::MAX,
         });
         let mut sink = FakeSink::default();
         let cam = pos(500.0, 0);
@@ -625,6 +692,7 @@ mod tests {
             stream: small(),
             upload_budget_bytes: 1 << 20,
             memory_budget_bytes: memory,
+            memory_hard_cap_bytes: u64::MAX,
         });
         let mut sink = FakeSink::default();
         // 400 m/s at 60 fps along x, across several sectors.
@@ -662,6 +730,7 @@ mod tests {
             stream: small(),
             upload_budget_bytes: 8 << 20,
             memory_budget_bytes: u64::MAX,
+            memory_hard_cap_bytes: u64::MAX,
         });
         let mut sink = FakeSink::default();
         let settle = |s: &mut Streamer, sink: &mut FakeSink, cam: &WorldPos| {
@@ -709,6 +778,7 @@ mod tests {
             stream: small(),
             upload_budget_bytes: 8 << 20,
             memory_budget_bytes: u64::MAX,
+            memory_hard_cap_bytes: u64::MAX,
         });
         let mut sink = FakeSink::default();
         let settle = |s: &mut Streamer, sink: &mut FakeSink, cam: &WorldPos| {
@@ -748,6 +818,7 @@ mod tests {
                 stream: StreamConfig::default(),
                 upload_budget_bytes: 16 << 20,
                 memory_budget_bytes: u64::MAX,
+                memory_hard_cap_bytes: u64::MAX,
             },
             MeshPool::new(WorldSeed(0), 8),
         );
@@ -801,6 +872,7 @@ mod tests {
             stream: small(),
             upload_budget_bytes: 8 << 20,
             memory_budget_bytes: u64::MAX,
+            memory_hard_cap_bytes: u64::MAX,
         });
         let mut sink = FakeSink::default();
         let settle = |s: &mut Streamer, sink: &mut FakeSink| {

@@ -31,6 +31,7 @@ fn flythrough(h: &Headless, fades: bool, frames: usize) -> Vec<usize> {
             stream: StreamConfig::default(),
             upload_budget_bytes: 16 << 20,
             memory_budget_bytes: 768 << 20,
+            memory_hard_cap_bytes: u64::MAX,
         },
         MeshPool::new(WorldSeed(0), 8),
     );
