@@ -181,7 +181,7 @@ weightless sites, rare events, movers, wells, roads, rivers, spines, ramparts, s
 gate zones round seams, and the L2 tissue of 12 000 sampled cells (forms, supports, variants,
 mutations, paths, modifiers, thresholds, hubs, sets, places, quarters, kit, growth, payoffs). IDs
 that the world cannot carry (the controller, the tools, the weather, the lights of the engine) are
-listed with the test that exercises them. Result: **476 IDs present, 47 tested, 122 with no
+listed with the test that exercises them. Result (after adding the regime and stack tags over a cube of 13 L0 cells): **485 IDs present, 49 tested, 111 with no
 instance.** What is still zero, by group:
 
 - **not built**: RIDE-01..10 (the journeys, 🎮), SND-01..09 (sound, audio deferred);

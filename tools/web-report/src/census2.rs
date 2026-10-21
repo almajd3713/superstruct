@@ -125,6 +125,11 @@ pub fn wide_scan(seed: WorldSeed, radius: i64) -> Vec<Found> {
         .par_iter()
         .flat_map(|&l0| {
             let mut out = l0_extra(seed, l0);
+            // The regime, the stack and the characters (REG, STR, BTW, SC, ORI, VOID) over a
+            // smaller cube round the origin: they need the stack of each cell.
+            if l0.abs().max_element() <= 6 {
+                out.extend(crate::l0_instances(seed, l0));
+            }
             let k = key_of(&(l0.x, l0.y, l0.z));
             if let Some(s) = worldgen::rare::site_of(seed, l0) {
                 push(&mut out, s.kind.id(), k, s.l1);
