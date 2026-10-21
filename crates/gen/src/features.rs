@@ -21,11 +21,40 @@ pub const M: Q = 16;
 /// Every feature that touches L1 cell `l1`.
 pub fn contents(seed: WorldSeed, l1: I64Vec3) -> Vec<Content> {
     let mut out = Vec::new();
+    // Movers come first: the engine draws them whatever the cell holds, so their supports must
+    // stand.
     for c in [
+        crate::movers::mover_content(seed, l1),
         crate::rare::rare_content(seed, l1),
         crate::roads::road_content(seed, l1),
+        crate::spines::spine_content(seed, l1),
+        crate::rivers::river_content(seed, l1),
+        crate::wonders::wonder_content(seed, l1),
+        crate::weightless::weightless_content(seed, l1),
+        crate::growth::tree_content(seed, l1),
+        crate::strange::strange_content(seed, l1),
+        crate::ambient::lamp_sun_content(seed, l1),
+        crate::ambient::pool_content(seed, l1),
     ] {
-        if !c.prims.is_empty() || !c.keep_out.is_empty() {
+        if c.prims.is_empty() && c.keep_out.is_empty() {
+            continue;
+        }
+        // Two features that would clear the same space cannot both stand: the first in the
+        // list keeps it, so a cell never holds one feature inside another's cleared space.
+        let clash = |a: &QAabb, b: &QAabb| {
+            a.min.x < b.max.x
+                && a.max.x > b.min.x
+                && a.min.y < b.max.y
+                && a.max.y > b.min.y
+                && a.min.z < b.max.z
+                && a.max.z > b.min.z
+        };
+        let taken = out.iter().any(|o: &Content| {
+            o.keep_out
+                .iter()
+                .any(|a| c.keep_out.iter().any(|b| clash(a, b)))
+        });
+        if !taken {
             out.push(c);
         }
     }

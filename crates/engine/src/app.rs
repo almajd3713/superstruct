@@ -46,6 +46,7 @@ use crate::tools::{self, Tools};
 use crate::tramauto::TramAuto;
 use crate::tramdraw::TramDraw;
 use crate::tramsys::{Riding, TramSystem};
+use crate::weather::{self, Weather};
 use crate::window::toggle_fullscreen;
 
 /// Simulation rate (PLAN.md §11).
@@ -100,6 +101,7 @@ struct App {
     tools: Tools,
     tools_t: Instant,
     tool_zoom: f32,
+    weather: Weather,
     trail: Vec<WorldPos>,
     chalk: Vec<WorldPos>,
     trail_draw: MarkDraw,
@@ -902,6 +904,19 @@ impl App {
             running
                 .renderer
                 .set_horizon_start(self.streamer.config().stream.l1_far_radius_m as f32);
+            #[allow(clippy::cast_sign_loss)] // the clock never runs backwards
+            let t_ms = (self.trams.time() * 1000.0) as u64;
+            self.weather
+                .sense(WorldSeed(self.settings.seed), &render_camera.pos, t_ms);
+            self.weather.update(
+                &mut running.renderer,
+                &running.gpu.device,
+                &running.gpu.queue,
+                WorldSeed(self.settings.seed),
+                &render_camera.pos,
+                t_ms,
+            );
+            running.renderer.set_lights(&self.weather.lights);
             {
                 // The regime around the camera lights the interiors it is in; a Blackout has
                 // no emissive colour, so every lamp and window goes dark.
@@ -909,7 +924,8 @@ impl App {
                     WorldSeed(self.settings.seed),
                     &render_camera.pos,
                 );
-                let e = atm.emissive;
+                let wave = weather::window_wave(weather::absolute(&render_camera.pos).0, t_ms);
+                let e = atm.emissive * wave;
                 running
                     .renderer
                     .set_module_glow(Some([e.x, e.y, e.z, f32::from(atm.light > 0.0)]));
@@ -921,13 +937,18 @@ impl App {
                 &FrameInput {
                     camera: &render_camera,
                     size: running.gpu.size(),
-                    params: FrameParams {
-                        debug_view: self.debug_view,
-                        ..frame_params(
-                            WorldSeed(self.settings.seed),
-                            &render_camera.pos,
-                            self.survival.fade(),
-                        )
+                    params: {
+                        let mut p = FrameParams {
+                            debug_view: self.debug_view,
+                            ..frame_params(
+                                WorldSeed(self.settings.seed),
+                                &render_camera.pos,
+                                self.survival.fade(),
+                            )
+                        };
+                        (p.fog_color, p.fog_density) =
+                            self.weather.tint_fog(p.fog_color, p.fog_density);
+                        p
                     },
                     boxes: &self.box_scratch,
                     timer: Some(&running.timer),
@@ -1224,6 +1245,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         tools: Tools::new(WorldSeed(settings_seed)),
         tools_t: now,
         tool_zoom: 1.0,
+        weather: Weather::default(),
         trail_draw: MarkDraw::new(Shape::Lamp),
         chalk_draw: MarkDraw::new(Shape::Chalk),
         route_draw: RouteDraw::default(),

@@ -52,6 +52,18 @@ salts! {
     RAMPART_LINE = 0x012E;
     /// Keyed by the L1 cell of a strange region's geometry (`levels.md` §3W.11).
     STRANGE_BUILD = 0x012F;
+    /// Keyed by the L0 cell (the site) and the L1 cell (the build): ambient movers (`levels.md` §5W.46).
+    AMBIENT_SITE = 0x0130;
+    /// Keyed by the L1 cell: its climate (`levels.md` §5W.47).
+    WEATHER = 0x0131;
+    /// Keyed by the L0 cell: its fog sea.
+    FOG_SEA = 0x0132;
+    /// Keyed by the L1 cell with the time slot folded in: lightning.
+    FLASH = 0x0133;
+    /// Keyed by the L1 cell: whether it holds a lamp sun, and which holes its crust has.
+    LAMP_SUN = 0x0134;
+    /// Keyed by the L1 cell: whether it holds a cistern with a still pool.
+    POOL = 0x0135;
     REGIME_WEB = 0x0110;
     /// Keyed by the L0 cell: the interior stack sequence (`regimes.md` §8.2).
     STACK = 0x0111;

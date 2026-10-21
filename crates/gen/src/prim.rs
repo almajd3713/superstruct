@@ -216,6 +216,14 @@ impl MaterialId {
     pub const MOSS: Self = Self(10);
     /// Pale fungus that glows a little (GROW-03).
     pub const FUNGUS: Self = Self(11);
+    /// Neon signage: a cold cyan that buzzes (LGT-11).
+    pub const NEON: Self = Self(12);
+    /// Aurora curtains (LGT-04).
+    pub const AURORA: Self = Self(13);
+    /// A beam of light: lighthouse, searchlight, pulse (LGT-01..03).
+    pub const BEAM: Self = Self(14);
+    /// Steam, rain and dust: pale and soft (WX-03..06).
+    pub const VAPOUR: Self = Self(15);
 }
 
 /// What a primitive belongs to. Append-only.

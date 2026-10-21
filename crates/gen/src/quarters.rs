@@ -218,8 +218,15 @@ fn recipe(m: &mut M<'_>, q: usize, rng: &mut Rng, f: &Face, lo: [f64; 3], hi: [f
             let (a, b) = f.bx(0.0, 3.2, t0 + 2.0, t1 - 2.0, f.y.0 + 8.0, f.y.0 + 9.0);
             m.boxed(7, a, b, conc, none);
         }
-        // QTR-09 bastion: merlons along the roof edge and buttresses.
+        // QTR-09 bastion: merlons along the roof edge and buttresses; LGT-10: red lamps every 6 m
+        // along the foot of the face, an evacuation route that leads along the wall.
         8 => {
+            let mut x = t0 + 1.0;
+            while x < t1 - 1.0 {
+                let (a, b) = f.bx(0.0, 0.3, x, x + 0.4, f.y.0 + 2.4, f.y.0 + 2.8);
+                m.boxed(8, a, b, MaterialId::SIGNAL, none);
+                x += 6.0;
+            }
             let mut x = t0;
             while x < t1 - 2.0 {
                 let (a, b) = f.bx(0.0, 2.0, x, x + 2.0, f.y.1, f.y.1 + 2.0);
@@ -294,6 +301,21 @@ fn recipe(m: &mut M<'_>, q: usize, rng: &mut Rng, f: &Face, lo: [f64; 3], hi: [f
         }
         // QTR-13 market: awnings over stalls, with lamps on strings.
         12 => {
+            // LGT-11: a neon sign of three unreadable glyphs of five by seven cells.
+            let sx = rand(rng, t0 + 2.0, (t1 - 14.0).max(t0 + 2.0));
+            let sy = f.y.0 + 6.0;
+            for g in 0..3 {
+                let bits = rng.next_u64();
+                for k in 0..35 {
+                    if bits >> k & 1 == 1 {
+                        let (cx, cy) = (f64::from(k % 5), f64::from(k / 5));
+                        let x = sx + f64::from(g) * 4.0 + cx * 0.5;
+                        let y = sy + cy * 0.5;
+                        let (a, b) = f.bx(0.0, 0.2, x, x + 0.4, y, y + 0.4);
+                        m.boxed(12, a, b, MaterialId::NEON, none);
+                    }
+                }
+            }
             let mut x = t0 + 2.0;
             while x < t1 - 4.0 {
                 let (a, b) = f.bx(0.0, 3.0, x, x + 3.0, f.y.0 + 3.2, f.y.0 + 3.5);

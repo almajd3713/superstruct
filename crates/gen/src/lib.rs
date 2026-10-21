@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod ambient;
 pub mod atmosphere;
 pub mod carve;
 pub mod cavity;
@@ -93,6 +94,7 @@ pub mod tram;
 pub mod validate;
 pub mod walk;
 pub mod walk_oriented;
+pub mod weather;
 pub mod weightless;
 pub mod wellgeom;
 pub mod wonders;
@@ -100,4 +102,4 @@ pub(crate) mod zfight;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 26;
+pub const GEN_VERSION: u32 = 27;

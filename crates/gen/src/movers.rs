@@ -48,6 +48,26 @@ pub enum MoverKind {
     EngineHall,
     /// NOT-03: four doors in a gallery, each of which rises as someone comes within reach.
     Doors,
+    /// LGT-01: a lighthouse with a slow beam, each with its own rhythm (`ambient`).
+    Lighthouse,
+    /// LGT-02: a searchlight sweeping.
+    Searchlight,
+    /// LGT-03: pulses running along a cable of a kilometre.
+    LightRiver,
+    /// LGT-04: curtains of aurora swaying in a Between.
+    Aurora,
+    /// WX-06: a steam vent that puffs on a cycle.
+    Steam,
+    /// LIFE-01: a flock of drones wheeling.
+    Flock,
+    /// LIFE-02: a maintenance crawler on a pipe.
+    Crawler,
+    /// LIFE-03: a cable spider on its net.
+    Spider,
+    /// LIFE-04: moths around a lamp.
+    Moths,
+    /// LIFE-05: a lantern on a distant catwalk, always going away.
+    Lantern,
 }
 
 /// The movers that notice the walker (PW.10.15); their pose is `pose_sensed`.
@@ -79,6 +99,16 @@ impl MoverKind {
             MoverKind::Builder => "P2-30",
             MoverKind::EngineHall => "NOT-01",
             MoverKind::Doors => "NOT-03",
+            MoverKind::Lighthouse => "LGT-01",
+            MoverKind::Searchlight => "LGT-02",
+            MoverKind::LightRiver => "LGT-03",
+            MoverKind::Aurora => "LGT-04",
+            MoverKind::Steam => "WX-06",
+            MoverKind::Flock => "LIFE-01",
+            MoverKind::Crawler => "LIFE-02",
+            MoverKind::Spider => "LIFE-03",
+            MoverKind::Moths => "LIFE-04",
+            MoverKind::Lantern => "LIFE-05",
         }
     }
 }
@@ -231,6 +261,16 @@ impl Mover {
                 offset: [0.0; 3],
                 yaw: 0,
             },
+            MoverKind::Lighthouse
+            | MoverKind::Searchlight
+            | MoverKind::LightRiver
+            | MoverKind::Aurora
+            | MoverKind::Steam
+            | MoverKind::Flock
+            | MoverKind::Crawler
+            | MoverKind::Spider
+            | MoverKind::Moths
+            | MoverKind::Lantern => crate::ambient::pose(self, u),
             MoverKind::GateTram => {
                 let tri = if u < 512 { u * 2 } else { 2048 - u * 2 };
                 let near_gate = (tri - 512).abs() < 128;
@@ -262,7 +302,13 @@ pub fn site_of(seed: WorldSeed, l0: I64Vec3) -> Option<(MoverKind, I64Vec3)> {
     ))
 }
 
-fn part(lo: [i32; 3], hi: [i32; 3], material: MaterialId, kind: FeatureKind, solid: bool) -> Part {
+pub(crate) fn part(
+    lo: [i32; 3],
+    hi: [i32; 3],
+    material: MaterialId,
+    kind: FeatureKind,
+    solid: bool,
+) -> Part {
     let q = |v: [i32; 3]| QVec3::new(v[0] * M, v[1] * M, v[2] * M);
     Part {
         aabb: QAabb::new(q(lo), q(hi)),
@@ -272,8 +318,15 @@ fn part(lo: [i32; 3], hi: [i32; 3], material: MaterialId, kind: FeatureKind, sol
     }
 }
 
-/// The movers of L1 cell `l1` (at most one).
+/// The movers of L1 cell `l1`: the main one and the ambient one, if any.
 pub fn movers_in_cell(seed: WorldSeed, l1: I64Vec3) -> Vec<Mover> {
+    let mut out = main_movers(seed, l1);
+    out.extend(crate::ambient::movers_in_cell(seed, l1));
+    out
+}
+
+/// The main mover of L1 cell `l1` (at most one kind; the doors are four).
+fn main_movers(seed: WorldSeed, l1: I64Vec3) -> Vec<Mover> {
     let l0 = l1.div_euclid(I64Vec3::splat(8));
     let Some((kind, site)) = site_of(seed, l0).filter(|s| s.1 == l1) else {
         return Vec::new();
@@ -423,6 +476,7 @@ pub fn movers_in_cell(seed: WorldSeed, l1: I64Vec3) -> Vec<Mover> {
             ],
             400,
         ),
+        _ => (Vec::new(), 0),
     };
     // The gallery has four doors, 40 m apart along z.
     let doors: Vec<i64> = if kind == MoverKind::Doors {
@@ -449,7 +503,15 @@ pub fn movers_in_cell(seed: WorldSeed, l1: I64Vec3) -> Vec<Mover> {
 
 /// The fixed supports of the mover in L1 cell `l1`, and the space it moves through.
 pub fn mover_content(seed: WorldSeed, l1: I64Vec3) -> Content {
-    let Some(m) = movers_in_cell(seed, l1).into_iter().next() else {
+    let mut main = main_content(seed, l1);
+    let ambient = crate::ambient::content(seed, l1);
+    main.prims.extend(ambient.prims);
+    main.keep_out.extend(ambient.keep_out);
+    main
+}
+
+fn main_content(seed: WorldSeed, l1: I64Vec3) -> Content {
+    let Some(m) = main_movers(seed, l1).into_iter().next() else {
         return Content::default();
     };
     let kind = m.kind;
@@ -687,6 +749,7 @@ pub fn mover_content(seed: WorldSeed, l1: I64Vec3) -> Content {
             }
             ([c - 18, c - 8, c - 12], [c + 430, c + 12, c + 12])
         }
+        _ => return Content::default(),
     };
     let q = |v: [i32; 3]| QVec3::new(v[0] * M, v[1] * M, v[2] * M);
     Content {

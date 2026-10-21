@@ -59,4 +59,5 @@ pub mod tramdraw;
 pub mod tramsys;
 pub mod vertex;
 pub mod volfog;
+pub mod weather;
 pub mod window;

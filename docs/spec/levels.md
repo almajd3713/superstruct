@@ -1402,6 +1402,77 @@ the machines are generated like any mover, and only their pose is driven by the 
   every 40 m walked, so those behind go out. *Deviation:* the lamps run along the straight line
   to the mark, not along a walkable route (the nav graph is not there yet, PW.7.3).
 
+### 5W.46 Ambient movers, lamp suns, signs, pools (PW.10.19–PW.10.23, `worldgen::ambient`, `GEN_VERSION` 27)
+
+`ambient::site_of`: one L0 cell in six holds an ambient mover (a `Mover` on the world clock, same
+engine system as §3W.10), drawn by weight: lighthouse 3, searchlight 2, light river 2, aurora 2,
+steam vent 3, flock 2, crawler 3, spider 2, moths 3, lantern 1. All parts are passable. Fixed
+supports are static content in the cell (`mover_content` merges them), with a keep-out.
+
+| ID | Kind | Moving part | Cycle |
+|---|---|---|---|
+| LGT-01 | Lighthouse | a beam of 2.5 km at the top of a 118 m tower, a turn of 64 steps | 32 to 96 s, its own rhythm |
+| LGT-02 | Searchlight | a beam of 600 m sweeping 24 of 64 turns and back | 2 to 4 min |
+| LGT-03 | Light river | twenty pulses 50 m apart along a cable of 1 km, one spacing per cycle | 1 to 2 s |
+| LGT-04 | Aurora | 24 curtains hung 600 m wide, swaying 3 of 64 turns | 3 to 5 min |
+| WX-06 | Steam | a plume of five puffs, hidden 10 km below, rising out of the grating for 40 % of the cycle | 20 to 60 s |
+| LIFE-01 | Flock | 24 drones on a ring of 60 to 100 m, a turn | 90 to 150 s |
+| LIFE-02 | Crawler | a lamp-carrying crawler on an 80 m pipe, there and back | 2 to 4 min |
+| LIFE-03 | Spider | a spider on a net of 20 × 17 m | 90 to 150 s |
+| LIFE-04 | Moths | eight moths around a lamp, a turn | 16 s |
+| LIFE-05 | Lantern | a lantern on a catwalk of 700 m at 1.4 m/s, always one way | 500 s |
+
+*Deviations:* the lighthouse is seen only within the movers' 3.5 km, not 20 km (its tower lamp is
+far-visible); a turn is 64 steps, so a beam jumps; the flock wheels in 64 steps; a mover's
+pieces that appear and disappear (steam) are moved far away rather than faded.
+
+- **LGT-06, LGT-08 lamp sun** (`lamp_sun_content`, 1 L1 cell in 24, far-visible): a disc of 60 m
+  hung 700 m above a crust of 400 m (16 squares, at least two of them holes) and a shaft of pale
+  light (`VAPOUR`, passable) under each hole down to the floor. The god rays are geometry.
+- **LGT-10 emergency light:** in a Bastion quarter (QTR-09) a red `SIGNAL` lamp every 6 m along
+  the foot of a dressed face.
+- **LGT-11 neon:** in a Market quarter (QTR-13) a sign of three glyphs of five by seven cells in
+  the new material `NEON`; unreadable. *Deviation:* the buzz waits for PW.11.
+- **LGT-09 blackout strata:** the existing Blackout regime event (`atmosphere`: no emissive colour
+  at all), with the trail lamps (§5W.44) and beacons as the only light.
+- **WX-11 still pool** (`pool_content`, 1 L1 cell in 30): a cistern of 64 m with walls of 3 m and a
+  pool of 2 m of coolant whose surface is a flat plate of glossy metal. *Deviation:* no planar
+  reflection (PW.10.20b).
+- New materials 12 `NEON`, 13 `AURORA`, 14 `BEAM`, 15 `VAPOUR`; salts `AMBIENT_SITE` 0x0130,
+  `WEATHER` 0x0131, `FOG_SEA` 0x0132, `FLASH` 0x0133, `LAMP_SUN` 0x0134, `POOL` 0x0135.
+
+### 5W.47 Weather and air (PW.10.19, PW.10.20, `worldgen::weather`, `engine::weather`)
+
+`air_at(seed, p, t_ms, between)`: the air at a point, a function of position and the world clock.
+Regions are blobs (a centre in an L1 cell and a radius below 4096 m) looked up in the 27 cells
+around the point; coverage rises smoothly to 1 at the centre.
+
+- **WX-01 fog sea:** one L0 cell in four has a cloud top at 2 to 28 km above its floor; inside a
+  Between below the top the fog is thicker by 12× over the last 80 m, spires stand out above.
+- **WX-02 fog tide:** a third of the L1 cells let the fog thicken by up to 70 % in banks that drift
+  with a period of 480 s (a triangle wave of the clock and `x + z`).
+- **WX-03 rain** (1 L1 cell in 14, in a Between, radius 600 to 1400 m), **WX-04 dust fall** (1 in
+  10, radius 500 to 1200), **WX-05 ash snow** (1 in 30, radius 900 to 1500): fields of particles that
+  slide with their velocity: rain 11 m/s down, dust 0.4 m/s, ash 0.9 m/s and drifting.
+- **WX-07 wind:** a sixth of the L1 cells have a wind of 3 to 10 m/s along one axis; dust blows
+  with it (the dust field moves along the wind). *Deviation:* the wind is by cell, not confined
+  to bores and Roads.
+- **WX-08 frost:** blobs of 400 to 900 m (1 in 16): pale fog and slow rime. *Deviation:* no rime
+  on railings and no visible breath.
+- **WX-09 heat haze:** blobs (1 in 16) and the furnaces of wells (within 700 m): warmer, thicker fog.
+  *Deviation:* no shimmer of the image.
+- **WX-10 lightning:** inside a fog sea, one 8 s slot in three holds a stroke of 400 ms within an L1
+  cell; a zigzag of beams and a white light that fades.
+- **LGT-05 window weather:** the module glow is multiplied by a wave of 0.55 to 1 that crosses
+  with the clock and position (period 240 s).
+- **LGT-07 furnace glow:** a warm point light at each furnace within 400 m, lighting the fog from
+  below.
+
+Engine: a field is a block of 96 × 48 × 96 m of static particles drawn 3 × 3 × 3 times and slid by
+chunk origin, so no frame uploads anything; it shows when the effect is above 0.1 and its
+chunks are made the first time. `SUPERSTRUCT_WEATHER=rain|dust|ash|frost|heat|wind|fog` forces an
+effect for captures.
+
 ## 6. L3: Blocks (64 m)
 
 > **Web redesign.** From version 7 the plan, entrances and skeleton are those of §6W. The rest of this section (tiles, solver, sockets, fallback, validator) is reused.
