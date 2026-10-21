@@ -17,6 +17,7 @@ use crate::l1_artery::ArteryType;
 use crate::rng::Rng;
 use crate::tissue::{AnchorKind, SlotState, Tissue};
 use crate::tissue_grow::{Shaped, SlotBox};
+use glam::I64Vec3;
 
 /// `Structure::form` of hub `n` (0-based) is `HUB_BASE + n`.
 pub const HUB_BASE: usize = 100;
@@ -309,9 +310,36 @@ pub fn knot_kinds(family: u8) -> &'static [(usize, u32)] {
     }
 }
 
+/// The hub of a world feature (PW.3.15b): HUB-04 (a stair cathedral) at a Spine station, where
+/// the spine's column meets a crust, and HUB-01 (a junction hall) where a Road along x crosses
+/// one along z, in the L2 cells that hold the column (the middle two of eight in x and z) and,
+/// for the crossing, the deck's row.
+fn world_feature(t: &Tissue) -> Option<usize> {
+    let l1 = t.cell.coords.div_euclid(I64Vec3::splat(8));
+    let inner = t.cell.coords - l1 * 8;
+    if !matches!(inner.x, 3 | 4) || !matches!(inner.z, 3 | 4) {
+        return None;
+    }
+    let l0 = l1.div_euclid(I64Vec3::splat(8));
+    let l1_inner = l1 - l0 * 8;
+    if crate::spines::spine_in_column(t.seed, l0.x, l0.z) == Some((l1_inner.x, l1_inner.z))
+        && crate::spines::stations(t.seed, l1)
+            .iter()
+            .any(|&s| i64::from(s) / 512 == inner.y)
+    {
+        return Some(3);
+    }
+    let roads = crate::roads::roads_in_cell(t.seed, l1);
+    let top = roads.iter().map(|r| r.height).max()?;
+    (roads.len() == 2 && i64::from(top - 1) / 512 == inner.y).then_some(0)
+}
+
 /// The contextual hub a cell can take: a tram terminus at a tram port, a valley rim beside a
 /// void, or an overlook at the edge of a crust over a Between. The first that applies.
 pub fn contextual(t: &Tissue) -> Option<usize> {
+    if let Some(k) = world_feature(t) {
+        return Some(k);
+    }
     let tram = t.anchors.iter().any(|a| {
         matches!(
             a.kind,
@@ -348,6 +376,61 @@ mod tests {
     use crate::seed::WorldSeed;
     use crate::tissue::{TissueCache, tissue_cell};
     use glam::I64Vec3;
+
+    /// PW.3.15b: some Spine stations and Road crossings hold their hub.
+    #[test]
+    fn spine_stations_and_road_crossings_hold_hubs() {
+        let seed = WorldSeed(0x5eed);
+        let cache = TissueCache::default();
+        let (mut stations, mut station_hubs, mut crossings, mut crossing_hubs) = (0, 0, 0, 0);
+        for x in -40..40i64 {
+            for z in -40..40i64 {
+                let l0 = I64Vec3::new(x, 0, z);
+                if let Some((a, b)) = crate::spines::spine_in_column(seed, x, z) {
+                    for y in 0..8i64 {
+                        let l1 = l0 * 8 + I64Vec3::new(a, y, b);
+                        for s in crate::spines::stations(seed, l1) {
+                            if stations >= 14 {
+                                break;
+                            }
+                            stations += 1;
+                            let key = CellKey::new(
+                                Level::L2,
+                                l1 * 8 + I64Vec3::new(3, i64::from(s) / 512, 3),
+                            );
+                            let t = tissue_cell(seed, &cache, key);
+                            assert_eq!(contextual(&t), Some(3));
+                            station_hubs += usize::from(t.hubs.iter().any(|&(id, _)| id == 4));
+                        }
+                    }
+                }
+            }
+        }
+        for (x, y, z) in (-60..60i64)
+            .flat_map(|x| (0..16i64).flat_map(move |y| (-60..60i64).map(move |z| (x, y, z))))
+        {
+            {
+                let l1 = I64Vec3::new(x, y, z);
+                let roads = crate::roads::roads_in_cell(seed, l1);
+                if roads.len() == 2 && crossings < 14 {
+                    crossings += 1;
+                    let top = roads.iter().map(|r| r.height).max().unwrap();
+                    let key = CellKey::new(
+                        Level::L2,
+                        l1 * 8 + I64Vec3::new(3, i64::from(top - 1) / 512, 3),
+                    );
+                    let t = tissue_cell(seed, &cache, key);
+                    assert_eq!(contextual(&t), Some(0));
+                    crossing_hubs += usize::from(t.hubs.iter().any(|&(id, _)| id == 1));
+                }
+            }
+        }
+        eprintln!(
+            "stations {stations} with a hub {station_hubs}; crossings {crossings} with a hub {crossing_hubs}"
+        );
+        assert!(stations > 0 && crossings > 0);
+        assert!(station_hubs > 0 || crossing_hubs > 0);
+    }
 
     /// Every hub builds at hub-like sizes and keeps every piece inside its bounding size.
     #[test]

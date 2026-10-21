@@ -19,6 +19,8 @@ use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
+mod tissue;
+
 use anyhow::{Context, Result, bail};
 use glam::{I64Vec3, Vec3};
 use rayon::prelude::*;
@@ -47,7 +49,8 @@ const HELP: &str = "web-report: metrics and census of the generated world
   --size N        edge of the region in metres, at least 4096 (default 32768)
   --samples N     points for the sampled metrics (default 20000)
   --defects N     count the defects of N sampled L2 cells with their L3 (PW.4.8) and exit
-  --threads N     threads for --defects (default: all)
+  --tissue N      MET-01, 08 and 10 over N sampled L2 cells and exit
+  --threads N     threads for --defects and --tissue (default: all)
   --census        count the instances of every registry ID
   --ids A-,B-     restrict the census output and --strict to these prefixes
   --out FILE      write the JSON report there
@@ -62,6 +65,7 @@ struct Args {
     samples: u32,
     census: bool,
     defects: usize,
+    tissue: usize,
     threads: usize,
     ids: Vec<String>,
     out: Option<String>,
@@ -78,6 +82,7 @@ fn parse() -> Result<Args> {
         samples: 20_000,
         census: false,
         defects: 0,
+        tissue: 0,
         threads: std::thread::available_parallelism().map_or(1, usize::from),
         ids: Vec::new(),
         out: None,
@@ -104,6 +109,7 @@ fn parse() -> Result<Args> {
             "--samples" => a.samples = value("--samples")?.parse()?,
             "--census" => a.census = true,
             "--defects" => a.defects = value("--defects")?.parse()?,
+            "--tissue" => a.tissue = value("--tissue")?.parse()?,
             "--threads" => a.threads = value("--threads")?.parse()?,
             "--ids" => a.ids = value("--ids")?.split(',').map(String::from).collect(),
             "--out" => a.out = Some(value("--out")?),
@@ -365,6 +371,9 @@ fn main() -> Result<()> {
     if a.defects > 0 {
         return defects(&a, seed, t0);
     }
+    if a.tissue > 0 {
+        return tissue_run(&a, seed);
+    }
     let lo = a.origin.div_euclid(I64Vec3::splat(L1_M));
     let hi = (a.origin + I64Vec3::splat(a.size - 1)).div_euclid(I64Vec3::splat(L1_M));
     let mut l1s = Vec::new();
@@ -621,6 +630,37 @@ fn main() -> Result<()> {
 /// `I64Vec3` is not `Ord`; a plain array is.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct I64Vec3Key([i64; 3]);
+
+/// `--tissue`: the L2 metrics over sampled cells of the region.
+fn tissue_run(a: &Args, seed: WorldSeed) -> Result<()> {
+    let cells = sample_cells(a, a.tissue);
+    tissue::run(seed, &cells, a.threads)
+}
+
+/// `n` distinct L2 cells drawn from the region by the sampling RNG.
+#[allow(clippy::cast_possible_wrap)]
+fn sample_cells(a: &Args, n: usize) -> Vec<I64Vec3> {
+    let lo = a.origin.div_euclid(I64Vec3::splat(512));
+    let span = (a.size / 512).max(1);
+    let mut state = a.seed ^ 0x9e37_79b9_7f4a_7c15;
+    let mut next = || {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    };
+    let mut cells = std::collections::BTreeSet::new();
+    while cells.len() < n {
+        let d = I64Vec3::new(
+            (next() % span as u64) as i64,
+            (next() % span as u64) as i64,
+            (next() % span as u64) as i64,
+        );
+        cells.insert((lo + d).to_array());
+    }
+    cells.into_iter().map(I64Vec3::from_array).collect()
+}
 
 /// `--defects`: the defect census over sampled L2 cells of the region.
 #[allow(clippy::unnecessary_wraps, clippy::cast_possible_wrap)]
