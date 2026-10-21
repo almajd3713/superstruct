@@ -64,6 +64,8 @@ salts! {
     LAMP_SUN = 0x0134;
     /// Keyed by the L1 cell: whether it holds a cistern with a still pool.
     POOL = 0x0135;
+    /// Keyed by the L2 cell: whether the far view lights a window over its mass (`levels.md` §5W.33).
+    FAR_LIGHT = 0x0136;
     REGIME_WEB = 0x0110;
     /// Keyed by the L0 cell: the interior stack sequence (`regimes.md` §8.2).
     STACK = 0x0111;

@@ -111,6 +111,7 @@ fn compare(far: &Depths, near: &Depths) -> [f64; 4] {
 fn the_far_view_matches_the_near_view() {
     let seed = WorldSeed(0);
     let mut worst = 1.0f64;
+    let mut worst_lit = 0.0f64;
     for l1 in [
         I64Vec3::new(0, 1, -1),
         I64Vec3::new(3, 0, 2),
@@ -120,6 +121,13 @@ fn the_far_view_matches_the_near_view() {
         let cache = L1Cache::default();
         let parent = cache.get(seed, CellKey::new(Level::L1, l1));
         let (mut far, mut mid, mut near) = (Depths::new(), Depths::new(), Depths::new());
+        let lit = |p: &Primitive| p.material == worldgen::prim::MaterialId::LIT_WINDOW;
+        let far_lit = parent
+            .primitives
+            .iter()
+            .filter(|p| lit(p) && p.flags.contains(PrimFlags::FAR_ONLY))
+            .count();
+        let (mut built_cells, mut near_lit_cells) = (0usize, 0usize);
         for p in &parent.primitives {
             far.add(p, [0; 3]);
             if !p.flags.contains(PrimFlags::FAR_ONLY) {
@@ -133,6 +141,14 @@ fn the_far_view_matches_the_near_view() {
             let c = I64Vec3::new(k % 8, k / 64, k / 8 % 8);
             let cell = CellKey::new(Level::L2, l1 * 8 + c);
             let out = l2_cell_in(seed, &cache, cell);
+            if out
+                .primitives
+                .iter()
+                .any(|p| p.flags.contains(PrimFlags::ENVELOPE))
+            {
+                built_cells += 1;
+                near_lit_cells += usize::from(out.primitives.iter().any(lit));
+            }
             let origin = [c.x as i32 * 8192, c.y as i32 * 8192, c.z as i32 * 8192];
             for p in &out.primitives {
                 near.add(p, origin);
@@ -157,6 +173,21 @@ fn the_far_view_matches_the_near_view() {
             n[2] * 100.0,
             n[3] * 100.0
         );
+        let runs = parent
+            .primitives
+            .iter()
+            .filter(|p| {
+                p.flags.contains(PrimFlags::FAR_ONLY) && p.kind == worldgen::prim::FeatureKind::MASS
+            })
+            .count();
+        let far_share = far_lit as f64 / 2.0 / runs.max(1) as f64;
+        let near_share = near_lit_cells as f64 / built_cells.max(1) as f64;
+        println!(
+            "L1 {l1}: lit windows (HOR-05): the far view lights {:.0} % of its {runs} runs of mass, the near view lights {:.0} % of its {built_cells} built cells",
+            far_share * 100.0,
+            near_share * 100.0
+        );
+        worst_lit = worst_lit.max((far_share - near_share).abs());
         let sil = silhouette(&far, &near);
         println!(
             "L1 {l1}: silhouette agreement of the near view with the far view {:.1} %",
@@ -167,6 +198,10 @@ fn the_far_view_matches_the_near_view() {
     println!(
         "worst silhouette agreement of the near view with the far view {:.1} %",
         worst * 100.0
+    );
+    assert!(
+        worst_lit <= 0.25,
+        "the far lights ({worst_lit:.2}) leave the near view's rate (HOR-05)"
     );
     assert!(
         worst >= 0.85,

@@ -101,7 +101,6 @@ const MASS_FROM: u8 = 24;
 /// answer to what the children will make, never a simplification of them.
 pub fn far_mass(seed: WorldSeed, l1: I64Vec3, fill: &[u8]) -> Vec<crate::prim::Primitive> {
     use crate::prim::{FeatureKind, MaterialId, PrimFlags, Primitive, QAabb, QVec3, Shape};
-    let _ = seed;
     let q = |m: i64| (m * 16) as i32;
     let mut out = Vec::new();
     for iz in 0..8i64 {
@@ -142,12 +141,42 @@ pub fn far_mass(seed: WorldSeed, l1: I64Vec3, fill: &[u8]) -> Vec<crate::prim::P
                     kind: FeatureKind::MASS,
                     flags: PrimFlags::FAR_VISIBLE | PrimFlags::FAR_ONLY | PrimFlags::NO_COLLIDE,
                 });
+                // HOR-05: windows light most of the built cells in the near view (76 to 98 % of
+                // them hold a lit window of the kit, the quarters or the paths), so each run
+                // carries a strip of lit windows, 2 m tall, along its faces towards -z and +z
+                // (in 85 runs of 100): one piece for the run, not one per cell.
+                let mut rng = Rng::new(hash(
+                    seed.0,
+                    Level::L2,
+                    l1 * 8 + I64Vec3::new(start, iy, iz),
+                    salt::FAR_LIGHT,
+                ));
+                if rng.below(100) < LIT_PER_100 {
+                    let y = y0 + 4 + rng.below((edge - 8).max(1) as u64) as i64;
+                    for z in [z0 - 1, z0 + edge] {
+                        out.push(Primitive {
+                            shape: Shape::Box {
+                                aabb: QAabb::new(
+                                    QVec3::new(q(x0 + 2), q(y), q(z)),
+                                    QVec3::new(q(x1 - 2), q(y + 2), q(z + 1)),
+                                ),
+                            },
+                            material: MaterialId::LIT_WINDOW,
+                            kind: FeatureKind::MISC,
+                            flags: PrimFlags::FAR_VISIBLE
+                                | PrimFlags::FAR_ONLY
+                                | PrimFlags::NO_COLLIDE,
+                        });
+                    }
+                }
             }
         }
     }
-    let _ = l1;
     out
 }
+
+/// Runs of the far view that carry lit windows, in a hundred.
+const LIT_PER_100: u64 = 85;
 
 /// The fill of one L2 cell, given its coordinates (`L2` cell index in the world).
 pub fn fill_l2(seed: WorldSeed, l2: I64Vec3) -> u8 {

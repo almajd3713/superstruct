@@ -102,4 +102,4 @@ pub(crate) mod zfight;
 
 /// Version of the generator's output. Bump it, and update the golden tests, on any change
 /// that alters what the generator produces (CLAUDE.md §3.8).
-pub const GEN_VERSION: u32 = 30;
+pub const GEN_VERSION: u32 = 31;

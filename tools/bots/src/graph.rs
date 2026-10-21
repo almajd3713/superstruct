@@ -40,6 +40,10 @@ struct CellData {
     /// The ports on the cell's faces: the axis, whether it is the high face, the point in
     /// cell-local metres and the slot the port routes from.
     ports: Vec<(u8, bool, [f32; 3], u16)>,
+    /// Cell-local centres of the Between overlooks (HUB-09) and of the shortcuts: lift
+    /// segments and tram ports.
+    overlooks: Vec<[f32; 3]>,
+    shortcuts: Vec<[f32; 3]>,
 }
 
 pub struct Graph {
@@ -256,11 +260,45 @@ pub fn load(o: &Opts) -> anyhow::Result<Graph> {
                         ))
                     })
                     .collect();
+                let centre = |slot: u32| {
+                    let c = t.lattice.centre(slot as usize);
+                    [c.x as f32, c.y as f32, c.z as f32]
+                };
+                let overlooks = t
+                    .hubs
+                    .iter()
+                    .filter(|&&(id, _)| id == 9)
+                    .filter_map(|&(_, si)| t.structures[usize::from(si)].slots.first())
+                    .map(|&i| centre(i))
+                    .collect();
+                let mut shortcuts: Vec<[f32; 3]> = t
+                    .lift_segments
+                    .iter()
+                    .filter_map(|&si| t.segments.get(usize::from(si)))
+                    .filter_map(|seg| seg.slots.first())
+                    .map(|&i| centre(i))
+                    .collect();
+                shortcuts.extend(
+                    t.anchors
+                        .iter()
+                        .filter(|a| {
+                            matches!(
+                                a.kind,
+                                worldgen::tissue::AnchorKind::Port {
+                                    kind: worldgen::l1_artery::ArteryType::TramTube,
+                                    ..
+                                }
+                            )
+                        })
+                        .map(|a| centre(a.slot)),
+                );
                 CellData {
                     crust,
                     segs,
                     breath,
                     ports,
+                    overlooks,
+                    shortcuts,
                 }
             })
             .collect()
@@ -464,6 +502,11 @@ pub struct Report {
     types_per_km: f64,
     three_links: f64,
     three_of_junctions: f64,
+    /// Overlooks passed per km walked, overlooks in the block, and the share with a lift or
+    /// tram within 300 m of walking.
+    overlooks_per_km: f64,
+    overlooks: usize,
+    shortcut_share: f64,
     bots: usize,
     km: f64,
 }
@@ -561,6 +604,29 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
         .iter()
         .map(|&n| to_breath[n as usize].min(cap))
         .collect();
+    // The Between overlooks and the shortcuts (lifts, trams) as nodes.
+    let near_node = |k: usize, c: &[f32; 3]| {
+        let org = g.org(k);
+        let at = [org[0] + c[0], org[1] + c[1], org[2] + c[2]];
+        let (lo, hi) = g.range[k];
+        (lo..hi)
+            .map(|n| (n, dist(g.pos[n as usize], at)))
+            .filter(|&(_, d)| d <= 48.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(n, _)| n)
+    };
+    let (mut overlooks, mut shortcuts) = (Vec::new(), Vec::new());
+    for k in 0..g.data.len() {
+        overlooks.extend(g.data[k].overlooks.iter().filter_map(|c| near_node(k, c)));
+        shortcuts.extend(g.data[k].shortcuts.iter().filter_map(|c| near_node(k, c)));
+    }
+    let to_shortcut = g.distances(&shortcuts);
+    let with_shortcut = overlooks
+        .iter()
+        .filter(|&&n| to_shortcut[n as usize] <= 300.0)
+        .count();
+    let overlook_set: std::collections::HashSet<u32> = overlooks.iter().copied().collect();
+    let mut overlooks_passed = 0usize;
     // The walkers.
     let mut state = o.seed ^ 0x9e37_79b9_7f4a_7c15;
     let mut next = move |n: usize| {
@@ -574,6 +640,7 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
     for _ in 0..o.bots {
         let mut at = starts[next(starts.len())];
         let (mut prev, mut walked_m, mut seen) = (u32::MAX, 0.0f64, BTreeSet::new());
+        let mut passed = std::collections::HashSet::new();
         for _ in 0..200_000 {
             if walked_m >= o.bot_km * 1000.0 {
                 break;
@@ -595,9 +662,13 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
             if ty != CROSS {
                 seen.insert(ty);
             }
+            if overlook_set.contains(&to) {
+                passed.insert(g.cell_of(to));
+            }
             prev = at;
             at = to;
         }
+        overlooks_passed += passed.len();
         types_km += seen.len() as f64;
         walked += walked_m / 1000.0;
     }
@@ -613,6 +684,9 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
         three_of_junctions: linked as f64 / ends.max(1) as f64,
         bots: o.bots,
         km: walked,
+        overlooks_per_km: overlooks_passed as f64 / walked.max(1e-9),
+        overlooks: overlooks.len(),
+        shortcut_share: with_shortcut as f64 / overlooks.len().max(1) as f64,
     }
 }
 
@@ -650,10 +724,20 @@ impl fmt::Display for Report {
             "  MET-10 nodes with three or more links                {:>8.3}     target >= 0.40     (of all route slots)",
             self.three_links
         )?;
-        write!(
+        writeln!(
             f,
             "  MET-10 ... of the junctions and ends                 {:>8.3}     target >= 0.40     (nodes whose degree is not 2)",
             self.three_of_junctions
+        )?;
+        writeln!(
+            f,
+            "  HOR-13 Between overlooks passed per km walked        {:>8.3}     (rare: {} in the block)",
+            self.overlooks_per_km, self.overlooks
+        )?;
+        write!(
+            f,
+            "  HOR-14 overlooks with a lift or tram within 300 m    {:>8.2}     (share of the overlooks)",
+            self.shortcut_share
         )
     }
 }

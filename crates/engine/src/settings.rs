@@ -50,7 +50,9 @@ pub struct Settings {
     /// Radians of rotation per raw mouse count.
     pub mouse_sensitivity: f32,
     pub seed: u64,
-    /// Draw the ray-marched horizon beyond the far band.
+    /// Draw the ray-marched horizon beyond the far band. Off by default: it marches the rules of
+    /// the old trunk-and-deck world, not the Web's, so beyond 51 km there is only fog until it is
+    /// ported (`docs/spec/levels.md` §5W.33).
     pub horizon: bool,
     /// March the horizon at half resolution and upsample it with depth awareness.
     pub horizon_half_res: bool,
@@ -74,7 +76,7 @@ impl Default for Settings {
             fov_deg: 90.0,
             mouse_sensitivity: 0.0022,
             seed: 0,
-            horizon: true,
+            horizon: false,
             horizon_half_res: false,
             band_l3_m: bands.l3_radius_m,
             band_l2_m: bands.l2_radius_m,
