@@ -218,10 +218,18 @@ fn overlook(s: [i32; 3], _: &mut Rng) -> Option<FormOut> {
             bx([0, 0, 0], [cx.max(1) + 1, h - 1, cz.max(1) + 1]),
             bx([0, h - 2, 0], [w, h - 1, d]),
         ],
-        vec![(
-            Shaped::Cyl,
-            bx([w - 2, h - 1, d - 2], [w, h.max(h - 1 + 2).min(h), d]),
-        )],
+        vec![
+            (
+                Shaped::Cyl,
+                bx([w - 2, h - 1, d - 2], [w, h.max(h - 1 + 2).min(h), d]),
+            ),
+            // HOR-14: a lift down the column, a cage that shows from the platform and from far
+            // off that there is a quicker way down.
+            (
+                Shaped::Cage,
+                bx([cx.max(1) + 1, 0, 0], [cx.max(1) + 2, h - 1, 1]),
+            ),
+        ],
         true,
     )
 }
@@ -376,6 +384,22 @@ mod tests {
     use crate::seed::WorldSeed;
     use crate::tissue::{TissueCache, tissue_cell};
     use glam::I64Vec3;
+
+    /// HOR-14: every Between overlook shows a way to make the trip shorter: a lift cage down its
+    /// column.
+    #[test]
+    fn an_overlook_shows_a_lift_down() {
+        let mut rng = Rng::new(3);
+        for size in [[3, 6, 3], [5, 8, 5], [8, 12, 8]] {
+            let f = overlook(size, &mut rng).unwrap();
+            assert!(
+                f.shaped
+                    .iter()
+                    .any(|(k, b)| matches!(k, Shaped::Cage) && b.hi[1] - b.lo[1] >= size[1] - 1),
+                "{size:?}"
+            );
+        }
+    }
 
     /// PW.3.15b: some Spine stations and Road crossings hold their hub.
     #[test]

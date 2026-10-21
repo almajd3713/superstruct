@@ -621,6 +621,17 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
         shortcuts.extend(g.data[k].shortcuts.iter().filter_map(|c| near_node(k, c)));
     }
     let to_shortcut = g.distances(&shortcuts);
+    {
+        let mut d: Vec<f32> = overlooks
+            .iter()
+            .map(|&n| to_shortcut[n as usize].min(CAP_M as f32))
+            .collect();
+        eprintln!(
+            "{} shortcut nodes; the walking distance from an overlook to the nearest, median {:.0} m",
+            shortcuts.len(),
+            median(&mut d)
+        );
+    }
     let with_shortcut = overlooks
         .iter()
         .filter(|&&n| to_shortcut[n as usize] <= 300.0)
