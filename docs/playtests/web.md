@@ -120,3 +120,14 @@ volumetric fog and the new weather/tools systems on. 51 one-second windows from 
 No tuning was done and no budget of PLAN §11.4 is claimed. The hitches while flying are the
 streaming (chunk meshing and uploads), not the weather or the tools. HOR-15 (how much of the
 tissue the occlusion culling hides) was not measured: the renderer has no counter for it yet.
+
+### Occlusion on and off (HOR-15; same fly-through, release, RTX 4070)
+
+| | fps (mean) | scene | prepass | cull, occlusion zones |
+|---|---|---|---|---|
+| `SUPERSTRUCT_OCCLUSION=0` | 93 | 1.21 ms | 1.08 ms | 0.00 |
+| default | 88 | 1.19 ms | 1.07 ms | 0.00 |
+
+The GPU spends about 2.5 ms a frame, so the frame (11 ms) is CPU-bound and the switch changes nothing
+that the frame rate or the zone times can show. The share of the tissue that the pass hides is
+not measured: PW.7.5 adds a draw counter.

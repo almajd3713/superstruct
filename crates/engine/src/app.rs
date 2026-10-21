@@ -178,6 +178,10 @@ impl App {
         let gpu = Gpu::new(&window, s.vsync)?;
         let mut renderer = Renderer::new(&gpu.device, gpu.config.format, gpu.size());
         renderer.set_volumetric_fog(true);
+        // `SUPERSTRUCT_OCCLUSION=0` turns the two-phase occlusion culling off, to measure what it saves.
+        if std::env::var("SUPERSTRUCT_OCCLUSION").as_deref() == Ok("0") {
+            renderer.set_occlusion(false);
+        }
         renderer.set_ao(crate::ao::AoMode::Analytic);
         if let Ok(list) = std::env::var("SUPERSTRUCT_POST") {
             renderer.set_post(crate::post::PostSettings::parse(&list));
@@ -1115,9 +1119,18 @@ impl App {
         self.worst_frame = self.worst_frame.max(frame_time);
         let elapsed = now.duration_since(self.fps_window_start);
         if elapsed >= Duration::from_secs(1) {
+            // The GPU zones of the latest frame, in milliseconds.
+            let gpu = self.running.as_ref().map_or_else(String::new, |r| {
+                r.timer
+                    .timings()
+                    .map(|(z, ms)| format!("{} {ms:.2}", z.name()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            });
             info!(
                 fps = format!("{:.1}", f64::from(self.fps_frames) / elapsed.as_secs_f64()),
                 worst_ms = format!("{:.1}", self.worst_frame * 1000.0),
+                gpu,
                 "frame rate"
             );
             self.worst_frame = 0.0;
