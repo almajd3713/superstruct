@@ -51,6 +51,8 @@ pub enum Action {
     GazeMark,
     Chalk,
     Atlas,
+    /// Shows or hides the lamps of your trail.
+    ToggleTrail,
 }
 
 /// A physical key or mouse button.
@@ -107,6 +109,7 @@ impl Default for Bindings {
             (K::KeyM, A::GazeMark),
             (K::KeyC, A::Chalk),
             (K::KeyN, A::Atlas),
+            (K::KeyT, A::ToggleTrail),
         ];
         Self {
             table: keys.into_iter().map(|(k, a)| (Input::Key(k), a)).collect(),

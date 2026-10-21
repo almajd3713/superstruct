@@ -105,6 +105,8 @@ struct App {
     trail: Vec<WorldPos>,
     chalk: Vec<WorldPos>,
     trail_draw: MarkDraw,
+    /// The trail lamps are drawn only when asked for (T): they stand where you walked.
+    show_trail: bool,
     chalk_draw: MarkDraw,
     route_draw: RouteDraw,
     trams: TramSystem,
@@ -633,6 +635,9 @@ impl App {
             return;
         }
         self.run_tools();
+        if self.input.pressed(Action::ToggleTrail) {
+            self.show_trail = !self.show_trail;
+        }
         let Some(running) = &mut self.running else {
             return;
         };
@@ -842,6 +847,8 @@ impl App {
             &running.gpu.queue,
             &self.beacons,
         );
+        self.trail_draw
+            .set_visible(&mut running.renderer, self.show_trail);
         self.trail_draw.update(
             &mut running.renderer,
             &running.gpu.device,
@@ -1247,6 +1254,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         tool_zoom: 1.0,
         weather: Weather::default(),
         trail_draw: MarkDraw::new(Shape::Lamp),
+        show_trail: false,
         chalk_draw: MarkDraw::new(Shape::Chalk),
         route_draw: RouteDraw::default(),
         trams: TramSystem::new(WorldSeed(settings_seed)),

@@ -1378,6 +1378,7 @@ wonder, rare, mover and spine sites of the L0 cells around a position, a functio
   25 m of the walker's path and stays, up to 6000; drawn in chunks of 16 anchored at their first
   lamp. *Deviation:* WAKE-01 is realised as the lamps along your own way, not as the world's
   dead lamps lighting.
+  The lamps are drawn only when asked for: T toggles them (off at start), because a lamp stands where you stood. The trail is recorded and saved either way.
 - **TOOL-08 chalk.** C draws a bright mark on the surface in view within 6 m.
 
 ### 5W.45 Machines that notice you (PW.10.15, `GEN_VERSION` 26)

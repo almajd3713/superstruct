@@ -55,6 +55,7 @@ pub struct MarkDraw {
     shape: Shape,
     groups: Vec<Group>,
     covered: usize,
+    visible: bool,
 }
 
 impl MarkDraw {
@@ -63,6 +64,20 @@ impl MarkDraw {
             shape,
             groups: Vec::new(),
             covered: 0,
+            visible: true,
+        }
+    }
+
+    /// Shows or hides every mark drawn so far, and those drawn from now on.
+    pub fn set_visible(&mut self, renderer: &mut Renderer, visible: bool) {
+        if self.visible == visible {
+            return;
+        }
+        self.visible = visible;
+        for g in &self.groups {
+            if let Some(h) = g.handle {
+                renderer.set_chunk_visible(h, visible);
+            }
         }
     }
 
@@ -103,7 +118,9 @@ impl MarkDraw {
             for &p in &g.points {
                 self.shape.add(&mut mesh, p);
             }
-            g.handle = Some(renderer.upload_chunk(device, queue, g.anchor, &mesh).0);
+            let h = renderer.upload_chunk(device, queue, g.anchor, &mesh).0;
+            renderer.set_chunk_visible(h, self.visible);
+            g.handle = Some(h);
         }
     }
 

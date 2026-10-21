@@ -264,6 +264,12 @@ dependencies = [
 [[package]]
 name = "bots"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gen",
+ "glam",
+ "rayon",
+]
 
 [[package]]
 name = "bumpalo"
