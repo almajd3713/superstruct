@@ -93,3 +93,14 @@ nodes, and about 2 000 links cross L1 faces in the block.
   junctions and ends only, four in five have three or more links, so the web branches.
 - Not yet measured: MET-03 (rays inside the cell only), MET-09. PRN-01..08 are the principles
   these numbers stand for; the numbers above are the record for PW.12.1.
+
+### Correction to MET-05, same day
+
+The first bots run counted only payoffs (views, sets, installations, local places), which are
+rare, and measured 7–11 km. The spec's definition of near breathing space (`web-report.md` §3)
+also counts the near details NEAR-02..05 (slit views, a doorway framing a far light, gaps in the
+grating that show the drop, windows), which 4 segments in 10 carry (`Mods::near`). With every
+slot of such a segment counted, the median walking distance to breathing space is **0 m (seed
+42), 32 m (seed 7) and 32 m (seed 1234)** against at most 150 m: **MET-05 and HOR-11 hold** on all
+three seeds. MET-04 stands as above (0.99, 1.6 and 6.2 km against 1.5–2.5 km: seed 7 has more
+long views than the range, seed 42 fewer).

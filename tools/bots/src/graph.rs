@@ -26,8 +26,9 @@ const LONG_M: f64 = 2000.0;
 const CAP_M: f64 = 20_000.0;
 const REACH_M: f64 = 4000.0;
 
-/// A segment: its path type and its slots (index and centre).
-type Seg = (u8, Vec<(u16, [f32; 3])>);
+/// A segment: its path type, whether a near detail looks out from it (NEAR-02..05) and its slots
+/// (index and centre).
+type Seg = (u8, bool, Vec<(u16, [f32; 3])>);
 
 struct CellData {
     crust: bool,
@@ -213,6 +214,13 @@ pub fn load(o: &Opts) -> anyhow::Result<Graph> {
                         .find(|c| usize::from(c.0) == si)
                         .map_or(0, |c| c.1)
                 };
+                let looks_out = |si: usize| {
+                    t.paths
+                        .mods
+                        .iter()
+                        .find(|m| usize::from(m.0) == si)
+                        .is_some_and(|m| (2..=5).contains(&m.1.near))
+                };
                 let segs = t
                     .segments
                     .iter()
@@ -220,6 +228,7 @@ pub fn load(o: &Opts) -> anyhow::Result<Graph> {
                     .map(|(si, seg)| {
                         (
                             kind_of(si),
+                            looks_out(si),
                             seg.slots
                                 .iter()
                                 .map(|&i| {
@@ -295,7 +304,7 @@ impl Graph {
             let org = self.org(k);
             let start = self.pos.len() as u32;
             let mut map: HashMap<u16, u32> = HashMap::new();
-            for (_, slots) in &self.data[k].segs {
+            for (_, _, slots) in &self.data[k].segs {
                 for &(i, c) in slots {
                     map.entry(i).or_insert_with(|| {
                         self.pos.push([0, 1, 2].map(|a| org[a] + c[a]));
@@ -311,7 +320,7 @@ impl Graph {
         for k in 0..self.data.len() {
             for si in 0..self.data[k].segs.len() {
                 let ty = self.data[k].segs[si].0;
-                let ids: Vec<u16> = self.data[k].segs[si].1.iter().map(|s| s.0).collect();
+                let ids: Vec<u16> = self.data[k].segs[si].2.iter().map(|s| s.0).collect();
                 for w in ids.windows(2) {
                     let (a, b) = (self.slot_node[k][&w[0]], self.slot_node[k][&w[1]]);
                     if a != b && !self.adj[a as usize].iter().any(|e| e.0 == b) {
@@ -484,6 +493,16 @@ pub fn measure(g: &Graph, o: &Opts) -> Report {
     for k in 0..g.data.len() {
         let org = g.org(k);
         let (lo, hi) = g.range[k];
+        // Every slot of a segment with a view detail (NEAR-02..05) is near breathing space.
+        for (_, looks_out, slots) in &g.data[k].segs {
+            if *looks_out {
+                for (i, _) in slots {
+                    if let Some(&n) = g.slot_node[k].get(i) {
+                        breath.push(n);
+                    }
+                }
+            }
+        }
         for c in &g.data[k].breath {
             let at = [org[0] + c[0], org[1] + c[1], org[2] + c[2]];
             // The nearest route node of the cell within 48 m (a balcony hangs beside a leaf).
