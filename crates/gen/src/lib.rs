@@ -10,6 +10,7 @@ pub mod cell;
 pub mod character;
 pub mod coord;
 pub mod defects;
+pub mod defects_audit;
 pub mod edges;
 pub mod features;
 pub mod forms;

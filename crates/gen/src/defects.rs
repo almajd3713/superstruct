@@ -88,7 +88,7 @@ impl Report {
             if self
                 .examples
                 .iter()
-                .filter(|x| x.split(':').next() == e.split(':').next())
+                .filter(|x| example_key(x) == example_key(e))
                 .count()
                 < 6
             {
@@ -96,6 +96,16 @@ impl Report {
             }
         }
     }
+}
+
+/// The counter an example belongs to, without the cell or the id that makes each name unique:
+/// its first two words ("f rise", "g L2/L3", "b kind").
+fn example_key(example: &str) -> String {
+    let name = example.split(':').next().unwrap_or("");
+    name.split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 struct Item {
@@ -195,6 +205,7 @@ fn item(prim: Primitive, src: Src, chunk: u32) -> Item {
         drawn: src != Src::Nbr
             && !is_shaft
             && !envelope
+            && !prim.flags.contains(PrimFlags::MID_ONLY)
             && prim.kind != FeatureKind::VOID
             && prim.kind != FeatureKind::RAILING,
         prim,
@@ -753,8 +764,19 @@ fn scan_cell(
             r.base("f ends", 1);
             let floor = |p: Vec3| ix.solid_at(p - up * 0.1, None).is_some();
             let reach = w.width as f32 / 2.0 + 0.8;
-            let continues =
-                floor(e + dir * 0.8) || floor(e + lat * reach) || floor(e - lat * reach);
+            // A leg that ends on the side of another leg is a T junction, not an end over air.
+            let on_other_leg = me.walks.iter().enumerate().any(|(j, o)| {
+                j != walk_index && !o.rise && o.points.len() >= 2 && {
+                    let (a, z) = (v(o.points[0]), v(o.points[1]));
+                    let d = z - a;
+                    let k = ((e - a).dot(d) / d.length_squared().max(1e-6)).clamp(0.0, 1.0);
+                    (a + d * k - e).length() <= o.width as f32 / 2.0 + 0.3
+                }
+            });
+            let continues = on_other_leg
+                || floor(e + dir * 0.8)
+                || floor(e + lat * reach)
+                || floor(e - lat * reach);
             if continues {
                 continue;
             }

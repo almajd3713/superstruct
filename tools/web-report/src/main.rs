@@ -49,7 +49,8 @@ const HELP: &str = "web-report: metrics and census of the generated world
   --origin x,y,z  min corner of the region in metres (default 0,0,0)
   --size N        edge of the region in metres, at least 4096 (default 32768)
   --samples N     points for the sampled metrics (default 20000)
-  --defects N     count the defects of N sampled L2 cells with their L3 (PW.4.8) and exit
+  --defects N     count the defects of N sampled L2 cells with their L3 (PW.4.8, PW.13.1) and exit
+  --cells FILE    with --defects (N may be 0): measure the L2 cells listed in FILE (x,y,z per line)
   --tissue N      MET-01, 08 and 10 over N sampled L2 cells and exit
   --l2-cells N    L2 cells sampled for the census (default 3000)
   --wide N        L0 cells each way scanned for sites (default 24, 117 649 cells)
@@ -68,6 +69,7 @@ struct Args {
     samples: u32,
     census: bool,
     defects: usize,
+    cells: Option<String>,
     tissue: usize,
     l2_cells: usize,
     wide: i64,
@@ -87,6 +89,7 @@ fn parse() -> Result<Args> {
         samples: 20_000,
         census: false,
         defects: 0,
+        cells: None,
         tissue: 0,
         l2_cells: 3000,
         wide: 24,
@@ -116,6 +119,7 @@ fn parse() -> Result<Args> {
             "--samples" => a.samples = value("--samples")?.parse()?,
             "--census" => a.census = true,
             "--defects" => a.defects = value("--defects")?.parse()?,
+            "--cells" => a.cells = Some(value("--cells")?),
             "--wide" => a.wide = value("--wide")?.parse()?,
             "--l2-cells" => a.l2_cells = value("--l2-cells")?.parse()?,
             "--tissue" => a.tissue = value("--tissue")?.parse()?,
@@ -600,7 +604,7 @@ fn main() -> Result<()> {
     let a = parse()?;
     let seed = WorldSeed(a.seed);
     let t0 = Instant::now();
-    if a.defects > 0 {
+    if a.defects > 0 || a.cells.is_some() {
         return defects(&a, seed, t0);
     }
     if a.tissue > 0 {
@@ -922,16 +926,21 @@ fn defects(a: &Args, seed: WorldSeed, t0: Instant) -> Result<()> {
         z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         z ^ (z >> 31)
     };
-    let mut cells = std::collections::BTreeSet::new();
-    while cells.len() < a.defects {
-        let d = I64Vec3::new(
-            (next() % span as u64) as i64,
-            (next() % span as u64) as i64,
-            (next() % span as u64) as i64,
-        );
-        cells.insert((lo + d).to_array());
-    }
-    let cells: Vec<I64Vec3> = cells.into_iter().map(I64Vec3::from_array).collect();
+    let cells: Vec<I64Vec3> = if let Some(path) = &a.cells {
+        let text = std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
+        worldgen::defects_audit::parse_cells(&text).map_err(|e| anyhow::anyhow!("{path}: {e}"))?
+    } else {
+        let mut cells = std::collections::BTreeSet::new();
+        while cells.len() < a.defects {
+            let d = I64Vec3::new(
+                (next() % span as u64) as i64,
+                (next() % span as u64) as i64,
+                (next() % span as u64) as i64,
+            );
+            cells.insert((lo + d).to_array());
+        }
+        cells.into_iter().map(I64Vec3::from_array).collect()
+    };
     let r = worldgen::defects::scan_cells(seed, &cells, a.threads);
     println!(
         "defect census: seed {}, {} cells, {:.0} s",
@@ -948,6 +957,21 @@ fn defects(a: &Args, seed: WorldSeed, t0: Instant) -> Result<()> {
     }
     for e in &r.examples {
         println!("  eg {e}");
+    }
+    let audit = worldgen::defects_audit::audit_cells(seed, &cells, a.threads, true);
+    println!(
+        "census v2 (PW.13.1): seed {}, {} cells, {:.0} s",
+        a.seed,
+        audit.cells,
+        t0.elapsed().as_secs_f64()
+    );
+    for (k, v) in &audit.counts {
+        println!("  {k:<60} {v}");
+    }
+    for (k, v) in &audit.examples {
+        for e in v {
+            println!("  eg [{k}] {e}");
+        }
     }
     Ok(())
 }

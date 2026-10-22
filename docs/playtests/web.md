@@ -193,3 +193,48 @@ instance.** What is still zero, by group:
   LGT-09, WGT-08, WON-13;
 - **too rare for the sample**: FORM-24, SV-23, SUP-11 (needs a radial well), STG-11 (beyond 2^20 L0
   cells, the Far Lands).
+
+### Census v2 baseline (PW.13.1, 2026-10-22, `GEN_VERSION` 33)
+
+`web-report --defects 0 --cells docs/playtests/2026-10-22-audit/cells.txt --seed S --size 4096 --threads 5` (release; 119 L2 cells with L3 and parent L1; seed 0 took 630 s for the PW.4.8 census plus 280 s for census v2, seed 42 took 2 230 s plus about 300 s; `--threads 5` because the machine is shared and the default of all threads ran out of memory). Raw output: `out/audit/v2-s0.txt`, `v2-s42.txt` (git-ignored). Counter definitions: spec `levels.md` §5W.48. The numbers agree with the audit's probe exactly (the census is deterministic): 240 and 166 leg pairs for D, 283 and 637 interiors with a face missing for C, 888 and 16 floored turned-rise samples for R.
+
+| Counter | Seed 0 | Seed 42 |
+|---|---|---|
+| A samples | 589444 | 168999 |
+| A blocked (rise) | 6013 | 970 |
+| A blocked (leg) | 1705 | 310 |
+| A headroom<1.8 (rise) | 937 | 228 |
+| A headroom<1.8 (leg) | 30 | 11 |
+| A no floor | 5207 | 960 |
+| B floating <2 m | 144 | 62 |
+| B floating <10 m | 1115 | 389 |
+| B floating large | 816 | 70 |
+| C masses | 4703 | 5116 |
+| C masses crossed by L2 solid | 1127 | 1809 |
+| C masses crossed by L1 solid | 497 | 650 |
+| C masses with a face missing | 283 | 637 |
+| D leg pairs on one line | 240 | 166 |
+| E slivers <0.1 m | 3445 | 9561 |
+| F walk through decoration (not ladders) | 1158 | 1087 |
+| G fake floors | 901 | 50 |
+| H large, absent from mid band | 35990 | 38150 |
+| H large pieces | 108178 | 139994 |
+| L L3 solid | 33429336 | 35311331 |
+| L outside every mass | 670424 | 185770 |
+| R rails | 324483 | 847182 |
+| R rails, no walk line beside | 179285 | 499165 |
+| R rails inside an enclosed path | 1585 | 10177 |
+| S parts turned | 4246 | 6893 |
+| S turned parts sliced | 574 | 1207 |
+| S parts upright | 2273 | 121 |
+| S upright parts sliced | 0 | 0 |
+| turned rise samples with a floor | 888 | 16 |
+| turned rise samples | 185221 | 93931 |
+| old census: c (dressing, no host) | 14612 | 28514 |
+| old census: f air | 2522 | 3173 |
+
+Notes:
+- **R (rails)** is new here and not in the audit: "no walk line beside it" is a rail with no walk leg or rise line within 2.5 m plus half the width. 55 to 59 % of all rails fail it, which is more than the roofs and rims the audit named; the rise lines of turned lattices are wrong until PW.13.3 and the structure decks carry no walk line at all. Read it as an upper bound; re-measure after PW.13.3 and PW.13.4.
+- **L** counts L3 solid whose middle is more than 0.6 m outside every mass (2.0 % and 0.5 % of L3 solid); the audit's 1.8 % was measured on 60 cells.
+- **PW.4.8 census corrections** (a) to (d) change its numbers: `g` no longer counts `MID_ONLY` boxes as drawn, `f air` accepts T junctions (seed 0: 2 522, seed 42: 3 173, down from the audit's quoted values), and examples are capped per counter. `c` is 14 612 and 28 514 pieces (the audit's 14 637 on seed 0).
+- Cost: a sample of 3 cells runs in `scripts/check.sh` in about one second (debug); the turned-lattice rise test is `#[ignore = "PW.13.3"]` and fails now with 495 of 25 585 samples floored.

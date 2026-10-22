@@ -1477,6 +1477,36 @@ chunk origin, so no frame uploads anything; it shows when the effect is above 0.
 chunks are made the first time. `SUPERSTRUCT_WEATHER=rain|dust|ash|frost|heat|wind|fog` forces an
 effect for captures.
 
+### 5W.48 Census v2 (PW.13.1, `worldgen::defects_audit`; no `GEN_VERSION` change)
+
+Counts the fault classes of the polish audit (`docs/playtests/2026-10-22-polish-audit.md`) over a
+list of L2 cells with their L3 interiors and parent L1 pieces. `web-report --defects N --cells FILE`
+runs it after the PW.4.8 census (`N` may be 0 with `--cells`; the list is one `x,y,z` per line).
+Every count is keyed `"<letter> <what>"`; the fixed list is `docs/playtests/2026-10-22-audit/cells.txt`.
+
+- **A** walk clearance: samples along every leg and rise against every solid (L1 except inside bores,
+  final L2, L3): blocked at 0.5 and 1.2 m, headroom at 1.8 m, no floor within 0.6 m below and 0.3 m
+  sideways. By leg or rise, by blocker and by path id. Skipped in tilted lattices.
+- **B** clusters of solid (and cables) that touch nothing, joined at 0.15 m, judged on pieces, at least
+  1 m from the cell's faces and not touching L1: under 2 m, under 10 m, larger.
+- **C** interiors (the masses of `l3_web::mass_specs`) sampled every 3 m against corridors, bores,
+  trams, other L2 solid and L1 solid; masses with a shell face missing.
+- **D** two legs on one line: parallel, within 0.6 m, sharing at least 4 m.
+- **E** solid pieces thinner than 0.1 m, and crumbs under 0.02 m³.
+- **F** walk lines (at 0.6 and 1.4 m) through non-solid decoration.
+- **G** non-solid plates of at least 1 × 1 m and at most 0.6 m thick (not windows, glass, voids).
+- **H** pieces of 16 m or more that the mid band does not draw (the full band skips `MID_ONLY`).
+- **L** L3 solid whose middle is more than 0.6 m outside every mass.
+- **R** rails with no walk line within 2.5 m + half the width, and rails whose middle lies in solid
+  of a path or threshold (rails inside an enclosed path).
+- **S** structure parts sliced by a cell face, by upright or turned lattice.
+
+The PW.4.8 census (`worldgen::defects`) is corrected in four places: counter `g` no longer counts
+`MID_ONLY` boxes as drawn; `f air` accepts a leg ending on the side of another leg (T junction);
+the example cap in `Report::merge` keys on the counter's first two words, not the id; counter `b`
+is superseded by A for clearance and kept only as a witness of path pieces in walk space.
+
+
 ## 6. L3: Blocks (64 m)
 
 > **Web redesign.** From version 7 the plan, entrances and skeleton are those of §6W. The rest of this section (tiles, solver, sockets, fallback, validator) is reused.

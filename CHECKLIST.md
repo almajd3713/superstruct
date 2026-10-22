@@ -594,7 +594,7 @@ The audit is `docs/playtests/2026-10-22-polish-audit.md`. Read it before any ite
   - `scripts/coverage.py` passes;
   - no lamp appears after a 200 m walk, with T pressed and with a mark pinned (a fresh screenshot);
   - an old `save.toml` with a trail still loads. (2026-10-22: the trail, route, T binding and drawing are gone; `Save` has no `trail` field and serde ignores a stale key, tested; the registry rows moved to Deferred; spec §5W.44 and §5W.45 updated. No lamp code is left to place a lamp, so no screenshot was taken.)
-- [ ] **PW.13.1** (Covers: no new IDs.) Census v2: count what the audit found and stop miscounting. Port the probe's counters into `worldgen::defects` and `web-report --defects`, and add a `--cells <file>` option that reads a cell list. The counters:
+- [x] **PW.13.1** (Covers: no new IDs.) Census v2: count what the audit found and stop miscounting. Port the probe's counters into `worldgen::defects` and `web-report --defects`, and add a `--cells <file>` option that reads a cell list. The counters:
   - **A:** walk clearance against every solid (L1 carved by the bores, final L2, L3), at 0.5 and 1.2 m (blocked) and 1.8 m (headroom); a floor within 0.6 m below and within 0.3 m sideways. Report by leg or rise, by blocker and by path id.
   - **B:** clusters of solid that touch nothing, judged on shapes rather than boxes, at least 1 m from the cell's faces; split into under 2 m, under 10 m and larger.
   - **C:** interior volume inside other L2 solid or L1 solid, and interiors with a shell face missing.
@@ -613,10 +613,10 @@ The audit is `docs/playtests/2026-10-22-polish-audit.md`. Read it before any ite
   - **(c)** `b` tests only path pieces as blockers; A replaces it for clearance.
   - **(d)** the example cap in `Report::merge` (`defects.rs:79`) compares keys that include the cell, so nothing is capped.
 
-  Make the walk-line tests in `paths_v` and `l2_web` also run in a turned lattice (`Frame::Table` with a yaw that is not a quarter turn). They will fail until PW.13.3: mark that test `#[ignore = "PW.13.3"]`. *Done when:*
+  Make the walk-line tests in `paths_v` and `l2_web` also run in a turned lattice (`Frame::Table` with a yaw that is not a quarter turn). They will fail until PW.13.3: mark that test `#[ignore = "PW.13.3"]`. (2026-10-22: done as one test over the turned cells of the fixed list, `defects_audit::tests::rise_walk_lines_in_a_turned_lattice_have_a_floor_under_them`; the `paths_v` unit test builds a rise and its pieces in the same frame, so it cannot see the second `at` in `paths.rs`.) *Done when:*
   - every counter is reported;
   - a sampled test of a few cells runs in `scripts/check.sh` in under 60 s;
-  - a baseline for seeds 0 and 42 on `cells.txt` is written in `docs/playtests/web.md`, and agrees with the audit within sampling noise.
+  - a baseline for seeds 0 and 42 on `cells.txt` is written in `docs/playtests/web.md`, and agrees with the audit within sampling noise. (2026-10-22: `worldgen::defects_audit` counts A, B, C, D, E, F, G, H, L, R and S; `web-report --defects N --cells FILE` runs it after the PW.4.8 census; faults (a) to (d) fixed; baseline for seeds 0 and 42 in `docs/playtests/web.md` agrees with the audit exactly; spec §5W.48.)
 - [ ] **PW.13.2** (Covers: no new IDs.) Done-criteria that survive a version change. Reword the criteria of PW.4.25 and PW.4.26 (and any other item whose proof is "a replay shows it gone") to a census count or a fresh screenshot of the same kind of fault. Add the rule to the "How Phase W works" list above. Fold what PW.4.26 still has open into this group:
   - (b) and (c) go to PW.13.13;
   - (f) goes to PW.13.8;
