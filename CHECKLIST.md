@@ -571,6 +571,147 @@ Found in the user's 25 screenshots (`out/screenshot-1792511403.png` to `...2255.
 - [ ] **PW.11.1** Breath, horns, stress, wind organs, the Organ. Covers: SND-01..05. *Needs:* P5.3.1. *Done when:* standard (audible in a capture).
 - [ ] **PW.11.2** Bells, choir, chimes, silence zones. Covers: SND-06..09. *Needs:* P5.3.1. *Done when:* standard (audible in a capture).
 
+### PW.13 Polish pass (from the audit of 2026-10-22)
+The audit is `docs/playtests/2026-10-22-polish-audit.md`. Read it before any item here: every finding has its numbers, an example place and its cause in the code. Items PW.13.2 to PW.13.15 each remove one cause.
+
+**Rules for this group:**
+- **Order.** Do PW.13.0 and PW.13.1 first. PW.13.1 is the measuring tool every later item is checked with. After that, follow the *Needs*.
+- **Proof of a fix.** Prove a fix with a census count on the fixed cell lists, or with a fresh screenshot of the same kind of fault. Never use a replay of an old sidecar after a `GEN_VERSION` change: the world around the camera is rebuilt, so the fault can vanish without being fixed.
+- **Cell lists.** `docs/playtests/2026-10-22-audit/cells.txt` holds 119 L2 cells: the cells around the 2026-10-20 and 2026-10-21 viewpoints, plus 14 random clusters. Measure on seeds 0 and 42.
+- **Baselines.** The audit's numbers are the baselines (seed 0: `out/audit/probe-w0e.txt`; seed 42: `out/audit/probe-w42c.txt`, both git-ignored and quoted in the audit).
+- **The probe.** `docs/playtests/2026-10-22-audit/probe.rs` is the throwaway probe that produced them. It is a reference to port, not code to keep. To run it as it is, build it as its own crate with `Cargo.toml.txt` as its manifest, and add an empty `[workspace]` table.
+- **Output changes.** An item marked **(v)** changes generator output: bump `GEN_VERSION` and regenerate the goldens once per item (targeted tests while iterating, the full suite before the commit).
+- **Specs.** Spec changes go in `docs/spec/levels.md` before the code.
+- **Commits.** One commit per item.
+
+- [ ] **PW.13.0** (Covers: no new IDs.) Remove the lamps that spawn around the player. The user (2026-10-22): "remove the lamp spawning, it doesn't suit and is annoying". Three ideas put lamps in the world because of where you walk:
+  - WAKE-01 and WAKE-02: a lamp every 25 m along your trail (`engine::tools`, `tools.rs:214`), saved in `save.toml`, drawn by `MarkDraw` in `app.rs` (toggled by T and hidden by default since `73d04d7`, but still placed and saved);
+  - NOT-04: a line of lamps laid ahead toward the nearest pinned mark (`tools.rs:237`; `RouteDraw` in `app.rs`).
+
+  Remove all three: the placement, the drawing, the T binding, and the trail and route state. Old saves must still load: a stale `trail` key is ignored. Keep chalk (TOOL-08) and the gaze-mark (TOOL-02). Keep anything else that reads the saved trail, if something does; check the atlas (TOOL-06) and arrivals (TOOL-04) first.
+
+  Move WAKE-01, WAKE-02 and NOT-04 to the registry's Deferred table with this date and the user's reason, and take them out of the `Covers:` of PW.10.15 and PW.10.16 with a note. Update `docs/controls.md` and the spec section (§5W.44) to match. *Done when:*
+  - `scripts/coverage.py` passes;
+  - no lamp appears after a 200 m walk, with T pressed and with a mark pinned (a fresh screenshot);
+  - an old `save.toml` with a trail still loads.
+- [ ] **PW.13.1** (Covers: no new IDs.) Census v2: count what the audit found and stop miscounting. Port the probe's counters into `worldgen::defects` and `web-report --defects`, and add a `--cells <file>` option that reads a cell list. The counters:
+  - **A:** walk clearance against every solid (L1 carved by the bores, final L2, L3), at 0.5 and 1.2 m (blocked) and 1.8 m (headroom); a floor within 0.6 m below and within 0.3 m sideways. Report by leg or rise, by blocker and by path id.
+  - **B:** clusters of solid that touch nothing, judged on shapes rather than boxes, at least 1 m from the cell's faces; split into under 2 m, under 10 m and larger.
+  - **C:** interior volume inside other L2 solid or L1 solid, and interiors with a shell face missing.
+  - **D:** two legs on one line.
+  - **E:** slivers under 0.1 m.
+  - **F:** walk lines through non-solid decoration.
+  - **G:** non-solid plates at least 1×1 m that look walkable.
+  - **H:** pieces of 16 m or more that the mid band does not draw.
+  - **L:** L3 solid more than 0.6 m outside every mass.
+  - **R:** rails with no walk line beside them, and rails inside an enclosed path.
+  - **S:** structure parts sliced by a cell face.
+
+  Fix four existing faults in the census:
+  - **(a)** counter `g` treats `MID_ONLY` boxes as drawn (`defects.rs:195`); the full band never draws them (`meshpool.rs:459`), so `g L2/L3` is mostly false.
+  - **(b)** `f air` counts a leg that ends at a T junction as over air (`defects.rs:756` looks only ahead and sideways).
+  - **(c)** `b` tests only path pieces as blockers; A replaces it for clearance.
+  - **(d)** the example cap in `Report::merge` (`defects.rs:79`) compares keys that include the cell, so nothing is capped.
+
+  Make the walk-line tests in `paths_v` and `l2_web` also run in a turned lattice (`Frame::Table` with a yaw that is not a quarter turn). They will fail until PW.13.3: mark that test `#[ignore = "PW.13.3"]`. *Done when:*
+  - every counter is reported;
+  - a sampled test of a few cells runs in `scripts/check.sh` in under 60 s;
+  - a baseline for seeds 0 and 42 on `cells.txt` is written in `docs/playtests/web.md`, and agrees with the audit within sampling noise.
+- [ ] **PW.13.2** (Covers: no new IDs.) Done-criteria that survive a version change. Reword the criteria of PW.4.25 and PW.4.26 (and any other item whose proof is "a replay shows it gone") to a census count or a fresh screenshot of the same kind of fault. Add the rule to the "How Phase W works" list above. Fold what PW.4.26 still has open into this group:
+  - (b) and (c) go to PW.13.13;
+  - (f) goes to PW.13.8;
+  - (h) goes to PW.13.7;
+  - (d), (e) and (g) stay in PW.4.26.
+
+  *Needs:* PW.13.1. *Done when:* the checklist says so, and `scripts/coverage.py` passes.
+- [ ] **PW.13.3** (Covers: no new IDs.) **(v)** Rise walk lines in the right place (audit §1). `paths_v::build_rise` returns its walk in cell-local metres (`paths_v.rs:923`), and `paths.rs:1899` maps it through `e.at` again, so in a turned lattice every rise's walk line is rotated twice about the cell centre. Measured: 888 of 185 221 turned-rise samples have a floor under them, and 170 247 with one `at` undone.
+  - **What reads the walk lines:** `l2_web::ways_of`, which feeds `edges::cut_rails` and `edges::decor_mask`, and the census. So expect rails and decoration at stair feet and tops to change.
+  - **Test:** un-ignore the turned-lattice walk test from PW.13.1.
+
+  *Needs:* PW.13.1. *Done when:*
+  - the turned-lattice test finds a floor under at least 95 % of rise samples;
+  - census `f rise` and A on rises are re-measured and recorded;
+  - a fresh screenshot shows a stair foot in a turned lattice with its rail opened.
+- [ ] **PW.13.4** (Covers: no new IDs.) **(v)** One path per route step (audit §7). `tissue::route` adds zero to two loop walks between route slots (`tissue.rs:929`). A loop can run along slots that are already on the tree, and `cut` then makes a second segment over them with its own path type. Both are built: 240 leg pairs, about 6 km of doubled walkway in 119 cells. Example: seed 0, L2 (2,6,3) local (240,256,431..465), where a railless PH-01 catwalk runs 3.5 m above a PH-04 catenary on the same line.
+  - **Fix:** when cutting segments, skip any slot step an earlier walk already used, so that a loop starts and ends at junctions.
+  - **Junctions:** recompute them after the change.
+
+  *Needs:* PW.13.1. *Done when:* census D is 0 on both seeds, and the route tests (`tissue`, the bots' route graph) still pass.
+- [ ] **PW.13.5** (Covers: no new IDs.) **(v)** Turned parts stay inside their cell (audit §2). A turned lattice turns about the cell centre, and its parts are clipped to the cell box. The neighbour does not continue them, so buildings end in a flat world-axis cut at L2 faces, and hollow shells lose that wall.
+  - **Measured:** 13.5 % (seed 0) and 17.5 % (seed 42) of turned parts are sliced; 283 and 637 interiors have a face with no shell.
+  - **Example:** seed 0, L2 (-48,7,-12) and its +z neighbour.
+  - **Fix:** at placement (tissue growth, forms, variants, hubs, sets), refuse or shrink any part, oriented part, shaped piece or kit face whose turned box leaves the cell. Then `mass_specs` refuses any part that still does.
+  - **Fill:** measure MET-01 before and after (`web-report --tissue`). If turned strata lose more than 0.05 of fill, stop and ask the user about the alternative: turning whole districts about a shared, world-anchored centre so neighbours continue each other.
+
+  *Needs:* PW.13.1. *Done when:* S is 0 and C "face missing" is 0 on both seeds; MET-01 is recorded; a fresh screenshot along an L2 face in a turned stratum shows no cut building.
+- [ ] **PW.13.6** (Covers: no new IDs.) **(v)** Interiors only in clear volume (audit §3). `l3_web::mass_specs` (`l3_web.rs:411`) refuses a mass only when it overlaps an earlier mass or a rise's clear box. It does not test:
+  - solid parts of other structures (a part refused as a mass stays solid and fills its neighbour's rooms);
+  - oriented parts in another frame (FORM-17 and FORM-18, turned mutations);
+  - L1 solid.
+
+  Measured: 24 % (seed 0) and 35 % (seed 42) of interiors contain other L2 solid; 11 to 13 % contain L1 solid. Example: seed 0, L2 (-55,11,47) local (80,464,496).
+
+  **Fix:** before a part becomes a mass, test its box (sampled in the lattice frame) against every other solid the cell will emit and the parent's L1 pieces. Shrink it to the clear storeys, or keep it solid. Also stop L3 pieces leaving their mass: 1.8 % of L3 solid, mostly `STAIR_TOWER`, lies more than 0.6 m outside every mass. Example: seed 0, `SECTOR=-28,6,23 LOCAL=573,33,553`.
+
+  Extend `every_entrance_reaches_every_other` so a door that opens into L2 or L1 solid fails. *Needs:* PW.13.5. *Done when:*
+  - C (other solid) is at most 1 % of interiors on both seeds;
+  - L is 0;
+  - the extended test passes;
+  - a fresh screenshot inside a formerly crossed interior.
+- [ ] **PW.13.7** (Covers: no new IDs.) **(v)** Rises own their column through L1 and through other paths (audit §4; takes over PW.4.26 (h); finishes the column part of PW.4.13). L1 is cut only by the bores of `Bored` segments (`l2_web::l1_primitives_carved`). A rise's column is reserved against structures, but not against the L1 frame or the decks of other legs.
+  - **Measured (seed 0):** 2 852 stair samples blocked by L1, 3 050 by other paths; 783 with solid between 1.2 and 1.8 m above a stair.
+  - **Example:** a PV-04 that tops out inside a 466 m L1 block (seed 0, `SECTOR=-20,27,-24 LOCAL=415,768,194`).
+  - **Fix:** a rise whose column meets L1 solid gets a bore. That means adding it to `bored_cuts`, which must stay a function of the routes alone (test `the_cuts_follow_from_the_routes_alone`). A leg that would cross a rise's column below its headroom ends at a landing on it, or the rise is moved. No stair has less than 2.0 m clear above any tread.
+
+  *Needs:* PW.13.3. *Done when:*
+  - A blocked on rises is 0 on both seeds;
+  - A headroom under 1.8 m on rises is 0;
+  - the L1 cut cost (`an_l1_cell_is_cut_open`) is re-measured and recorded;
+  - a fresh screenshot of a stair passing through an L1 plate.
+- [ ] **PW.13.8** (Covers: no new IDs.) **(v)** Extras go through the same passes as everything else (audit §5; takes over PW.4.26 (f)). `l2_web::add_extras` (`l2_web.rs:145`) runs after carve, `orphan_mask`, `fix_members`, `decor_mask` and `cut_rails`. So the exterior kit, quarter dressing, growth, strange-region pieces, well geometry and gate markers are never cut by doors or corridors, never tested for a host, and never kept out of walkways.
+  - **Measured:** census `c` is back to 14 637 of 75 180 dressing pieces (19 %), from 10 of 3 295 after PW.4.14; walk lines pass through 914 path lamps and frames, 66 windows and 45 quarter pieces.
+  - **Fix:** build the extras before the clean-up passes and run them all on them. `kit_ext::dress` dresses only exposed faces: the test `lit_faces` already uses, and not where a door or corridor cuts the face. KIT-07 cable runs get brackets to the face, or lie on it (`kit_ext.rs:296`). KIT-09 lamp chains and GROW-02 roots hang only where nothing stands under them.
+
+  *Needs:* PW.13.1. *Done when:* census `c` is at most 0.5 % of dressing; F is 0 for decoration; `every_kit_piece_occurs_and_is_harmless` and the census still find every KIT, GROW and quarter ID.
+- [ ] **PW.13.9** (Covers: no new IDs.) **(v)** Nothing floats (audit §6). Census B finds about 1 260 small floating clusters in 119 cells (seed 0). Their causes:
+  - **(a)** the PV-04 pillar: `paths_v.rs:741` builds the `TRUNK` slab from `y0 + 3` to `top - 3` and 1 m inside the flights, so it touches nothing. It should stand on the foot and carry the top landing.
+  - **(b)** ceiling-hatch collars: `thresholds.rs:252` makes one for every PosY or NegY entrance, even with no route and no structure left at the hatch. Example: seed 0, L2 (0,6,4) local (304,96,176). The edge pass then rails both sides of its 0.5 m rim.
+  - **(c)** SV-18 lit windows: `tissue_variants.rs:596` and `tissue_grow.rs:2382` place panels against a host that is not there. They are collidable, so `orphan_mask` (which looks only at `NO_COLLIDE` dressing) misses them. Make them `NO_COLLIDE`, or test the host.
+  - **(d)** overhead path pipes 2 to 3 m above a deck, with no hangers.
+  - **(e)** balustrades standing outside an enclosed skybridge's wall. Example: seed 0, L2 (-55,12,47) local (128,129,465).
+  - **(f)** look at the large B clusters (whole cell webs that touch no L1) with fresh screenshots, and decide with the user whether they are a fault.
+
+  *Needs:* PW.13.8. *Done when:* B under 10 m is 0 outside weightless and strange regions on both seeds, and (f) is decided and recorded.
+- [ ] **PW.13.10** (Covers: no new IDs.) **(v)** Rails only where someone could fall (audit §8). The edge pass rails any walkable edge above a drop, and a few centimetres of gap count as a drop. So rails run inside enclosed corridors (P2-01, PH-02: the walkway is narrower than the walls; shot `out/audit/v61-m40-55-m48-0.png`), on the roofs of skybridges nobody can reach, and on both sides of rims (the PW.13.9 (b) collars).
+  - **Gaps:** a gap narrower than 0.6 m (under the capsule) is no drop.
+  - **Reach:** a surface that no walk line reaches (a roof, a rim, the top of a mass) gets no rail.
+  - **Enclosed paths:** their floors meet their walls.
+
+  *Needs:* PW.13.3, PW.13.4. *Done when:* census R (rails inside an enclosed path, rails with no walk line beside them) is 0, census `a` does not rise, and there are fresh screenshots inside a PH-02 and a P2-01.
+- [ ] **PW.13.11** (Covers: no new IDs.) **(v)** Structure stairs and helices at human scale, or not stairs (audit §9).
+  - **`Shaped::Stair`:** `Emitter::stair` (`tissue_grow.rs:2049`) fills a whole slot box with a 32-step `StairRun` (treads of 1 m, risers of 1 to 3 m). It is used by SV-03 kissing (`tissue_variants.rs:262`) and F2-21 stair-tower field (`forms2.rs:492`). Replace it with a real stair: a `paths_v` flight with landings and rails on a walk, joining what it claims to join. Or make the form read as mass (terraces of at least 4 m, with no tread rhythm).
+  - **Structure helix:** SV-16 (`tissue_variants.rs:564`) and the rotunda hub (`hubs.rs`) build a coreless ramp of separate treads up to 112 m high. It gets a core, a rail on its open edge, and an exit at the top onto something, or it becomes a walk.
+
+  Keep the registry ideas (SV-03, SV-16, F2-21) and update their spec rows. *Needs:* PW.13.1. *Done when:*
+  - no `StairRun` has a riser over 0.45 m (a test over sampled cells);
+  - every structure helix has a core, rails and a top;
+  - the census still counts SV-03, SV-16 and F2-21;
+  - fresh screenshots of each.
+- [ ] **PW.13.12** (Covers: no new IDs.) The mid band carries the paths (audit §10; the horizon promise). `meshpool::mid_primitives` (`crates/engine/src/meshpool.rs:311`) keeps only `MID_ONLY` boxes and envelope parts. Between 640 m and 4 km, every walkway, bridge, stair, cage, helix and piece of skin cladding is missing: 31 000 of 108 178 pieces of at least 16 m in 119 cells. They appear as you come closer.
+  - **Fix:** give the mid band a cheap form of the large path and structure pieces: decks, stair runs and ramps as plain boxes; cages as their frame; no rails, kit or dressing. This can be a flag set by the generator **(v)** or a filter in the engine.
+  - **Test:** add a mid-against-full test at 8 m resolution beside `far_near`.
+  - **Budget:** measure the mid band's triangles and memory on native Windows (PW.4.22 viewpoints); if a budget is missed, say so.
+
+  *Needs:* PW.13.1. *Done when:* H is 0 for decks, bridges and stairs of 16 m or more; the 8 m test passes at 90 % or more; Windows frame times at the three PW.4.22 viewpoints are recorded.
+- [ ] **PW.13.13** (Covers: no new IDs.) **(v)** No slivers (audit §11; takes over PW.4.26 (b) and (c)). Carving doors and corridors out of turned shells in their own frame leaves strips 1 quantum (6 cm) thick:
+  - 3 000 (seed 0) and 8 900 (seed 42) in 119 cells, some 32 m tall;
+  - they show as ribs at door edges, and z-fight at distance;
+  - the sagging walkways also leave wedges under 0.3 m thick (PW.4.26 (c)).
+
+  **Fix:** snap carve cuts to whole quanta in the piece's own frame, and drop or merge any output under 0.1 m in a dimension. *Needs:* PW.13.1. *Done when:* E is 0 on both seeds; the census `g` (as fixed in PW.13.1) does not rise.
+- [ ] **PW.13.14** (Covers: no new IDs.) **(v)** No fake floors (audit §12). KIT-12 scaffold decks and KIT-02 ledges are `NO_COLLIDE` plates of at least 1×1 m that look walkable (889 in 119 cells on seed 0), and a walker falls through them. Make kit that looks walkable solid (with a rail if it is high), or make it read as not walkable (mesh, not grating; under 0.6 m deep). Covers: no new IDs. *Needs:* PW.13.8. *Done when:* G is 0 on both seeds, and KIT-02 and KIT-12 still occur.
+- [ ] **PW.13.15** (Covers: no new IDs.) 🎮 Re-walk after the polish pass. Take fresh Windows screenshots of every fault class of the audit (one per counter, in places the census names), compare them with the audit's shots, and record the census on both seeds in `docs/playtests/web.md`. Then the user walks. Covers: no new IDs. *Needs:* PW.13.0 to PW.13.14. *Done when:* 🎮 the user signs off, or the new findings are added as items here.
+
 ### PW.12 Phase exit
 - [x] **PW.3.22** L1 face ports on the right L2 cell. Found by the bots (P6.1.1, first version): the artery routing and the tissue's anchors gave an L1 face port to the L2 cell at the far end of the L1 cell, so no route crossed an L1 face. Covers: no new IDs. *Done when:* the bots' largest component holds most of a block. (2026-10-21, `GEN_VERSION` 30, spec `levels.md` §5W.46a: `p.l2(dir.is_positive())` in `l1_artery` and `tissue`; the largest component of a 2 × 2 × 2 L1 block went from 13 % to 79–86 % of the route nodes. The test of the ports (`faces_carry_two_to_four_distinct_ports_that_both_sides_hold`) now checks the cells that touch the face; `every_variant_occurs` scans three layers of halls, since the draws moved.)
 - [ ] **PW.12.0** Density and graph metrics miss their targets (found 2026-10-21, `docs/playtests/web.md`). `web-report --tissue` measures MET-01 at 0.61–0.66 (envelopes counted as solid; target 0.70–0.90, the tissue aims at 0.81; solid pieces alone cover 0.23–0.27) MET-10 at 0.14–0.15 on the plate graph (target 0.40; on the route graph 0.78–0.83 of junctions and ends) on three seeds (MET-05 is met: 0–32 m). Find out why crust-edge cells pull the mean down and why plates have so few links, then either raise the values or change the targets with the user's agreement. Covers: no new IDs. *Done when:* MET-01 and MET-10 are in range on 3 seeds, or the user has changed the targets and the note says so.

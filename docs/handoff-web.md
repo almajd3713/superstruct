@@ -45,7 +45,25 @@ After playing the Phase 5 build, the user found the world empty and dull: deck s
 
 The user wants wild, varied ideas, not literal readings. Their examples, and the ones in these docs, are seeds. When implementing a family, multiply its variants. When stuck for ideas, research or ask the user.
 
-## Handoff 2026-10-20 (latest): the user's walk, the fix items PW.4.6 to PW.4.26, PW.4.6 done
+## Handoff 2026-10-22 (latest): the polish pass, PW.13
+
+**What happened.** The world at `GEN_VERSION` 33 still showed many subtle faults. An audit measured them and traced each to its cause: `docs/playtests/2026-10-22-polish-audit.md`. Its fixes are the group **PW.13** in `CHECKLIST.md` (PW.13.0 to PW.13.15). Work them in order before anything else in Phase W, and read the audit first. Every item names the code, an example place and the number to bring to zero.
+
+**User decisions (2026-10-22).**
+- The lamps that spawn around the player are removed: WAKE-01, WAKE-02 (trail lamps) and NOT-04 (lamps ahead toward a mark). The user's words: "it doesn't suit and is annoying". This is PW.13.0, and it moves the three IDs to the registry's Deferred table.
+- A fix is proven by a census count or a fresh screenshot of the same kind of fault. A replay of an old sidecar is not proof after a `GEN_VERSION` change, because the world around the camera is rebuilt.
+
+**Where things are.**
+- Fixed cell list for every measurement: `docs/playtests/2026-10-22-audit/cells.txt` (119 L2 cells; use seeds 0 and 42).
+- Reference probe to port into the census (PW.13.1): `docs/playtests/2026-10-22-audit/probe.rs`, with its manifest `Cargo.toml.txt`.
+- The audit's raw outputs and screenshots are in `out/audit/` (git-ignored, on this machine only); the audit quotes the numbers.
+
+**Watch for.**
+- PW.13.3 (stair walk lines) changes where rails are cut at stair feet. Re-measure census `a`/`b` after it.
+- PW.13.5 may thin turned strata. Measure MET-01 and ask the user before switching to district-wide frames.
+- Most items change output: one `GEN_VERSION` bump and one golden regeneration per item (`fast-test-loop` in the notes above).
+
+## Handoff 2026-10-20: the user's walk, the fix items PW.4.6 to PW.4.26, PW.4.6 done
 
 **What happened.** The user walked `GEN_VERSION` 17 on Windows and saved 25 screenshots (`out/screenshot-1792511403.png` to `...2255.png`). `docs/playtests/2026-10-20-web-walk.md` reads every shot and traces each defect to the code. `CHECKLIST.md` has a new section, "PW.4 fixes from the walk of 2026-10-20", with items **PW.4.6 to PW.4.26**. Each item removes a cause, not a single shot. Work them in order before PW.5. The user asked for the first three (4.6, 4.7, 4.8) and then stopped the session after 4.6.
 

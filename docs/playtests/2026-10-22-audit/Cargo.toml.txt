@@ -1,0 +1,12 @@
+[package]
+name = "probe"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+worldgen = { path = "/home/reeler/_hsproject/superstruct/crates/gen", package = "gen" }
+glam = "0.34.1"
+
+[profile.release]
+debug = 1
+
