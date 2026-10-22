@@ -39,8 +39,6 @@ pub struct Save {
     pub marks: Vec<[i64; 3]>,
     /// L1 cells arrived in, in order (TOOL-04).
     pub places: Vec<[i64; 3]>,
-    /// The walked trail (WAKE-02), a point every 25 m.
-    pub trail: Vec<BeaconPos>,
     /// Marks drawn on walls (TOOL-08).
     pub chalk: Vec<BeaconPos>,
 }
@@ -83,7 +81,6 @@ mod tests {
         .unwrap();
         let save = Save {
             beacons: vec![BeaconPos::of(&at)],
-            trail: vec![BeaconPos::of(&at)],
             places: vec![[1, 2, 3]],
             ..Save::default()
         };
@@ -92,5 +89,13 @@ mod tests {
         assert_eq!(back, save);
         assert_eq!(back.beacons[0].pos(), Some(at));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_stale_trail_key_in_an_old_save_is_ignored() {
+        let text =
+            "places = [[1, 2, 3]]\n\n[[trail]]\nsector = [0, 0, 0]\nlocal = [1.0, 2.0, 3.0]\n";
+        let save: Save = toml::from_str(text).unwrap();
+        assert_eq!(save.places, vec![[1, 2, 3]]);
     }
 }

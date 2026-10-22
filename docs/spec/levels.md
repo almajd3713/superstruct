@@ -1374,11 +1374,7 @@ wonder, rare, mover and spine sites of the L0 cells around a position, a functio
 - **TOOL-07 listening.** Standing still 2.5 s, outside a Silent region, gives the direction of
   the nearest landmark within its hearing (spine 16 cells, wonder 12, machine 10, oddity 8):
   "you hear a slow grinding, right 128°".
-- **WAKE-01..02 trail.** A lamp (a slim warm post 6 m tall with a signal lamp on top) wakes every
-  25 m of the walker's path and stays, up to 6000; drawn in chunks of 16 anchored at their first
-  lamp. *Deviation:* WAKE-01 is realised as the lamps along your own way, not as the world's
-  dead lamps lighting.
-  The lamps are drawn only when asked for: T toggles them (off at start), because a lamp stands where you stood. The trail is recorded and saved either way.
+- **WAKE-01..02 trail** and **NOT-04 lamps ahead** were removed on 2026-10-22 (PW.13.0): the user found lamps spawning around the walker unsuitable and annoying. The trail is no longer recorded; a `trail` key in an old `save.toml` is ignored.
 - **TOOL-08 chalk.** C draws a bright mark on the surface in view within 6 m.
 
 ### 5W.45 Machines that notice you (PW.10.15, `GEN_VERSION` 26)
@@ -1400,10 +1396,6 @@ the machines are generated like any mover, and only their pose is driven by the 
     mover; these are not saved, so a restart finds every machine asleep.
 - **NOT-02 lifts that come** (`liftsys`): waiting within 3 m of a served opening for 1.2 s calls the
   lift as the call key would; it then rests 8 s before noticing again.
-- **NOT-04 lamps ahead** (`engine::tools::Route`): with a gaze-mark pinned, a line of up to 25 lamps
-  every 40 m (a kilometre) lights up from the walker toward the nearest pin, and is laid again
-  every 40 m walked, so those behind go out. *Deviation:* the lamps run along the straight line
-  to the mark, not along a walkable route (the nav graph is not there yet, PW.7.3).
 
 ### 5W.46a L1 face ports reach the right L2 cell (`GEN_VERSION` 30)
 

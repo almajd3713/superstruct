@@ -30,7 +30,7 @@ use crate::input::{Action, Bindings, InputState};
 use crate::liftdraw::LiftDraw;
 use crate::liftplan::plan_cell;
 use crate::liftsys::{LiftInput, LiftSystem, PlanResult, PlayerView};
-use crate::marks::{MarkDraw, RouteDraw, Shape};
+use crate::marks::{MarkDraw, Shape};
 use crate::meshpool::MeshPool;
 use crate::moversys::{MoverSystem, WithMovers};
 use crate::overlay::{Overlay, OverlayInfo};
@@ -97,18 +97,13 @@ struct App {
     save: Save,
     beacons: Vec<WorldPos>,
     beacon_draw: BeaconDraw,
-    /// Held zoom, gaze-marks, atlas, trail and chalk (`tools.rs`).
+    /// Held zoom, gaze-marks, atlas and chalk (`tools.rs`).
     tools: Tools,
     tools_t: Instant,
     tool_zoom: f32,
     weather: Weather,
-    trail: Vec<WorldPos>,
     chalk: Vec<WorldPos>,
-    trail_draw: MarkDraw,
-    /// The trail lamps are drawn only when asked for (T): they stand where you walked.
-    show_trail: bool,
     chalk_draw: MarkDraw,
-    route_draw: RouteDraw,
     trams: TramSystem,
     tram_draw: TramDraw,
     /// World-clock movers near the player (`moversys.rs`).
@@ -567,7 +562,7 @@ impl App {
         false
     }
 
-    /// The walker's tools for this frame: zoom, marks, atlas, trail and chalk.
+    /// The walker's tools for this frame: zoom, marks, atlas and chalk.
     fn run_tools(&mut self) {
         let now = Instant::now();
         let dt = now.duration_since(self.tools_t).as_secs_f32().min(0.25);
@@ -608,11 +603,10 @@ impl App {
             .update(&frame, &mut self.save, self.input.pressed(Action::Atlas));
         self.tool_zoom = out.zoom;
         if out.dirty {
-            self.trail = self.save.trail.iter().filter_map(BeaconPos::pos).collect();
             self.chalk = self.save.chalk.iter().filter_map(BeaconPos::pos).collect();
         }
         if out.dirty
-            && (self.save.trail.len().is_multiple_of(8) || frame.mark || frame.chalk)
+            && (frame.mark || frame.chalk)
             && let Err(err) = self.save.save(&save_path())
         {
             tracing::warn!(%err, "could not write the save file");
@@ -639,9 +633,6 @@ impl App {
             return;
         }
         self.run_tools();
-        if self.input.pressed(Action::ToggleTrail) {
-            self.show_trail = !self.show_trail;
-        }
         let Some(running) = &mut self.running else {
             return;
         };
@@ -851,23 +842,6 @@ impl App {
             &running.gpu.queue,
             &self.beacons,
         );
-        self.trail_draw
-            .set_visible(&mut running.renderer, self.show_trail);
-        self.trail_draw.update(
-            &mut running.renderer,
-            &running.gpu.device,
-            &running.gpu.queue,
-            &self.trail,
-        );
-        if let Some(route) = self.tools.route.take() {
-            self.route_draw.set(
-                &mut running.renderer,
-                &running.gpu.device,
-                &running.gpu.queue,
-                route.anchor,
-                &route.lamps,
-            );
-        }
         self.chalk_draw.update(
             &mut running.renderer,
             &running.gpu.device,
@@ -1269,7 +1243,6 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         lift_draw: LiftDraw::default(),
         photo: None,
         beacons: save.beacons.iter().filter_map(BeaconPos::pos).collect(),
-        trail: save.trail.iter().filter_map(BeaconPos::pos).collect(),
         chalk: save.chalk.iter().filter_map(BeaconPos::pos).collect(),
         save,
         beacon_draw: BeaconDraw::default(),
@@ -1277,10 +1250,7 @@ pub fn run(title: &str, settings: Settings) -> Result<(), AppError> {
         tools_t: now,
         tool_zoom: 1.0,
         weather: Weather::default(),
-        trail_draw: MarkDraw::new(Shape::Lamp),
-        show_trail: false,
         chalk_draw: MarkDraw::new(Shape::Chalk),
-        route_draw: RouteDraw::default(),
         trams: TramSystem::new(WorldSeed(settings_seed)),
         tram_draw: TramDraw::default(),
         movers: MoverSystem::default(),

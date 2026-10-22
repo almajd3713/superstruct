@@ -1,6 +1,6 @@
-//! The walker's tools (TOOL-01..04, 06..08, WAKE-01..02): a held zoom, a gaze-mark that pins a
+//! The walker's tools (TOOL-01..04, 06..08): a held zoom, a gaze-mark that pins a
 //! far landmark, the atlas of places arrived in, a cue for the direction of a sound when
-//! standing still, the trail and chalk marks. All of it is saved in `save.toml`. Spec:
+//! standing still and chalk marks. All of it is saved in `save.toml`. Spec:
 //! `docs/spec/levels.md` §5W.44.
 
 #![allow(clippy::cast_sign_loss)] // distances and counts here are never negative
@@ -18,9 +18,6 @@ use crate::save::{BeaconPos, Save};
 const ZOOM: f32 = 4.0;
 const ZOOM_OBSERVATORY: f32 = 16.0;
 const OBSERVATORY: u8 = 11;
-/// A point of the trail every this many metres (WAKE-02), and the most that are kept.
-const TRAIL_STEP_M: f64 = 25.0;
-const TRAIL_MAX: usize = 6000;
 const MARKS_MAX: usize = 8;
 const PLACES_MAX: usize = 4096;
 /// Seconds in one L1 cell before it is a place arrived in (TOOL-04).
@@ -45,28 +42,11 @@ pub struct Frame {
     pub hit_m: Option<f32>,
 }
 
-/// NOT-04: lamps every `ROUTE_STEP_M` for `ROUTE_LAMPS` of them (a kilometre), laid again once
-/// the walker has moved `ROUTE_RELAY_M`.
-const ROUTE_STEP_M: f32 = 40.0;
-const ROUTE_LAMPS: usize = 25;
-const ROUTE_RELAY_M: f64 = 40.0;
-
-/// The lamps of a route from the walker toward a pinned mark.
-pub struct Route {
-    pub anchor: WorldPos,
-    /// Metres from `anchor`; empty when there is no route.
-    pub lamps: Vec<Vec3>,
-}
-
 pub struct Tools {
     seed: WorldSeed,
-    /// Set when the route was laid anew this frame; the app takes it to redraw.
-    pub route: Option<Route>,
-    last_route: Option<WorldPos>,
     pub atlas: bool,
     still_s: f32,
     dwell: Option<(I64Vec3, f32)>,
-    last_trail: Option<WorldPos>,
     pub lines: Vec<String>,
 }
 
@@ -152,12 +132,9 @@ impl Tools {
     pub fn new(seed: WorldSeed) -> Self {
         Self {
             seed,
-            route: None,
-            last_route: None,
             atlas: false,
             still_s: 0.0,
             dwell: None,
-            last_trail: None,
             lines: Vec::new(),
         }
     }
@@ -211,20 +188,6 @@ impl Tools {
             }
         }
 
-        // WAKE-01..02: a lamp wakes every 25 m along the way, and stays.
-        let far = self
-            .last_trail
-            .is_none_or(|p| f.eye.delta(&p).length() >= TRAIL_STEP_M);
-        if far && save.trail.len() < TRAIL_MAX {
-            let feet = f
-                .eye
-                .offset(Vec3::NEG_Y * crate::controller::EYE_HEIGHT)
-                .unwrap_or(f.eye);
-            save.trail.push(BeaconPos::of(&feet));
-            self.last_trail = Some(f.eye);
-            dirty = true;
-        }
-
         // TOOL-08: chalk on the wall in view.
         if f.chalk
             && let Some(d) = f.hit_m.filter(|d| *d <= CHALK_REACH_M)
@@ -232,32 +195,6 @@ impl Tools {
         {
             save.chalk.push(BeaconPos::of(&p));
             dirty = true;
-        }
-
-        // NOT-04: with a mark pinned, a line of lamps lights up ahead toward the nearest one.
-        let relay = self
-            .last_route
-            .is_none_or(|p| f.eye.delta(&p).length() >= ROUTE_RELAY_M);
-        if relay {
-            self.last_route = Some(f.eye);
-            let nearest = save
-                .marks
-                .iter()
-                .map(|m| direction_to(at, I64Vec3::from(*m)))
-                .min_by(|a, b| a.1.total_cmp(&b.1));
-            let lamps = nearest.map_or_else(Vec::new, |(dir, km)| {
-                let n =
-                    ((km * 1000.0 / f64::from(ROUTE_STEP_M)).max(0.0) as usize).min(ROUTE_LAMPS);
-                (1..=n)
-                    .map(|k| {
-                        dir * (k as f32 * ROUTE_STEP_M) - Vec3::Y * crate::controller::EYE_HEIGHT
-                    })
-                    .collect()
-            });
-            self.route = Some(Route {
-                anchor: f.eye,
-                lamps,
-            });
         }
 
         self.still_s = if f.moving { 0.0 } else { self.still_s + f.dt };
@@ -355,15 +292,12 @@ mod tests {
     }
 
     #[test]
-    fn the_trail_gains_a_lamp_every_25_metres_and_places_are_arrived_in() {
+    fn places_are_arrived_in_after_four_seconds_in_a_cell() {
         let mut tools = Tools::new(WorldSeed(1));
         let mut save = Save::default();
         tools.update(&frame(pos(0.0)), &mut save, false);
-        assert_eq!(save.trail.len(), 1);
-        tools.update(&frame(pos(10.0)), &mut save, false);
-        assert_eq!(save.trail.len(), 1);
         tools.update(&frame(pos(30.0)), &mut save, false);
-        assert_eq!(save.trail.len(), 2);
+        assert!(save.places.is_empty());
         // Four seconds in one cell: arrived.
         for _ in 0..4 {
             tools.update(&frame(pos(30.0)), &mut save, false);
@@ -405,13 +339,6 @@ mod tests {
         f.forward = dir;
         tools.update(&f, &mut save, false);
         assert_eq!(save.marks.len(), 1, "{lm:?}");
-        // NOT-04: with a mark pinned a line of lamps, a kilometre of them at most, is laid ahead.
-        let route = tools
-            .route
-            .take()
-            .expect("the route is laid at the first frame");
-        assert_eq!(route.lamps.len(), ROUTE_LAMPS);
-        assert!((route.lamps[1] - route.lamps[0]).length() - ROUTE_STEP_M < 0.01);
         tools.update(&f, &mut save, false);
         assert!(save.marks.is_empty());
     }

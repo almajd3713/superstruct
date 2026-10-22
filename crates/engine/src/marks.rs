@@ -1,5 +1,4 @@
-//! Player-made marks drawn in the world (WAKE-01..02, TOOL-08): the lamps of the trail and the
-//! chalk on walls. Points are grouped into chunks anchored at the first of each group, so f32
+//! Player-made marks drawn in the world (TOOL-08): the chalk on walls. Points are grouped into chunks anchored at the first of each group, so f32
 //! offsets stay small however far apart the marks are.
 
 use glam::Vec3;
@@ -15,8 +14,6 @@ const REACH_M: f64 = 1500.0;
 
 #[derive(Clone, Copy)]
 pub enum Shape {
-    /// A lamp post, 6 m tall and slim, readable from an overlook.
-    Lamp,
     /// A chalk cross on a wall: a small bright cube.
     Chalk,
 }
@@ -24,18 +21,6 @@ pub enum Shape {
 impl Shape {
     fn add(self, mesh: &mut Mesh, at: Vec3) {
         match self {
-            Shape::Lamp => {
-                mesh.add_box(
-                    at - Vec3::new(0.2, 0.0, 0.2),
-                    at + Vec3::new(0.2, 6.0, 0.2),
-                    MaterialId::WARM.0,
-                );
-                mesh.add_box(
-                    at + Vec3::new(-0.5, 6.0, -0.5),
-                    at + Vec3::new(0.5, 6.8, 0.5),
-                    MaterialId::SIGNAL.0,
-                );
-            }
             Shape::Chalk => mesh.add_box(
                 at - Vec3::splat(0.25),
                 at + Vec3::splat(0.25),
@@ -136,39 +121,5 @@ impl MarkDraw {
             .take_while(|g| g.handle.is_none())
             .count();
         (undrawn + 1).min(self.groups.len())
-    }
-}
-
-/// NOT-04: the lamps of a route, one chunk replaced whole whenever the route is laid again.
-#[derive(Default)]
-pub struct RouteDraw {
-    handle: Option<ChunkHandle>,
-}
-
-impl RouteDraw {
-    /// Draws a lamp at each of `lamps` (metres from `anchor`); no lamps removes the route.
-    pub fn set(
-        &mut self,
-        renderer: &mut Renderer,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        anchor: WorldPos,
-        lamps: &[Vec3],
-    ) {
-        if let Some(h) = self.handle.take() {
-            renderer.remove_chunk(h);
-        }
-        if lamps.is_empty() {
-            return;
-        }
-        let mut mesh = Mesh::default();
-        for &at in lamps {
-            mesh.add_box(
-                at - Vec3::new(0.3, 0.0, 0.3),
-                at + Vec3::new(0.3, 0.6, 0.3),
-                MaterialId::SIGNAL.0,
-            );
-        }
-        self.handle = Some(renderer.upload_chunk(device, queue, anchor, &mesh).0);
     }
 }

@@ -763,9 +763,6 @@ The "Idea" column is a phrase copied from the source doc, matched case-insensiti
 | NOT-01 | an engine hall that starts turning as you walk through | ideas §13.2 |
 | NOT-02 | lift cars that come when you approach | ideas §13.2 |
 | NOT-03 | doors opening ahead of you | ideas §13.2 |
-| NOT-04 | a line of lamps lighting up a kilometre ahead | ideas §13.2 |
-| WAKE-01 | Dead lights wake as you pass | ideas §13.3 |
-| WAKE-02 | your own trail | ideas §13.3 |
 | LIFE-01 | Drone flocks wheeling | ideas §13.4 |
 | LIFE-02 | Maintenance crawlers on pipes | ideas §13.4 |
 | LIFE-03 | Cable spiders mending nets | ideas §13.4 |
@@ -849,6 +846,8 @@ Ideas the user chose to drop or postpone, with the date and reason. They keep th
 
 | ID | Idea | Date | Reason |
 |---|---|---|---|
-| (none yet) | | | |
+| NOT-04 | a line of lamps lighting up a kilometre ahead | 2026-10-22 | The user: "remove the lamp spawning, it doesn't suit and is annoying" (PW.13.0). |
+| WAKE-01 | Dead lights wake as you pass | 2026-10-22 | The user: "remove the lamp spawning, it doesn't suit and is annoying" (PW.13.0). |
+| WAKE-02 | your own trail | 2026-10-22 | The user: "remove the lamp spawning, it doesn't suit and is annoying" (PW.13.0). |
 
 Note: "eras" (eight period styles by depth) were dropped by the user on 2026-10-18 before this registry existed. Stratum character (SC-xx) replaces them.

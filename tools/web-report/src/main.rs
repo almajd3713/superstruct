@@ -491,7 +491,7 @@ const TESTED: &[(&str, &str, &str)] = &[
     ),
     (
         "TOOL-04",
-        "the_trail_gains_a_lamp_every_25_metres_and_places_are_arrived_in",
+        "places_are_arrived_in_after_four_seconds_in_a_cell",
         "crates/engine/src/tools.rs",
     ),
     (
@@ -501,7 +501,7 @@ const TESTED: &[(&str, &str, &str)] = &[
     ),
     (
         "TOOL-06",
-        "the_trail_gains_a_lamp_every_25_metres_and_places_are_arrived_in",
+        "places_are_arrived_in_after_four_seconds_in_a_cell",
         "crates/engine/src/tools.rs",
     ),
     (
@@ -512,16 +512,6 @@ const TESTED: &[(&str, &str, &str)] = &[
     (
         "TOOL-08",
         "chalk_goes_on_a_wall_in_reach_only",
-        "crates/engine/src/tools.rs",
-    ),
-    (
-        "WAKE-01",
-        "the_trail_gains_a_lamp_every_25_metres_and_places_are_arrived_in",
-        "crates/engine/src/tools.rs",
-    ),
-    (
-        "WAKE-02",
-        "the_trail_gains_a_lamp_every_25_metres_and_places_are_arrived_in",
         "crates/engine/src/tools.rs",
     ),
     (
@@ -583,11 +573,6 @@ const TESTED: &[(&str, &str, &str)] = &[
         "LGT-07",
         "a_furnace_lights_the_fog_and_heats_the_air",
         "crates/engine/src/weather.rs",
-    ),
-    (
-        "NOT-04",
-        "a_gaze_mark_pins_the_landmark_in_view_and_a_second_press_releases_it",
-        "crates/engine/src/tools.rs",
     ),
 ];
 
