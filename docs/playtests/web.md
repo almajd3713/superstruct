@@ -256,4 +256,4 @@ The remaining samples without a floor are the ladders (climbed, not walked); the
 
 ### PW.13.4 one path per route step (2026-10-23, `GEN_VERSION` 35), same 119 cells
 
-Census D, legs sharing a line within 0.6 m for 4 m or more: seed 0 240 pairs before (audit), 56 after; seed 42 60 after (not measured before). New counter "D legs sharing a line over 16 m": seed 0 1, seed 42 0. The remaining short pairs overlap 4 to 11 m near leg ends; the one long pair is PH-13 with PH-13 (18 m, L2 -52,9,-39), untraced.
+Census D, legs sharing a line within 0.6 m for 4 m or more: seed 0 240 pairs before (audit), 56 after; seed 42 60 after (not measured before). New counter "D legs sharing a line over 28 m": 0 on both seeds. The remaining pairs are legs meeting at a node (traced: PH-13 with PH-09, 10 m; two PH-13 avenues, 16 m at L2 2,6,2, avenues reach half their width past the node).

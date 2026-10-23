@@ -908,9 +908,20 @@ pub fn audit_cell(seed: WorldSeed, cache: &L1Cache, c: I64Vec3, l3: bool) -> Aud
                     r.add("D legs sharing a line (pairs)", 1);
                     r.add("D shared length (m)", (hi - lo) as u64);
                     // Collinear legs of neighbouring slots overlap a few metres at the node
-                    // they meet in; a whole slot's length (32 m) is a doubled route.
-                    if hi - lo >= 16.0 {
-                        r.add("D legs sharing a line over 16 m", 1);
+                    // they meet in (a PH-13 avenue reaches half its width, up to 14 m, past the node, so two
+                    // avenues overlap up to 28 m); more than that is a doubled route.
+                    if hi - lo > 28.0 {
+                        r.add("D legs sharing a line over 28 m", 1);
+                        r.ex("D over 28 m", || {
+                            format!(
+                                "{tag} PH-{:02}+PH-{:02} {:.0} m at {:?} / {:?}",
+                                legs[i].id,
+                                legs[j].id,
+                                hi - lo,
+                                legs[i].points,
+                                legs[j].points
+                            )
+                        });
                     }
                     let mid = a0 + da * ((lo + hi) / 2.0);
                     r.ex("D shared line", || {
