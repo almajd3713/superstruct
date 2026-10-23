@@ -238,3 +238,18 @@ Notes:
 - **L** counts L3 solid whose middle is more than 0.6 m outside every mass (2.0 % and 0.5 % of L3 solid); the audit's 1.8 % was measured on 60 cells.
 - **PW.4.8 census corrections** (a) to (d) change its numbers: `g` no longer counts `MID_ONLY` boxes as drawn, `f air` accepts T junctions (seed 0: 2 522, seed 42: 3 173, down from the audit's quoted values), and examples are capped per counter. `c` is 14 612 and 28 514 pieces (the audit's 14 637 on seed 0).
 - Cost: a sample of 3 cells runs in `scripts/check.sh` in about one second (debug); the turned-lattice rise test is `#[ignore = "PW.13.3"]` and fails now with 495 of 25 585 samples floored.
+
+### PW.13.3 rise walk lines (2026-10-22, `GEN_VERSION` 34), same 119 cells
+
+`Rise::walk` is mapped once (spec `levels.md` §5W.17 addendum). Census v2 on the fixed list, before then after:
+
+| Counter | Seed 0 | Seed 42 |
+|---|---|---|
+| turned rise samples with a floor under them | 888 → 170 247 of 185 221 (0.5 % → 92 %) | 16 → 82 640 of 93 931 (0.02 % → 88 %) |
+| PW.4.8 `f rise` (rise ends with nothing to continue on) | 2 195 → 195 | not run (4 011 before) |
+| PW.4.8 `a edge` (rails with no floor beside them) | 2 238 → 2 172 | not run |
+| R rails with no walk line beside them | 179 285 → 56 155 | 499 165 → 184 626 |
+| R rails inside an enclosed path | 1 585 → 1 331 | 10 177 → 9 073 |
+| A on rises: blocked, headroom under 1.8 m | unchanged (the audit's probe undid the second map; the census no longer does) | unchanged |
+
+The remaining samples without a floor are the ladders (climbed, not walked); the unit test `rise_walk_lines_in_a_turned_lattice_have_a_floor_under_them` leaves them out and finds at least 95 % of the rest floored.

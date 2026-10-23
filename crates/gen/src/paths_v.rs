@@ -920,6 +920,7 @@ pub(crate) fn build_rise(e: &mut Emitter<'_>, id: u8, col: Column, p: &VParams) 
         },
         _ => fold(&mut m, id, units),
     }
+    // Cell-local metres either way (the helix is built there; the others are mapped here).
     let walk = match m.local_walk.take() {
         Some(w) => w,
         None => m

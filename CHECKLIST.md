@@ -625,7 +625,7 @@ The audit is `docs/playtests/2026-10-22-polish-audit.md`. Read it before any ite
   - (d), (e) and (g) stay in PW.4.26.
 
   *Needs:* PW.13.1. *Done when:* the checklist says so, and `scripts/coverage.py` passes. (2026-10-22: PW.4.20, PW.4.25 and PW.4.26 reworded, the rule is in "How Phase W works", and (b), (c), (f), (h) of PW.4.26 point to PW.13.13, PW.13.8 and PW.13.7.)
-- [ ] **PW.13.3** (Covers: no new IDs.) **(v)** Rise walk lines in the right place (audit §1). `paths_v::build_rise` returns its walk in cell-local metres (`paths_v.rs:923`), and `paths.rs:1899` maps it through `e.at` again, so in a turned lattice every rise's walk line is rotated twice about the cell centre. Measured: 888 of 185 221 turned-rise samples have a floor under them, and 170 247 with one `at` undone.
+- [x] **PW.13.3** (Covers: no new IDs.) **(v)** Rise walk lines in the right place (audit §1). `paths_v::build_rise` returns its walk in cell-local metres (`paths_v.rs:923`), and `paths.rs:1899` maps it through `e.at` again, so in a turned lattice every rise's walk line is rotated twice about the cell centre. Measured: 888 of 185 221 turned-rise samples have a floor under them, and 170 247 with one `at` undone. (2026-10-22: `Rise::walk` mapped once, GEN_VERSION 34; turned rise samples with a floor 0.5 % to 92 % on seed 0, numbers in docs/playtests/web.md. Seed 42 `f rise` and `a edge` not re-run.)
   - **What reads the walk lines:** `l2_web::ways_of`, which feeds `edges::cut_rails` and `edges::decor_mask`, and the census. So expect rails and decoration at stair feet and tops to change.
   - **Test:** un-ignore the turned-lattice walk test from PW.13.1.
 

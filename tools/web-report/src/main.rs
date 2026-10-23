@@ -50,6 +50,7 @@ const HELP: &str = "web-report: metrics and census of the generated world
   --size N        edge of the region in metres, at least 4096 (default 32768)
   --samples N     points for the sampled metrics (default 20000)
   --defects N     count the defects of N sampled L2 cells with their L3 (PW.4.8, PW.13.1) and exit
+  --audit-only    with --defects: run census v2 only (skip the PW.4.8 counters)
   --cells FILE    with --defects (N may be 0): measure the L2 cells listed in FILE (x,y,z per line)
   --tissue N      MET-01, 08 and 10 over N sampled L2 cells and exit
   --l2-cells N    L2 cells sampled for the census (default 3000)
@@ -70,6 +71,7 @@ struct Args {
     census: bool,
     defects: usize,
     cells: Option<String>,
+    audit_only: bool,
     tissue: usize,
     l2_cells: usize,
     wide: i64,
@@ -90,6 +92,7 @@ fn parse() -> Result<Args> {
         census: false,
         defects: 0,
         cells: None,
+        audit_only: false,
         tissue: 0,
         l2_cells: 3000,
         wide: 24,
@@ -120,6 +123,7 @@ fn parse() -> Result<Args> {
             "--census" => a.census = true,
             "--defects" => a.defects = value("--defects")?.parse()?,
             "--cells" => a.cells = Some(value("--cells")?),
+            "--audit-only" => a.audit_only = true,
             "--wide" => a.wide = value("--wide")?.parse()?,
             "--l2-cells" => a.l2_cells = value("--l2-cells")?.parse()?,
             "--tissue" => a.tissue = value("--tissue")?.parse()?,
@@ -941,22 +945,24 @@ fn defects(a: &Args, seed: WorldSeed, t0: Instant) -> Result<()> {
         }
         cells.into_iter().map(I64Vec3::from_array).collect()
     };
-    let r = worldgen::defects::scan_cells(seed, &cells, a.threads);
-    println!(
-        "defect census: seed {}, {} cells, {:.0} s",
-        a.seed,
-        r.cells,
-        t0.elapsed().as_secs_f64()
-    );
-    for (k, v) in &r.counts {
-        println!("  {k:<14} {v}");
-    }
-    println!("measured:");
-    for (k, v) in &r.bases {
-        println!("  {k:<14} {v}");
-    }
-    for e in &r.examples {
-        println!("  eg {e}");
+    if !a.audit_only {
+        let r = worldgen::defects::scan_cells(seed, &cells, a.threads);
+        println!(
+            "defect census: seed {}, {} cells, {:.0} s",
+            a.seed,
+            r.cells,
+            t0.elapsed().as_secs_f64()
+        );
+        for (k, v) in &r.counts {
+            println!("  {k:<14} {v}");
+        }
+        println!("measured:");
+        for (k, v) in &r.bases {
+            println!("  {k:<14} {v}");
+        }
+        for e in &r.examples {
+            println!("  eg {e}");
+        }
     }
     let audit = worldgen::defects_audit::audit_cells(seed, &cells, a.threads, true);
     println!(

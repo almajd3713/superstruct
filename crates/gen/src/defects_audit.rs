@@ -379,27 +379,15 @@ pub fn audit_cell(seed: WorldSeed, cache: &L1Cache, c: I64Vec3, l3: bool) -> Aud
         let mine = &own_of[wi];
         let turned = t.lattice.frame.axes()[0].x < 0.9999;
         if w.rise && turned {
-            // Undo one `at` (the suspected double transform) and test the floor again.
-            let [ex, ey, ez] = t.lattice.frame.axes();
-            let inv = |p: DVec3| {
-                let c = p - DVec3::splat(256.0);
-                DVec3::splat(256.0) + DVec3::new(ex.dot(c), ey.dot(c), ez.dot(c))
-            };
             for q in w.points.iter().step_by(2) {
-                let has = |p: DVec3| {
-                    [0.05f32, 0.2, 0.4].iter().any(|&h| {
-                        let x = v(p) - Vec3::Y * h;
-                        mine.iter().any(|m| {
-                            !m.flags.contains(PrimFlags::NO_COLLIDE) && m.shape.contains(x)
-                        })
-                    })
-                };
+                let has = [0.05f32, 0.2, 0.4].iter().any(|&h| {
+                    let x = v(*q) - Vec3::Y * h;
+                    mine.iter()
+                        .any(|m| !m.flags.contains(PrimFlags::NO_COLLIDE) && m.shape.contains(x))
+                });
                 r.add("R turned rise samples", 1);
-                if has(*q) {
-                    r.add("R floor under the stored point", 1);
-                }
-                if has(inv(*q)) {
-                    r.add("R floor under the point with one at() undone", 1);
+                if has {
+                    r.add("R turned-lattice floor under the stored point", 1);
                 }
             }
         }
@@ -422,16 +410,8 @@ pub fn audit_cell(seed: WorldSeed, cache: &L1Cache, c: I64Vec3, l3: bool) -> Aud
             format!("PH-{:02}", w.id)
         };
         let mut samples: Vec<DVec3> = Vec::new();
-        let [fx, fy, fz] = t.lattice.frame.axes();
-        let fix = |p: DVec3| {
-            if !w.rise || fx.x >= 0.9999 {
-                return p;
-            }
-            let c = p - DVec3::splat(256.0);
-            DVec3::splat(256.0) + DVec3::new(fx.dot(c), fy.dot(c), fz.dot(c))
-        };
         if w.rise {
-            samples.extend(w.points.iter().step_by(2).map(|&p| fix(p)));
+            samples.extend(w.points.iter().step_by(2).copied());
         } else {
             for pair in w.points.windows(2) {
                 let n = (pair[1] - pair[0]).length().ceil().max(1.0) as usize;
@@ -1163,6 +1143,7 @@ pub fn parse_cells(text: &str) -> Result<Vec<I64Vec3>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paths::Walk;
 
     const CELLS: &str = include_str!("../../../docs/playtests/2026-10-22-audit/cells.txt");
 
@@ -1202,7 +1183,6 @@ mod tests {
 
     /// The walk line of a rise in a turned lattice has a floor under it (PW.13.3).
     #[test]
-    #[ignore = "PW.13.3"]
     fn rise_walk_lines_in_a_turned_lattice_have_a_floor_under_them() {
         let seed = WorldSeed(0);
         let cache = L1Cache::default();
@@ -1218,7 +1198,14 @@ mod tests {
             for (rg, _) in &t.paths.owners {
                 own.extend(t.paths.prims[rg.clone()].iter().copied());
             }
-            for w in t.paths.walks.iter().filter(|w| w.rise) {
+            // A ladder is climbed, not walked: no floor is wanted under its rungs.
+            let climbs = |w: &Walk| {
+                w.points.windows(2).any(|p| {
+                    let d = p[1] - p[0];
+                    d.y.abs() > 2.0 * (d.x * d.x + d.z * d.z).sqrt()
+                })
+            };
+            for w in t.paths.walks.iter().filter(|w| w.rise && !climbs(w)) {
                 for q in w.points.iter().step_by(2) {
                     samples += 1;
                     let has = [0.05f32, 0.2, 0.4].iter().any(|&h| {

@@ -1896,7 +1896,8 @@ fn paths_impl(seed: WorldSeed, t: &Tissue, only_bored: bool) -> PathPieces {
                 id,
                 rise: true,
                 width,
-                points: walk.iter().map(|&f| e.at(f)).collect(),
+                // `build_rise` returns cell-local metres already.
+                points: walk.iter().map(|&q| glam::DVec3::from(q)).collect(),
                 up: t.lattice.frame.axes()[1],
             });
             out.chosen.push((si as u16, id));
