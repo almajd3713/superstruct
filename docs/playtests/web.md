@@ -253,3 +253,7 @@ Notes:
 | A on rises: blocked, headroom under 1.8 m | unchanged (the audit's probe undid the second map; the census no longer does) | unchanged |
 
 The remaining samples without a floor are the ladders (climbed, not walked); the unit test `rise_walk_lines_in_a_turned_lattice_have_a_floor_under_them` leaves them out and finds at least 95 % of the rest floored.
+
+### PW.13.4 one path per route step (2026-10-23, `GEN_VERSION` 35), same 119 cells
+
+Census D, legs sharing a line within 0.6 m for 4 m or more: seed 0 240 pairs before (audit), 56 after; seed 42 60 after (not measured before). New counter "D legs sharing a line over 16 m": seed 0 1, seed 42 0. The remaining short pairs overlap 4 to 11 m near leg ends; the one long pair is PH-13 with PH-13 (18 m, L2 -52,9,-39), untraced.

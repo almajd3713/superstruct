@@ -940,6 +940,33 @@ pub(crate) fn route(t: &mut Tissue, rng: &mut Rng, weave: u8, probe: &SolidProbe
             walks.push(path);
         }
     }
+    // A loop may run along steps an earlier walk already took; keep only its fresh runs, so
+    // that no step carries two paths (PW.13.4). The runs start and end where it meets the tree.
+    let mut used: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let mut runs: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (w, path) in walks.iter().enumerate() {
+        let mut cur: Vec<usize> = Vec::new();
+        for s in path.windows(2) {
+            let key = (s[0].min(s[1]), s[0].max(s[1]));
+            if used.contains(&key) {
+                if cur.len() > 1 {
+                    runs.push((w, std::mem::take(&mut cur)));
+                }
+                cur.clear();
+            } else {
+                if cur.is_empty() {
+                    cur.push(s[0]);
+                }
+                cur.push(s[1]);
+                used.insert(key);
+            }
+        }
+        if cur.len() > 1 {
+            runs.push((w, cur));
+        }
+    }
+    let walk_of: Vec<usize> = runs.iter().map(|r| r.0).collect();
+    let walks: Vec<Vec<usize>> = runs.into_iter().map(|r| r.1).collect();
     // A step that runs into parent solid between the slot centres (a plate or a wall that no
     // centre lies in) is bored like a step through a solid slot: its slots count as crossed.
     // A slot where three or more routes meet is a junction: segments end there, so that a stair
@@ -964,7 +991,7 @@ pub(crate) fn route(t: &mut Tissue, rng: &mut Rng, weave: u8, probe: &SolidProbe
             }
         }
     }
-    for (w, path) in walks.iter().enumerate() {
+    for (path, &w) in walks.iter().zip(&walk_of) {
         for seg in cut(&t.lattice, path, &crossed, &junction) {
             // 1/8 in the open, up to 3/4 in a dense stratum: routes run through buildings there.
             let engulfable = rng.below(1024) < 128 + 640 * u64::from(t.fill) / 255;

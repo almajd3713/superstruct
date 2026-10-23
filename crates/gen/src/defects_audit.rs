@@ -907,6 +907,11 @@ pub fn audit_cell(seed: WorldSeed, cache: &L1Cache, c: I64Vec3, l3: bool) -> Aud
                     );
                     r.add("D legs sharing a line (pairs)", 1);
                     r.add("D shared length (m)", (hi - lo) as u64);
+                    // Collinear legs of neighbouring slots overlap a few metres at the node
+                    // they meet in; a whole slot's length (32 m) is a doubled route.
+                    if hi - lo >= 16.0 {
+                        r.add("D legs sharing a line over 16 m", 1);
+                    }
                     let mid = a0 + da * ((lo + hi) / 2.0);
                     r.ex("D shared line", || {
                         format!(
@@ -1179,6 +1184,28 @@ mod tests {
                 r.counts.keys()
             );
         }
+    }
+
+    /// No two segments of a route take the same lattice step (PW.13.4).
+    #[test]
+    fn no_two_segments_share_a_lattice_step() {
+        let seed = WorldSeed(0);
+        let cache = L1Cache::default();
+        let mut shared = 0;
+        for c in parse_cells(CELLS).unwrap() {
+            let t = tissue_cell(seed, cache.tissue(), CellKey::new(Level::L2, c));
+            let mut seen: HashMap<(u32, u32), usize> = HashMap::new();
+            for (si, seg) in t.segments.iter().enumerate() {
+                for w in seg.slots.windows(2) {
+                    let key = (w[0].min(w[1]), w[0].max(w[1]));
+                    if let Some(prev) = seen.insert(key, si) {
+                        shared += 1;
+                        eprintln!("{c}: segments {prev} and {si} share step {key:?}");
+                    }
+                }
+            }
+        }
+        assert_eq!(shared, 0);
     }
 
     /// The walk line of a rise in a turned lattice has a floor under it (PW.13.3).

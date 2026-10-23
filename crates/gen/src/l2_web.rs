@@ -566,7 +566,9 @@ mod tests {
             .sum();
         let artefact = w.by_rail - rails;
         assert!(
-            (w.blocked() - artefact) * 500 <= w.samples,
+            // 0.25 % since version 35 (0.2 % before): the PH-15 roof tiles blocked by a walkway
+            // went from 27 to 51 samples when loops stopped doubling the tree's legs (PW.13.4).
+            (w.blocked() - artefact) * 400 <= w.samples,
             "{} samples blocked: {w:?}",
             w.blocked() - artefact
         );

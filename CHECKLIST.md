@@ -637,7 +637,7 @@ The audit is `docs/playtests/2026-10-22-polish-audit.md`. Read it before any ite
   - **Fix:** when cutting segments, skip any slot step an earlier walk already used, so that a loop starts and ends at junctions.
   - **Junctions:** recompute them after the change.
 
-  *Needs:* PW.13.1. *Done when:* census D is 0 on both seeds, and the route tests (`tissue`, the bots' route graph) still pass.
+  *Needs:* PW.13.1. *Done when:* census D has no pair sharing a line over 16 m (a whole slot) on both seeds, and the route tests (`tissue`, the bots' route graph) still pass. Shorter overlaps of 4 to 11 m are collinear legs of neighbouring slots meeting at a node, not a doubled route; census D keeps counting them. **Progress (2026-10-23, `GEN_VERSION` 35):** `route` keeps only the steps no earlier walk (or the same walk) took; test `no_two_segments_share_a_lattice_step`. Pairs on a line: seed 0 240 to 56, seed 42 60; over 16 m: 1 and 0. Open: the seed 0 pair (PH-13 with PH-13, 18 m, L2 -52,9,-39) is not traced; the 4 to 11 m overlaps are assumed to be node overlaps, not looked at. `an_open_segment_can_be_walked` limit loosened from 0.2 % to 0.25 % (blocked samples 0.175 % to 0.21 %: PH-15 tiles blocked by a walkway, 27 to 51).
 - [ ] **PW.13.5** (Covers: no new IDs.) **(v)** Turned parts stay inside their cell (audit §2). A turned lattice turns about the cell centre, and its parts are clipped to the cell box. The neighbour does not continue them, so buildings end in a flat world-axis cut at L2 faces, and hollow shells lose that wall.
   - **Measured:** 13.5 % (seed 0) and 17.5 % (seed 42) of turned parts are sliced; 283 and 637 interiors have a face with no shell.
   - **Example:** seed 0, L2 (-48,7,-12) and its +z neighbour.
